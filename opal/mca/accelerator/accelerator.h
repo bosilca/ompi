@@ -81,6 +81,7 @@
 
 #include "opal/class/opal_object.h"
 #include "opal/mca/mca.h"
+#include "opal/mca/threads/mutex.h"
 
 BEGIN_C_DECLS
 
@@ -109,13 +110,39 @@ typedef enum {
 
 typedef uint64_t opal_accelerator_buffer_id_t;
 
-struct opal_accelerator_stream_t {
+typedef enum opal_accelerator_stream_type_e {
+    MCA_ACCELERATOR_STREAM_TYPE_BASE = 0,  /* Default stream, everything handled by the caller */
+    MCA_ACCELERATOR_STREAM_TYPE_TRACKABLE,  /* Automatic stream management provided by OPAL, including
+                                      * triggering callbacks on completion of events during opal_progress.
+                                      */
+    MCA_ACCELERATOR_STREAM_TYPE_ATOMIC,    /* Advanced stream management via atomic operations. Cannot be used with
+                                     * traditional kernels (like memcpy_async) as it required the kernels to
+                                     * atomically update memory on the CPU.
+                                     */
+} opal_accelerator_stream_type_t;
+
+typedef struct opal_accelerator_stream_t {
     opal_object_t super;
-    /* Stream object */
-    void *stream;
-};
-typedef struct opal_accelerator_stream_t opal_accelerator_stream_t;
+    opal_accelerator_stream_type_t type;
+    void *stream; /* Stream object */
+} opal_accelerator_stream_t;
 OBJ_CLASS_DECLARATION(opal_accelerator_stream_t);
+
+typedef void (*opal_mca_accelerator_callback_fn_t)(opal_accelerator_stream_t *stream, void *cbdata,
+                                                   int status);
+typedef struct opal_accelerator_stream_trackable_t {
+    opal_accelerator_stream_t  super;
+    opal_mutex_t               stream_lock;
+    uint16_t                   stream_num_events;
+    uint16_t                   stream_first_avail;
+    uint16_t                   stream_first_used;
+    char                      *stream_name;
+    struct {
+        opal_mca_accelerator_callback_fn_t cb_fct;
+        void*                              cb_data;
+    }                         *stream_cb_info;
+} opal_accelerator_stream_trackable_t;
+OBJ_CLASS_DECLARATION(opal_accelerator_stream_trackable_t);
 
 /* Constant indicating the default/zero stream */
 #define MCA_ACCELERATOR_STREAM_DEFAULT (opal_accelerator_stream_t *)0x00000002
@@ -748,6 +775,15 @@ typedef struct {
 
 /* Global structure for accessing accelerator functions */
 OPAL_DECLSPEC extern opal_accelerator_base_module_t opal_accelerator;
+
+int mca_base_accelerator_trackable_stream_create(int dev_id,
+                                                 opal_accelerator_stream_t **stream,
+                                                 uint16_t num_events,
+                                                 char* name);
+int mca_base_accelerator_track_event(opal_accelerator_stream_t *stream,
+                                     opal_mca_accelerator_callback_fn_t *cb,
+                                     void *cb_data,
+                                     char *msg);
 
 END_C_DECLS
 

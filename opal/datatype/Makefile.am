@@ -25,6 +25,13 @@
 # $HEADER$
 #
 
+# If we have cuda support, modify file list and flags
+if OPAL_cuda_support
+SUBDIRS      = . cuda
+endif
+
+DIST_SUBDIRS = cuda
+
 headers = \
         opal_convertor.h \
         opal_convertor_internal.h \
@@ -77,4 +84,3 @@ if WANT_INSTALL_HEADERS
 opaldir = $(opalincludedir)/$(subdir)
 opal_HEADERS = $(headers)
 endif
-

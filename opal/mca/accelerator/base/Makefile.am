@@ -4,6 +4,7 @@
 # Copyright (c) 2014      Intel, Inc. All rights reserved.
 # Copyright (c) 2022      Amazon.com, Inc. or its affiliates.
 #                         All Rights reserved.
+# Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
 # $COPYRIGHT$
 #
 # Additional copyrights may follow
@@ -18,4 +19,5 @@ headers += \
 
 libmca_accelerator_la_SOURCES += \
 	base/accelerator_base_frame.c \
-	base/accelerator_base_select.c
+	base/accelerator_base_select.c \
+	base/accelerator_base_generic_event.c

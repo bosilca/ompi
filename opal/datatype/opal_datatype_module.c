@@ -38,6 +38,9 @@
 #include "opal/runtime/opal.h"
 #include "opal/util/arch.h"
 #include "opal/util/output.h"
+#if OPAL_CUDA_SUPPORT
+#include "opal/datatype/opal_datatype_cuda.h"
+#endif /* OPAL_CUDA_SUPPORT */
 
 /* by default the debugging is turned off */
 int opal_datatype_dfd = -1;
@@ -48,7 +51,11 @@ bool opal_ddt_copy_debug = false;
 bool opal_ddt_raw_debug = false;
 int opal_ddt_verbose = -1; /* Has the datatype verbose it's own output stream */
 
-/* Using this macro implies that at this point _all_ information needed
+extern int opal_cuda_verbose;
+extern int opal_datatype_cuda_verbose;
+extern size_t opal_datatype_cuda_buffer_size;
+
+/* Using this macro implies that at this point _all_ informations needed
  * to fill up the datatype are known.
  * We fill all the static information, the pointer to desc.desc is setup
  * into an array, which is initialized at runtime.
@@ -224,13 +231,44 @@ int opal_datatype_register_params(void)
     if (0 > ret) {
         return ret;
     }
-
+    
+#if OPAL_CUDA_SUPPORT
+    /* Set different levels of verbosity in the cuda datatype related code. */
+    ret = mca_base_var_register ("opal", "opal", NULL, "datatype_cuda_verbose",
+                                 "Set level of opal datatype cuda verbosity",
+                                 MCA_BASE_VAR_TYPE_INT, NULL, 0, MCA_BASE_VAR_FLAG_SETTABLE,
+                                 OPAL_INFO_LVL_8, MCA_BASE_VAR_SCOPE_LOCAL,
+                                 &opal_datatype_cuda_verbose);
+    if (0 > ret) {
+	return ret;
+    }
+    
+    /* Set cuda kernel datatype engine buffer size. */
+    ret = mca_base_var_register ("opal", "opal", NULL, "opal_datatype_cuda_buffer_size",
+                                 "Set cuda datatype engine buffer size",
+                                 MCA_BASE_VAR_TYPE_INT, NULL, 0, MCA_BASE_VAR_FLAG_SETTABLE,
+                                 OPAL_INFO_LVL_8, MCA_BASE_VAR_SCOPE_LOCAL,
+                                 &opal_datatype_cuda_buffer_size);
+    if (0 > ret) {
+	return ret;
+    }
+    
+    /* Set cuda kernel datatype engine enable or not. */
+    ret = mca_base_var_register ("opal", "opal", NULL, "opal_datatype_cuda_kernel_support",
+                                 "Set cuda kernel datatype engine enable or not",
+                                 MCA_BASE_VAR_TYPE_INT, NULL, 0, MCA_BASE_VAR_FLAG_SETTABLE,
+                                 OPAL_INFO_LVL_8, MCA_BASE_VAR_SCOPE_LOCAL,
+                                 &opal_datatype_cuda_kernel_support);
+    if (0 > ret) {
+	return ret;
+    }
+#endif /* OPAL_CUDA_SUPPORT */
 #endif /* OPAL_ENABLE_DEBUG */
 
     return OPAL_SUCCESS;
 }
 
-static void opal_datatype_finalize(void)
+static void opal_datatype_finalize( void )
 {
     /* As the synonyms are just copies of the internal data we should not free them.
      * Anyway they are over the limit of OPAL_DATATYPE_MAX_PREDEFINED so they will never get freed.
@@ -244,6 +282,10 @@ static void opal_datatype_finalize(void)
 
     opal_output_close(opal_datatype_dfd);
     opal_datatype_dfd = -1;
+
+#if OPAL_CUDA_SUPPORT
+    opal_cuda_kernel_support_fini();
+#endif /* OPAL_CUDA_SUPPORT */
 }
 
 int32_t opal_datatype_init(void)

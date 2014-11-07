@@ -29,6 +29,10 @@
 #include "opal/datatype/opal_datatype.h"
 #include "opal/datatype/opal_datatype_internal.h"
 #include "opal/prefetch.h"
+#if OPAL_CUDA_SUPPORT
+#include "opal/datatype/opal_convertor.h"
+#include "opal/datatype/opal_datatype_cuda.h"
+#endif /* OPAL_CUDA_SUPPORT */ 
 
 static void opal_datatype_construct(opal_datatype_t *pData)
 {
@@ -55,6 +59,8 @@ static void opal_datatype_construct(opal_datatype_t *pData)
 
     pData->ptypes = NULL;
     pData->loops = 0;
+
+    pData->cached_iovec = NULL;
 }
 
 static void opal_datatype_destruct(opal_datatype_t *datatype)
@@ -87,6 +93,22 @@ static void opal_datatype_destruct(opal_datatype_t *datatype)
 
     /* make sure the name is set to empty */
     datatype->name[0] = '\0';
+
+    if( NULL != datatype->cached_iovec ) {
+        if (datatype->cached_iovec->cached_iovec != NULL) {
+            free(datatype->cached_iovec->cached_iovec);
+        }
+#if OPAL_CUDA_SUPPORT   
+        /* free cuda iov */
+        if (opal_datatype_cuda_kernel_support == 1 && datatype->cached_iovec->cached_cuda_iov != NULL) {
+            opal_cached_cuda_iov_fini((void*)datatype->cached_iovec->cached_cuda_iov);
+            datatype->cached_iovec->cached_cuda_iov = NULL;
+        }
+#endif /* OPAL_CUDA_SUPPORT */
+    
+        free(datatype->cached_iovec);
+        datatype->cached_iovec = NULL;
+    }
 }
 
 OBJ_CLASS_INSTANCE(opal_datatype_t, opal_object_t, opal_datatype_construct, opal_datatype_destruct);

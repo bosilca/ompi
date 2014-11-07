@@ -31,11 +31,14 @@
 #include "opal/mca/accelerator/accelerator.h"
 
 struct mca_opal_gpu_reg_data_t {
-    opal_accelerator_ipc_handle_t       ipcHandle;
-    opal_accelerator_ipc_event_handle_t ipcEventHandle;
+    opal_accelerator_ipc_handle_t        ipcHandle;
+    opal_accelerator_ipc_event_handle_t  ipcEventHandle;
     opal_accelerator_event_t            *event;
-    opal_ptr_t                          memh_seg_addr;
-    size_t                              memh_seg_len;
+    opal_ptr_t                           memh_seg_addr;
+    size_t                               memh_seg_len;
+    uint8_t                              pack_unpack_required;
+    int32_t                              gpu_device;
+    struct opal_convertor_t             *convertor;
 };
 typedef struct mca_opal_gpu_reg_data_t mca_opal_gpu_reg_data_t;
 

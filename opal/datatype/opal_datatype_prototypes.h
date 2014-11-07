@@ -55,6 +55,16 @@ int32_t opal_generic_simple_unpack(opal_convertor_t *pConvertor, struct iovec *i
 int32_t opal_generic_simple_unpack_checksum(opal_convertor_t *pConvertor, struct iovec *iov,
                                             uint32_t *out_size, size_t *max_data);
 
+/* TODO GB: Do we really need these functions ? */
+int32_t opal_generic_simple_pack_cuda( opal_convertor_t* pConvertor, struct iovec* iov, uint32_t* out_size,
+                               size_t* max_data );
+int32_t opal_generic_simple_pack_cuda_checksum( opal_convertor_t* pConvertor, struct iovec* iov, uint32_t* out_size,
+                                        size_t* max_data );
+int32_t opal_generic_simple_unpack_cuda( opal_convertor_t* pConvertor, struct iovec* iov, uint32_t* out_size,
+                                size_t* max_data );                                     
+int32_t opal_generic_simple_unpack_cuda_checksum( opal_convertor_t* pConvertor, struct iovec* iov, uint32_t* out_size,
+                                        size_t* max_data );
+
 END_C_DECLS
 
 #endif /* OPAL_DATATYPE_PROTOTYPES_H_HAS_BEEN_INCLUDED */

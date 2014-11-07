@@ -280,3 +280,67 @@ complete_loop:
                     pConvertor->stack_pos, pStack->index, pStack->count, (long) pStack->disp););
     return 0;
 }
+
+#define IOVEC_INITIAL_SIZE 64
+
+int32_t
+opal_convertor_to_iov(struct opal_convertor_t *convertor,
+                      struct iovec **iov,
+                      uint32_t *iov_count,
+                      size_t *max_data)
+{
+    uint32_t temp_count = IOVEC_INITIAL_SIZE;
+    struct iovec *iovec;
+    size_t temp_data;
+
+    *iov_count = 0;
+    *max_data = 0;
+
+    *iov = iovec = (struct iovec*) malloc(temp_count * sizeof(struct iovec));
+    while(1) {
+        int ret = opal_convertor_raw(convertor, iovec, &temp_count, &temp_data);
+        *iov_count += temp_count;
+        *max_data += temp_data;
+        if(ret)
+            break;
+
+        *iov = (struct iovec*)realloc(*iov, (*iov_count + IOVEC_INITIAL_SIZE) * sizeof(struct iovec));
+        temp_count = IOVEC_INITIAL_SIZE;
+        iovec = &((*iov)[*iov_count]);
+    }
+    return OPAL_SUCCESS;
+}
+
+int opal_convertor_raw_cached(struct opal_convertor_t *convertor,
+                              const struct iovec **iov,
+                              uint32_t* iov_count)
+{
+    if( NULL == convertor->pDesc->cached_iovec ) {
+        opal_datatype_t *datatype = (opal_datatype_t *)convertor->pDesc;
+        datatype->cached_iovec = (opal_datatype_caching_iovec_t *)malloc(sizeof(opal_datatype_caching_iovec_t));
+        datatype->cached_iovec->cached_iovec = NULL;
+        datatype->cached_iovec->cached_iovec_count = 0;
+        
+        struct opal_convertor_t conv;
+        size_t max_data;
+
+        OBJ_CONSTRUCT(&conv, opal_convertor_t);
+        conv.remoteArch = convertor->remoteArch;
+        conv.stack_pos  = 0;
+        conv.flags      = convertor->flags;
+        conv.master     = convertor->master;
+        opal_convertor_prepare_for_send(&conv, convertor->pDesc, 1, NULL);
+        opal_convertor_get_packed_size(&conv, &max_data);
+        opal_convertor_to_iov(&conv, (struct iovec **)&(datatype->cached_iovec->cached_iovec),
+                              (uint32_t *)&(datatype->cached_iovec->cached_iovec_count), &max_data);
+#if OPAL_CUDA_SUPPORT
+        datatype->cached_iovec->cached_cuda_iov = NULL;
+#endif /* OPAL_CUDA_SUPPORT */
+    
+        OBJ_DESTRUCT(&conv);
+    }
+    *iov = convertor->pDesc->cached_iovec->cached_iovec;
+    *iov_count = convertor->pDesc->cached_iovec->cached_iovec_count;
+
+    return OPAL_SUCCESS;
+}

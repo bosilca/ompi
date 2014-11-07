@@ -109,6 +109,14 @@ struct dt_type_desc_t {
 };
 typedef struct dt_type_desc_t dt_type_desc_t;
 
+typedef struct opal_datatype_caching_iovec_t {
+    struct iovec*      cached_iovec;
+    uint32_t           cached_iovec_count;
+#if OPAL_CUDA_SUPPORT
+    void*              cached_cuda_iov;
+#endif /* OPAL_CUDA_SUPPORT */
+} opal_datatype_caching_iovec_t;
+
 /*
  * The datatype description.
  */
@@ -142,8 +150,13 @@ struct opal_datatype_t {
                          environments */
     /* --- cacheline 5 boundary (320 bytes) was 32-36 bytes ago --- */
 
-    /* size: 352, cachelines: 6, members: 15 */
-    /* last cacheline: 28-32 bytes */
+    struct iovec*      iov;
+    int                iov_count;
+    size_t             max_data;
+    /* size: 416, cachelines: 7, members: 18 */
+    /* last cacheline: 32 bytes */
+
+    opal_datatype_caching_iovec_t* cached_iovec;
 };
 
 typedef struct opal_datatype_t opal_datatype_t;

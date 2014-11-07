@@ -1399,6 +1399,15 @@ if test $ac_cv_header_sys_synch_h = yes ; then
               [Do not use outside of mpi.h.  Define to 1 if you have the <sys/synch.h> header file.])
 fi
 
+# Special treatement for CUDA/ROCM related activities. If we want to
+# be able to use them outside specialized components, we need to do the
+# prerequisite discovery here.
+OPAL_CHECK_CUDA([opal_CUDA])
+OPAL_CHECK_CUDART([opal_CUDART])
+OPAL_CHECK_NVCC([opal_NVCC])
+AC_SUBST([OPAL_NVCC])
+AC_SUBST([OPAL_NVCC_COMPUTE_ARCH])
+
 # If there is a local hook for each project, call it.  This allows 3rd
 # parties to add configuration steps to OPAL and/or OMPI simply
 # by placing a file in [opal|ompi]/config/whatever.m4 that

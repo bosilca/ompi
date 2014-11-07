@@ -42,6 +42,8 @@
 #include "opal/mca/common/sm/common_sm.h"
 #include "opal/util/bit_ops.h"
 
+#define OPAL_DATATYPE_DIRECT_COPY_GPUMEM    0
+
 BEGIN_C_DECLS
 
 /*
@@ -208,6 +210,7 @@ struct mca_btl_smcuda_component_t {
     int accelerator_delayed_ipc_init;
     int accelerator_max_ipc_events;
 
+    int cuda_ddt_pipeline_size;
     unsigned long mpool_min_size;
     char *allocator;
 };
@@ -476,6 +479,74 @@ enum ipcState { IPC_INIT = 1, IPC_SENT, IPC_ACKING, IPC_ACKED, IPC_OK, IPC_BAD }
 
 extern void mca_btl_smcuda_dump(struct mca_btl_base_module_t *btl,
                                 struct mca_btl_base_endpoint_t *endpoint, int verbose);
+
+/* cuda datatype pack/unpack message */
+typedef struct {
+    int lindex;
+    int seq;
+    int msg_type;
+    int packed_size;
+    struct opal_convertor_t *pack_convertor;
+} cuda_ddt_hdr_t;
+
+/* cuda datatype put message */
+typedef struct {
+    int lindex;
+    void *remote_address;
+    void *remote_base;
+    uint64_t mem_handle[8];
+    struct opal_convertor_t *pack_convertor;
+} cuda_ddt_put_hdr_t;
+
+#define CUDA_DDT_UNPACK_FROM_BLOCK  0
+#define CUDA_DDT_COMPLETE           1
+#define CUDA_DDT_COMPLETE_ACK       2
+#define CUDA_DDT_CLEANUP            3
+#define CUDA_DDT_PACK_START         4
+#define CUDA_DDT_PACK_TO_BLOCK      5
+#define CUDA_UNPACK_NO              6
+
+
+/* event for pack/unpack */
+typedef struct {
+    int32_t loc;
+    int32_t nb_events;
+    void *cuda_kernel_event_list;
+} cuda_ddt_smfrag_event_list_t; 
+    
+/* package save pack/unpack convertor and cbfunc */
+typedef struct {
+    struct opal_convertor_t *pack_convertor;
+    struct opal_convertor_t *unpack_convertor;
+    unsigned char *current_unpack_convertor_pBaseBuf;
+    void *remote_gpu_address;
+    int lindex;
+    int remote_device;
+    int local_device;
+    mca_btl_base_descriptor_t *frag;
+    cuda_ddt_smfrag_event_list_t ddt_cuda_events;
+} cuda_ddt_clone_t;
+
+typedef struct {
+    mca_btl_base_module_t* btl;
+    struct mca_btl_base_endpoint_t *endpoint;
+    cuda_ddt_hdr_t sig_msg;
+} btl_smcuda_ddt_callback_t;
+
+#define SMCUDA_DT_CLONE_SIZE 20
+
+int mca_btl_smcuda_send_cuda_ddt_sig(struct mca_btl_base_module_t* btl,
+                                     struct mca_btl_base_endpoint_t* endpoint,
+                                     void* msg, size_t msglen,
+                                     int tag);
+int mca_btl_smcuda_alloc_cuda_ddt_clone(struct mca_btl_base_endpoint_t *endpoint);
+void mca_btl_smcuda_free_cuda_ddt_clone(struct mca_btl_base_endpoint_t *endpoint, int lindex);
+void mca_btl_smcuda_cuda_ddt_clone(struct mca_btl_base_endpoint_t *endpoint,
+                                   struct opal_convertor_t *pack_convertor,
+                                   struct opal_convertor_t *unpack_convertor,
+                                   void *remote_gpu_address,
+                                   mca_btl_base_descriptor_t *frag,
+                                   int lindex, int remote_device, int local_device);
 
 #if OPAL_ENABLE_PROGRESS_THREADS == 1
 void mca_btl_smcuda_component_event_thread(opal_object_t *);

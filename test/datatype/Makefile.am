@@ -20,6 +20,10 @@ if PROJECT_OMPI
 endif
 TESTS = opal_datatype_test unpack_hetero $(MPI_TESTS)
 
+if OPAL_cuda_support
+TESTS += ddt_test_cuda
+endif
+
 check_PROGRAMS = $(TESTS) $(MPI_CHECKS)
 
 unpack_ooo_SOURCES = unpack_ooo.c ddt_lib.c ddt_lib.h
@@ -33,6 +37,14 @@ ddt_test_LDFLAGS = $(OMPI_PKG_CONFIG_LDFLAGS)
 ddt_test_LDADD = \
         $(top_builddir)/ompi/lib@OMPI_LIBMPI_NAME@.la \
         $(top_builddir)/opal/lib@OPAL_LIB_NAME@.la
+
+if OPAL_cuda_support
+ddt_test_cuda_SOURCES = ddt_test_cuda.c ddt_lib.c ddt_lib.h
+ddt_test_cuda_LDFLAGS = $(OMPI_PKG_CONFIG_LDFLAGS)
+ddt_test_cuda_LDADD = \
+        $(top_builddir)/ompi/lib@OMPI_LIBMPI_NAME@.la \
+        $(top_builddir)/opal/lib@OPAL_LIB_NAME@.la
+endif
 
 ddt_raw_SOURCES = ddt_raw.c ddt_lib.c ddt_lib.h
 ddt_raw_LDFLAGS = $(OMPI_PKG_CONFIG_LDFLAGS)

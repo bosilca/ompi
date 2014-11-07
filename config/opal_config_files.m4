@@ -21,6 +21,7 @@ AC_DEFUN([OPAL_CONFIG_FILES],[
         opal/etc/Makefile
         opal/include/Makefile
         opal/datatype/Makefile
+        opal/datatype/cuda/Makefile
         opal/util/Makefile
         opal/util/json/Makefile
         opal/util/keyval/Makefile

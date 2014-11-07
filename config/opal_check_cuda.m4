@@ -82,6 +82,8 @@ AS_IF([test "$with_cuda" = "no" || test "x$with_cuda" = "x"],
                      AC_MSG_ERROR([Cannot continue])],
                     [AC_MSG_RESULT([found])
                      opal_check_cuda_happy=yes
+                     opal_cuda_prefix=/usr/local/
+                     opal_cuda_libdir=/usr/local/cuda/lib64
                      opal_cuda_incdir=/usr/local/cuda/include])],
              [AS_IF([test ! -d "$with_cuda"],
                     [AC_MSG_RESULT([not found])
@@ -93,10 +95,14 @@ AS_IF([test "$with_cuda" = "no" || test "x$with_cuda" = "x"],
                                    AC_MSG_WARN([Could not find cuda.h in $with_cuda/include or $with_cuda])
                                    AC_MSG_ERROR([Cannot continue])],
                                   [opal_check_cuda_happy=yes
+                                   opal_cuda_prefix=$with_cuda
                                    opal_cuda_incdir=$with_cuda
+                                   opal_cuda_libdir="$with_cuda/lib64"
                                    AC_MSG_RESULT([found ($with_cuda/cuda.h)])])],
                            [opal_check_cuda_happy=yes
+                            opal_cuda_prefix="$with_cuda"
                             opal_cuda_incdir="$with_cuda/include"
+                            opal_cuda_libdir="$with_cuda/lib64"
                             AC_MSG_RESULT([found ($opal_cuda_incdir/cuda.h)])])])])])
 
 AS_IF([test "$opal_check_cuda_happy" = "yes"],
@@ -178,5 +184,13 @@ CPPFLAGS=${cuda_save_CPPFLAGS}
 LDFLAGS=${cuda_save_LDFLAGS}
 LIBS=${cuda_save_LIBS}
 OPAL_VAR_SCOPE_POP
+# Checking for nvcc
+AC_MSG_CHECKING([nvcc in $opal_cuda_prefix/bin])
+if test -x "$opal_cuda_prefix/bin/nvcc"; then
+    AC_MSG_RESULT([found])
+    AC_DEFINE_UNQUOTED([NVCC], ["$opal_cuda_prefix/bin/nvcc"], [Path to nvcc binary])
+fi
+
+AC_SUBST([NVCC],[$opal_cuda_prefix/bin/nvcc])
 ])
 

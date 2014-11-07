@@ -48,15 +48,20 @@
 #include "opal/datatype/opal_datatype_checksum.h"
 #include "opal/datatype/opal_datatype_prototypes.h"
 #include "opal/datatype/opal_datatype_unpack.h"
+#if OPAL_CUDA_SUPPORT
+#include "opal/datatype/opal_datatype_cuda.h"
+#endif /* OPAL_CUDA_SUPPORT */
 
 #if defined(CHECKSUM)
 #    define opal_unpack_general_function            opal_unpack_general_checksum
 #    define opal_unpack_homogeneous_contig_function opal_unpack_homogeneous_contig_checksum
 #    define opal_generic_simple_unpack_function     opal_generic_simple_unpack_checksum
+#    define opal_generic_simple_unpack_cuda_function     opal_generic_simple_unpack_cuda_checksum
 #else
 #    define opal_unpack_general_function            opal_unpack_general
 #    define opal_unpack_homogeneous_contig_function opal_unpack_homogeneous_contig
 #    define opal_generic_simple_unpack_function     opal_generic_simple_unpack
+#    define opal_generic_simple_unpack_cuda_function     opal_generic_simple_unpack_cuda
 #endif /* defined(CHECKSUM) */
 
 /**
@@ -684,4 +689,12 @@ int32_t opal_unpack_general_function(opal_convertor_t *pConvertor, struct iovec 
                          pConvertor->stack_pos, pStack->index, pStack->count,
                          (long) pStack->disp););
     return 0;
+}
+
+int32_t
+opal_generic_simple_unpack_cuda_function( opal_convertor_t* pConvertor,
+                                          struct iovec* iov, uint32_t* out_size,
+                                          size_t* max_data )
+{
+    return opal_generic_simple_unpack_function_cuda_iov( pConvertor, iov, out_size, max_data);
 }
