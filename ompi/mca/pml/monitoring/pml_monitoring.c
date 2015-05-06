@@ -3,6 +3,7 @@
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2013-2015 Inria.  All rights reserved.
+ * Copyright (c) 2015      Bull SAS.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -167,8 +168,46 @@ void monitor_send_data(int world_rank, size_t data_size, int tag){
 
 }
 
-void output_monitoring( void ){
+int mca_pml_monitoring_get_messages_count (const struct mca_base_pvar_t *pvar, void *value, void *obj_handle)
+{
+    ompi_communicator_t *comm = (ompi_communicator_t *) obj_handle;
+    int comm_size = ompi_comm_size (comm);
+    unsigned *values = (unsigned *) value;
     int i;
+
+    if(comm != &ompi_mpi_comm_world)
+      return OMPI_ERROR;
+
+    for (i = 0 ; i < comm_size ; ++i) {
+        values[i] = messages_count[i];
+    }
+
+    return OMPI_SUCCESS;
+}
+
+int mca_pml_monitoring_get_messages_size (const struct mca_base_pvar_t *pvar, void *value, void *obj_handle)
+{
+    ompi_communicator_t *comm = (ompi_communicator_t *) obj_handle;
+    int comm_size = ompi_comm_size (comm);
+    unsigned *values = (unsigned *) value;
+    int i;
+
+    if(comm != &ompi_mpi_comm_world)
+      return OMPI_ERROR;
+
+    for (i = 0 ; i < comm_size ; ++i) {
+        values[i] = sent_data[i];
+    }
+
+    return OMPI_SUCCESS;
+}
+
+void output_monitoring( void )
+{
+    int i;
+
+    if ( !init_done ) return;
+
     for (i = 0 ; i < nbprocs ; i++) {
         all_sent_data[i] += sent_data[i];
         all_messages_count[i] += messages_count[i];
@@ -198,6 +237,7 @@ int ompi_mca_pml_monitoring_flush(char* filename) {
   FILE *pf;
   int i;
 
+  if ( !init_done ) return -1;
 
   pf = fopen(filename, "w");
 
