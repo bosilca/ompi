@@ -172,10 +172,10 @@ int mca_pml_monitoring_get_messages_count (const struct mca_base_pvar_t *pvar, v
 {
     ompi_communicator_t *comm = (ompi_communicator_t *) obj_handle;
     int comm_size = ompi_comm_size (comm);
-    unsigned *values = (unsigned *) value;
+    uint64_t *values = (uint64_t*) value;
     int i;
 
-    if(comm != &ompi_mpi_comm_world)
+    if(comm != &ompi_mpi_comm_world.comm)
       return OMPI_ERROR;
 
     for (i = 0 ; i < comm_size ; ++i) {
@@ -189,10 +189,10 @@ int mca_pml_monitoring_get_messages_size (const struct mca_base_pvar_t *pvar, vo
 {
     ompi_communicator_t *comm = (ompi_communicator_t *) obj_handle;
     int comm_size = ompi_comm_size (comm);
-    unsigned *values = (unsigned *) value;
+    uint64_t *values = (uint64_t*) value;
     int i;
 
-    if(comm != &ompi_mpi_comm_world)
+    if(comm != &ompi_mpi_comm_world.comm)
       return OMPI_ERROR;
 
     for (i = 0 ; i < comm_size ; ++i) {
