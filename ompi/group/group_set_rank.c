@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2005 The University of Tennessee and The University
+ * Copyright (c) 2004-2016 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -24,14 +24,17 @@
 #include "ompi/group/group.h"
 #include "ompi/constants.h"
 
+#include <assert.h>
+
 /*
- * Set group rank in a group structure.
+ * Set group rank in a group structure. This function works only for the local proc
+ * and it is unsafe to use for any other proc.
  */
 void ompi_set_group_rank(ompi_group_t *group, struct ompi_proc_t *proc_pointer)
 {
-    /* local variables */
     int proc;
 
+    assert( proc_pointer == ompi_proc_local_proc );
     /* set the rank to MPI_UNDEFINED, just in case this process is not
      *   in this group
      */
@@ -41,10 +44,10 @@ void ompi_set_group_rank(ompi_group_t *group, struct ompi_proc_t *proc_pointer)
         for (proc = 0; proc < group->grp_proc_count; proc++) {
             /* check and see if this proc pointer matches proc_pointer
              */
-	    if (ompi_group_peer_lookup_existing (group, proc) == proc_pointer) {
+            if (ompi_group_peer_lookup_existing (group, proc) == proc_pointer) {
                 group->grp_my_rank = proc;
-		break;
-	    }
+                break;
+            }
         }                       /* end proc loop */
     }
 }

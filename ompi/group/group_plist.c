@@ -100,11 +100,8 @@ int ompi_group_calc_plist ( int n , const int *ranks ) {
 int ompi_group_incl_plist(ompi_group_t* group, int n, const int *ranks,
                           ompi_group_t **new_group)
 {
-    /* local variables */
-    int my_group_rank;
-    ompi_group_t *group_pointer, *new_group_pointer;
-
-    group_pointer = (ompi_group_t *)group;
+    ompi_group_t *new_group_pointer;
+    int idx;
 
     if ( 0 == n ) {
         *new_group = MPI_GROUP_EMPTY;
@@ -113,29 +110,31 @@ int ompi_group_incl_plist(ompi_group_t* group, int n, const int *ranks,
     }
 
     /* get new group struct */
-    new_group_pointer=ompi_group_allocate(n);
+    new_group_pointer = ompi_group_allocate(n);
     if( NULL == new_group_pointer ) {
         return MPI_ERR_GROUP;
     }
 
-    /* put group elements in the list */
-    for (int proc = 0; proc < n; proc++) {
-        new_group_pointer->grp_proc_pointers[proc] =
-            ompi_group_get_proc_ptr_raw (group_pointer, ranks[proc]);
-    }                           /* end proc loop */
-
+    new_group_pointer->grp_my_rank = MPI_UNDEFINED;
+    if (MPI_UNDEFINED != group->grp_my_rank) {
+        /* If the local proc was not part of the original group, it won't be part of the resulting group either */
+        for( idx = 0; idx < n; idx++ ) {
+            new_group_pointer->grp_proc_pointers[idx] =
+                ompi_group_get_proc_ptr_raw (group, ranks[idx]);
+        }                           /* end proc loop */
+    } else {
+        for( idx = 0; idx < n; idx++ ) {
+            new_group_pointer->grp_proc_pointers[idx] =
+                ompi_group_get_proc_ptr_raw (group, ranks[idx]);
+            if( OPAL_UNLIKELY(ompi_proc_local_proc == new_group_pointer->grp_proc_pointers[idx]) ) {
+                new_group_pointer->grp_my_rank = idx;
+            }
+        }                           /* end proc loop */
+    }
     /* increment proc reference counters */
     ompi_group_increment_proc_count(new_group_pointer);
 
-    /* find my rank */
-    my_group_rank=group_pointer->grp_my_rank;
-    if (MPI_UNDEFINED != my_group_rank) {
-        ompi_set_group_rank(new_group_pointer, ompi_proc_local_proc);
-    } else {
-        new_group_pointer->grp_my_rank = MPI_UNDEFINED;
-    }
-
-    *new_group = (MPI_Group)new_group_pointer;
+    *new_group = new_group_pointer;
 
     return OMPI_SUCCESS;
 }
@@ -147,10 +146,8 @@ int ompi_group_incl_plist(ompi_group_t* group, int n, const int *ranks,
 int ompi_group_union (ompi_group_t* group1, ompi_group_t* group2,
                       ompi_group_t **new_group)
 {
-    /* local variables */
     int new_group_size, cnt, rc, overlap_count;
     ompi_group_t *new_group_pointer;
-    ompi_proc_t *proc2_pointer;
     opal_bitmap_t bitmap;
 
     /*
@@ -201,8 +198,8 @@ int ompi_group_union (ompi_group_t* group1, ompi_group_t* group2,
             continue;
         }
 
-        proc2_pointer = ompi_group_get_proc_ptr_raw (group2, proc2);
-        new_group_pointer->grp_proc_pointers[cnt++] = proc2_pointer;
+        new_group_pointer->grp_proc_pointers[cnt++] =
+            ompi_group_get_proc_ptr_raw (group2, proc2);
     }                           /* end proc loop */
 
     OBJ_DESTRUCT(&bitmap);
@@ -227,12 +224,11 @@ int ompi_group_union (ompi_group_t* group1, ompi_group_t* group2,
  * two parent groups in the group structure and maintain functions
  */
 int ompi_group_difference(ompi_group_t* group1, ompi_group_t* group2,
-                          ompi_group_t **new_group) {
-
+                          ompi_group_t **new_group)
+{
     /* local varibles */
     int new_group_size, overlap_count, rc;
     ompi_group_t *new_group_pointer;
-    ompi_proc_t *proc1_pointer;
     opal_bitmap_t bitmap;
 
     /*
@@ -275,8 +271,8 @@ int ompi_group_difference(ompi_group_t* group1, ompi_group_t* group2,
             continue;
         }
 
-        proc1_pointer = ompi_group_get_proc_ptr_raw (group1, proc1);
-        new_group_pointer->grp_proc_pointers[cnt++] = proc1_pointer;
+        new_group_pointer->grp_proc_pointers[cnt++] =
+            ompi_group_get_proc_ptr_raw (group1, proc1);
     }  /* end proc loop */
 
     OBJ_DESTRUCT(&bitmap);
@@ -291,7 +287,7 @@ int ompi_group_difference(ompi_group_t* group1, ompi_group_t* group2,
         ompi_set_group_rank(new_group_pointer, ompi_proc_local_proc);
     }
 
-    *new_group = (MPI_Group)new_group_pointer;
+    *new_group = new_group_pointer;
 
     return OMPI_SUCCESS;
 }

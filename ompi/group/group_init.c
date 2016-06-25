@@ -221,10 +221,10 @@ void ompi_group_increment_proc_count(ompi_group_t *group)
 {
     ompi_proc_t * proc_pointer;
     for (int proc = 0 ; proc < group->grp_proc_count ; ++proc) {
-	proc_pointer = ompi_group_peer_lookup_existing (group, proc);
-	if (proc_pointer) {
-	    OBJ_RETAIN(proc_pointer);
-	}
+        proc_pointer = ompi_group_peer_lookup_existing (group, proc);
+        if (proc_pointer) {
+            OBJ_RETAIN(proc_pointer);
+        }
     }
 }
 
@@ -236,10 +236,10 @@ void ompi_group_decrement_proc_count(ompi_group_t *group)
 {
     ompi_proc_t * proc_pointer;
     for (int proc = 0 ; proc < group->grp_proc_count ; ++proc) {
-	proc_pointer = ompi_group_peer_lookup_existing (group, proc);
-	if (proc_pointer) {
-	    OBJ_RELEASE(proc_pointer);
-	}
+        proc_pointer = ompi_group_peer_lookup_existing (group, proc);
+        if (proc_pointer) {
+            OBJ_RELEASE(proc_pointer);
+        }
     }
 }
 

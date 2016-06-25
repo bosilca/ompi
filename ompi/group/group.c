@@ -127,58 +127,51 @@ int ompi_group_translate_ranks ( ompi_group_t *group1,
 
 int ompi_group_dump (ompi_group_t* group)
 {
-    int i;
-    int new_rank;
+    int i, new_rank;
 
-    i=0;
-    printf("Group Proc Count: %d\n",group->grp_proc_count);
-    printf("Group My Rank: %d\n",group->grp_my_rank);
+    opal_output(0, "Group Proc Count: %d\n", group->grp_proc_count);
+    opal_output(0, "Group My Rank: %d\n", group->grp_my_rank);
+
+    ompi_group_translate_ranks( group, 1, &group->grp_my_rank,
+                                group->grp_parent_group_ptr,
+                                &new_rank );
     if (OMPI_GROUP_IS_SPORADIC(group)) {
-        ompi_group_translate_ranks( group,1,&group->grp_my_rank,
-                                    group->grp_parent_group_ptr,
-                                    &new_rank);
-        printf("Rank in the parent group: %d\n",new_rank);
-        printf("The Sporadic List Length: %d\n",
-               group->sparse_data.grp_sporadic.grp_sporadic_list_len);
-        printf("Rank First       Length\n");
-        for(i=0 ; i<group->sparse_data.grp_sporadic.grp_sporadic_list_len ; i++) {
-            printf("%d               %d\n",
-                   group->sparse_data.grp_sporadic.grp_sporadic_list[i].rank_first,
-                   group->sparse_data.grp_sporadic.grp_sporadic_list[i].length);
+        opal_output(0, "Rank in the parent group: %d\n",new_rank);
+        opal_output(0, "The Sporadic List Length: %d\n",
+                    group->sparse_data.grp_sporadic.grp_sporadic_list_len);
+        opal_output(0, "Rank First       Length\n");
+        for(i = 0; i < group->sparse_data.grp_sporadic.grp_sporadic_list_len; i++) {
+            opal_output(0, "%d               %d\n",
+                        group->sparse_data.grp_sporadic.grp_sporadic_list[i].rank_first,
+                        group->sparse_data.grp_sporadic.grp_sporadic_list[i].length);
         }
     }
     else if (OMPI_GROUP_IS_STRIDED(group)) {
-        ompi_group_translate_ranks( group,1,&group->grp_my_rank,
-                                    group->grp_parent_group_ptr,
-                                    &new_rank);
-        printf("Rank in the parent group: %d\n",new_rank);
-        printf("The Offset is: %d\n",group->sparse_data.grp_strided.grp_strided_offset);
-        printf("The Stride is: %d\n",group->sparse_data.grp_strided.grp_strided_stride);
-        printf("The Last Element is: %d\n",
-               group->sparse_data.grp_strided.grp_strided_last_element);
+        opal_output(0, "Rank in the parent group: %d\n", new_rank);
+        opal_output(0, "The Offset is: %d\n", group->sparse_data.grp_strided.grp_strided_offset);
+        opal_output(0, "The Stride is: %d\n", group->sparse_data.grp_strided.grp_strided_stride);
+        opal_output(0, "The Last Element is: %d\n",
+                    group->sparse_data.grp_strided.grp_strided_last_element);
     }
     else if (OMPI_GROUP_IS_BITMAP(group)) {
-        ompi_group_translate_ranks( group,1,&group->grp_my_rank,
-                                    group->grp_parent_group_ptr,
-                                    &new_rank);
-        printf("Rank in the parent group: %d\n",new_rank);
-        printf("The length of the bitmap array is: %d\n",
-               group->sparse_data.grp_bitmap.grp_bitmap_array_len);
-        for (i=0 ; i<group->sparse_data.grp_bitmap.grp_bitmap_array_len ; i++) {
-            printf("%d\t",group->sparse_data.grp_bitmap.grp_bitmap_array[i]);
+        opal_output(0, "Rank in the parent group: %d\n", new_rank);
+        opal_output(0, "The length of the bitmap array is: %d\n",
+                    group->sparse_data.grp_bitmap.grp_bitmap_array_len);
+        for (i = 0; i<group->sparse_data.grp_bitmap.grp_bitmap_array_len; i++) {
+            opal_output(0, "%d\t", group->sparse_data.grp_bitmap.grp_bitmap_array[i]);
         }
     }
-    printf("*********************************************************\n");
+    opal_output(0, "*********************************************************\n");
     return OMPI_SUCCESS;
 }
 
 int ompi_group_minloc ( int list[] , int length )
 {
-    int i,index,min;
+    int i, index, min;
     min = list[0];
     index = 0;
 
-    for (i=0 ; i<length ; i++) {
+    for (i = 1; i < length ; i++) {
         if (min > list[i] && list[i] != -1) {
             min = list[i];
             index = i;
@@ -440,37 +433,38 @@ int ompi_group_range_excl(ompi_group_t* group, int n_triplets, int ranges[][3],
     return result;
 }
 
-int ompi_group_intersection(ompi_group_t* group1,ompi_group_t* group2,
+int ompi_group_intersection(ompi_group_t* group1,
+                            ompi_group_t* group2,
                             ompi_group_t **new_group)
 {
-    int proc1,proc2,k, result;
-    int *ranks_included=NULL;
-    ompi_group_t *group1_pointer, *group2_pointer;
-    ompi_proc_t *proc1_pointer, *proc2_pointer;
+    ompi_proc_t *proc1, *proc2;
+    int rank1, rank2, k, result;
+    int *ranks_included = NULL;
 
-    group1_pointer=(ompi_group_t *)group1;
-    group2_pointer=(ompi_group_t *)group2;
+    if( (0 == group1->grp_proc_count) || (0 == group2->grp_proc_count) ) {
+        *new_group = MPI_GROUP_EMPTY;
+        OBJ_RETAIN(MPI_GROUP_EMPTY);
+        return OMPI_SUCCESS;
+    }
 
-    k = 0;
     /* allocate the max required memory */
-    if (0 < group1_pointer->grp_proc_count) {
-        ranks_included = (int *)malloc(group1_pointer->grp_proc_count*(sizeof(int)));
+    if (0 < group1->grp_proc_count) {
+        ranks_included = (int *)malloc(group1->grp_proc_count*(sizeof(int)));
         if (NULL == ranks_included) {
             return MPI_ERR_NO_MEM;
         }
     }
     /* determine the list of included processes for the incl-method */
     k = 0;
-    for (proc1 = 0; proc1 < group1_pointer->grp_proc_count; proc1++) {
-        proc1_pointer = ompi_group_peer_lookup (group1_pointer , proc1);
+    for (rank1 = 0; rank1 < group1->grp_proc_count; rank1++) {
+        proc1 = ompi_group_get_proc_ptr_raw(group1, rank1);
 
         /* check to see if this proc is in group2 */
+        for (rank2 = 0; rank2 < group2->grp_proc_count; rank2++) {
+            proc2 = ompi_group_get_proc_ptr_raw(group2, rank2);
 
-        for (proc2 = 0; proc2 < group2_pointer->grp_proc_count; proc2++) {
-            proc2_pointer = ompi_group_peer_lookup (group2_pointer ,proc2);
-
-            if( proc1_pointer == proc2_pointer ) {
-                ranks_included[k] = proc1;
+            if( proc1 == proc2 ) {
+                ranks_included[k] = rank1;
                 k++;
                 break;
             }
@@ -490,70 +484,59 @@ int ompi_group_compare(ompi_group_t *group1,
                        ompi_group_t *group2,
                        int *result)
 {
-    int return_value = OMPI_SUCCESS;
-    int proc1, proc2, match;
-    bool similar, identical;
-    ompi_group_t *group1_pointer, *group2_pointer;
-    ompi_proc_t *proc1_pointer, *proc2_pointer;
+    ompi_proc_t *proc1, *proc2;
+    int rank1, rank2;
 
     /* check for same groups */
     if( group1 == group2 ) {
-        *result=MPI_IDENT;
-        return return_value;
+        *result = MPI_IDENT;
+        return OMPI_SUCCESS;
     }
 
     /* check to see if either is MPI_GROUP_NULL or MPI_GROUP_EMPTY */
     if( ( MPI_GROUP_EMPTY == group1 ) || ( MPI_GROUP_EMPTY == group2 ) ) {
-        *result=MPI_UNEQUAL;
-        return return_value;
+        *result = MPI_UNEQUAL;
+        return OMPI_SUCCESS;
     }
-
-    /* get group pointers */
-    group1_pointer = (ompi_group_t *)group1;
-    group2_pointer = (ompi_group_t *)group2;
 
     /* compare sizes */
-    if( group1_pointer->grp_proc_count != group2_pointer->grp_proc_count ) {
+    if( group1->grp_proc_count != group2->grp_proc_count ) {
         /* if not same size - return */
-        *result=MPI_UNEQUAL;
-        return return_value;
+        *result = MPI_UNEQUAL;
+        return OMPI_SUCCESS;
     }
 
-    /* check for similarity */
-    /* loop over group1 processes */
-    similar=true;
-    identical=true;
-    for(proc1=0 ; proc1 < group1_pointer->grp_proc_count ; proc1++ ) {
-        proc1_pointer= ompi_group_peer_lookup(group1_pointer,proc1);
-        /* loop over group2 processes to find "match" */
-        match=-1;
-        for(proc2=0 ; proc2 < group2_pointer->grp_proc_count ; proc2++ ) {
-            proc2_pointer=ompi_group_peer_lookup(group2_pointer,proc2);
-            if( proc1_pointer == proc2_pointer ) {
-                if(proc1 != proc2 ) {
-                    identical=false;
-                }
-                match=proc2;
+    *result = MPI_IDENT;  /* assume the groups are identical by default */
+
+    for( rank1 = 0; rank1 < group1->grp_proc_count; rank1++ ) {
+        proc1 = ompi_group_get_proc_ptr_raw(group1, rank1);
+        proc2 = ompi_group_get_proc_ptr_raw(group2, rank1);
+        if( proc1 != proc2 ) {
+            /* so far the 2 groups were identical, but as we missed an identical proc at the
+             * same rank, in the best case they can be similar. Continue the similarity comparaison.
+             */
+            goto similar_search;
+        }
+    }
+    return OMPI_SUCCESS;
+    
+    for( rank1 = 0; rank1 < group1->grp_proc_count; rank1++ ) {
+        proc1 = ompi_group_get_proc_ptr_raw(group1, rank1);
+    similar_search:
+        /* loop over group2 processes to find a match */
+        for( rank2 = 0; rank2 < group2->grp_proc_count; rank2++ ) {
+            proc2 = ompi_group_get_proc_ptr_raw(group2, rank2);
+            if( proc1 == proc2 ) {
                 break;
             }
         } /* end proc2 loop */
-        if( match== -1 ) {
-            similar=false;
-            identical=false;
-            break;
+        if( rank2 == group2->grp_proc_count ) {
+            *result = MPI_UNEQUAL;
+            return OMPI_SUCCESS;
         }
     } /* end proc1 loop */
 
-    /* set comparison result */
-    if( identical ) {
-        *result=MPI_IDENT;
-    } else if( similar ) {
-        *result=MPI_SIMILAR;
-    } else {
-        *result=MPI_UNEQUAL;
-    }
-
-    return return_value;
+    return OMPI_SUCCESS;
 }
 
 bool ompi_group_have_remote_peers (ompi_group_t *group)
