@@ -17,8 +17,8 @@
 #define FREE_LIST_MAX_INBUF_LIST 10000  //The max size of the context free list
 #define FREE_LIST_INC_INBUF_LIST 2    //The incresment of the context free list
 
-#define TEST printf
-#define COUNT_TIME 1
+#define TEST printfno
+#define COUNT_TIME 0
 
 double starttime_0, endtime_0;
 double totaltime = 0;
@@ -89,9 +89,9 @@ static int send_cb(ompi_request_t *req){
             recvbuf = context->con->recvbuf;
         }
         //sendbuf = recvbuf + sendbuf
-        printf("[%d]: send_cb, distance = %d, recvbuf[1] = %d,sendbuf[1] = %d\n", rank, context->distance, ((int *)recvbuf)[1], ((int *)context->con->sendbuf)[1]);
+        TEST("[%d]: send_cb, distance = %d, recvbuf[1] = %d,sendbuf[1] = %d\n", rank, context->distance, ((int *)recvbuf)[1], ((int *)context->con->sendbuf)[1]);
         ompi_op_reduce(context->con->op, recvbuf, context->con->sendbuf, context->con->count, context->con->datatype);
-        printf("[%d]: send_cb, distance = %d, sendbuf[1] = %d\n", rank, context->distance, ((int *)context->con->sendbuf)[1]);
+        TEST("[%d]: send_cb, distance = %d, sendbuf[1] = %d\n", rank, context->distance, ((int *)context->con->sendbuf)[1]);
         //send to new distance
         if (new_distance < context->con->adjsize && context->newrank >= 0) {
             mca_coll_adapt_allreduce_context_t * send_context = (mca_coll_adapt_allreduce_context_t *) opal_free_list_wait(context->con->context_list);
@@ -259,9 +259,9 @@ static int recv_cb(ompi_request_t *req){
             recvbuf = context->con->recvbuf;
         }
         //sendbuf = recvbuf + sendbuf
-        printf("[%d]: recv_cb, distance = %d, recvbuf[1] = %d,sendbuf[1] = %d\n", rank, context->distance, ((int *)recvbuf)[1], ((int *)context->con->sendbuf)[1]);
+        TEST("[%d]: recv_cb, distance = %d, recvbuf[1] = %d,sendbuf[1] = %d\n", rank, context->distance, ((int *)recvbuf)[1], ((int *)context->con->sendbuf)[1]);
         ompi_op_reduce(context->con->op, recvbuf, context->con->sendbuf, context->con->count, context->con->datatype);
-        printf("[%d]: recv_cb, distance = %d, sendbuf[1] = %d\n", rank, context->distance, ((int *)context->con->sendbuf)[1]);
+        TEST("[%d]: recv_cb, distance = %d, sendbuf[1] = %d\n", rank, context->distance, ((int *)context->con->sendbuf)[1]);
         //send to new distance
         if (new_distance < context->con->adjsize && context->newrank >= 0) {
             mca_coll_adapt_allreduce_context_t * send_context = (mca_coll_adapt_allreduce_context_t *) opal_free_list_wait(context->con->context_list);
