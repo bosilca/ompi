@@ -18,7 +18,7 @@
 #define FREE_LIST_INC_INBUF_LIST 2    //The incresment of the context free list
 
 #define TEST printfno
-#define COUNT_TIME 1
+#define COUNT_TIME 0
 
 
 static void printfno(){
@@ -177,6 +177,10 @@ static int send_cb(ompi_request_t *req){
             //signal
             TEST("[%d]: last send, signal\n", ompi_comm_rank(context->con->comm));
             ompi_request_t *temp_req = context->con->request;
+            if (ready && context->newrank >= 0) {
+                TEST("[%d]: send_cb return inbuf item\n", rank);
+                opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
+            }
             opal_free_list_t * temp = context->con->context_list;
             OBJ_RELEASE(context->con->inbuf_list);
             OBJ_RELEASE(context->con->context_list);
@@ -193,6 +197,10 @@ static int send_cb(ompi_request_t *req){
         }
     }
     else{
+        if (ready && context->newrank >= 0) {
+            TEST("[%d]: send_cb return inbuf item\n", rank);
+            opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
+        }
         opal_free_list_t * temp = context->con->context_list;
         OBJ_RELEASE(context->con);
         opal_free_list_return(temp, (opal_free_list_item_t*)context);
@@ -331,7 +339,8 @@ static int recv_cb(ompi_request_t *req){
             //signal
             TEST("[%d]: last recv, signal\n", ompi_comm_rank(context->con->comm));
             ompi_request_t *temp_req = context->con->request;
-            if (context->newrank > 0) {
+            if (ready && context->newrank >= 0) {
+                TEST("[%d]: recv_cb return inbuf item\n", rank);
                 opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
             }
             opal_free_list_t * temp = context->con->context_list;
@@ -350,7 +359,8 @@ static int recv_cb(ompi_request_t *req){
         }
     }
     else{
-        if (context->newrank > 0) {
+        if (ready && context->newrank >= 0) {
+            TEST("[%d]: recv_cb return inbuf item\n", rank);
             opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
         }
         opal_free_list_t * temp = context->con->context_list;

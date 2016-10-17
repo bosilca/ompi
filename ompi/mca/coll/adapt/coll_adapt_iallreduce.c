@@ -505,7 +505,7 @@ int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rb
             ompi_request_set_callback(send_req, send_cb, send_context);
             
             //recv from rank+1 at last round, since this node just recv once at last,
-            //so there is no need to use inbuf_list
+            //so there is no need to use inbuf_list, set distance to adjsize+1
             mca_coll_adapt_allreduce_context_t * recv_context = (mca_coll_adapt_allreduce_context_t *) opal_free_list_wait(context_list);
             recv_context->inbuf = NULL;
             recv_context->newrank = newrank;
@@ -588,7 +588,7 @@ int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rb
         send_context->con = con;
         OBJ_RETAIN(con);
         
-        //create a send requests
+        //create a send request
         ompi_request_t *send_req;
         TEST("[%d]: Send(start in main): distance %d to %d, ongoing send %d\n", ompi_comm_rank(send_context->con->comm), send_context->distance, send_context->peer, send_context->con->total_send);
 
