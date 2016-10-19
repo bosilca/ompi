@@ -114,7 +114,6 @@ struct ompi_request_t {
     ompi_request_complete_fn_t req_complete_cb; /**< Called when the request is MPI completed */
     void *req_complete_cb_data;
     ompi_mpi_object_t req_mpi_object;           /**< Pointer to MPI object that created this request */
-    bool req_complete_cb_called;                //need to be set to 1 when callback is called
     opal_mutex_t * req_lock;                   //lock the request for request_complete and set_callback
 };
 
@@ -149,7 +148,6 @@ typedef struct ompi_predefined_request_t ompi_predefined_request_t;
         (request)->req_complete = REQUEST_PENDING;    \
         (request)->req_state = OMPI_REQUEST_INACTIVE; \
         (request)->req_persistent = (persistent);     \
-        (request)->req_complete_cb_called = 0;        \
         (request)->req_complete_cb  = NULL;           \
         (request)->req_complete_cb_data = NULL;       \
     } while (0);
@@ -434,10 +432,10 @@ static inline int ompi_request_complete(ompi_request_t* request, bool with_signa
 {
     int rc = 0;
     
-//    printf("[%" PRIx64 "]: In request complete 0: req %p, req_complete_cb no null %d, req_complete_cb_called %d, req_complete %d, rc %d\n", gettid(), (void *)request, NULL != request->req_complete_cb,request->req_complete_cb_called, request->req_complete == REQUEST_COMPLETED, rc);
+//    printf("[%" PRIx64 "]: In request complete 0: req %p, req_complete_cb no null %d, req_complete %d, rc %d\n", gettid(), (void *)request, NULL != request->req_complete_cb, request->req_complete == REQUEST_COMPLETED, rc);
     //printf("[%" PRIx64 ", request %p]: ompi_request_complete lock \n", gettid(), (void *)request);
     OPAL_THREAD_LOCK (request->req_lock);
-    if(NULL != request->req_complete_cb && request->req_complete_cb_called == 0) {
+    if(NULL != request->req_complete_cb) {
         ompi_request_complete_fn_t temp = request->req_complete_cb;
         request->req_complete_cb = NULL;
         rc = temp( request );
@@ -446,7 +444,7 @@ static inline int ompi_request_complete(ompi_request_t* request, bool with_signa
         }
     }
     
-//    printf("[%" PRIx64 "]: In request complete 1: req %p, req_complete_cb no null %d, req_complete_cb_called %d, req_complete %d, rc %d\n", gettid(), (void *)request, NULL != request->req_complete_cb,request->req_complete_cb_called, request->req_complete == REQUEST_COMPLETED, rc);
+//    printf("[%" PRIx64 "]: In request complete 1: req %p, req_complete_cb no null %d, req_complete %d, rc %d\n", gettid(), (void *)request, NULL != request->req_complete_cb, request->req_complete == REQUEST_COMPLETED, rc);
 
     if (0 == rc) {
         if( OPAL_LIKELY(with_signal) ) {
@@ -479,8 +477,8 @@ static inline int ompi_request_set_callback(ompi_request_t* request,
     request->req_complete_cb = cb;
     int rc = 0;
     //request is completed and the callback is not called, need to call callback myself
-    //    printf("[%" PRIx64 "]: In set callback: req %p, req_complete_cb_called %d, req_complete %d, ret %d\n", gettid(), (void *)request, request->req_complete_cb_called, request->req_complete == REQUEST_COMPLETED, temp);
-    if ((request->req_complete_cb_called == 0) && (request->req_complete == REQUEST_COMPLETED)) {
+    //    printf("[%" PRIx64 "]: In set callback: req %p, req_complete %d, ret %d\n", gettid(), (void *)request, request->req_complete == REQUEST_COMPLETED, temp);
+    if ((NULL != request->req_complete_cb) && (request->req_complete == REQUEST_COMPLETED)) {
         ompi_request_complete_fn_t temp = request->req_complete_cb;
         request->req_complete_cb = NULL;
         rc = temp( request );

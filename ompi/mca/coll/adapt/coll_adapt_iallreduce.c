@@ -23,17 +23,12 @@
 double starttime_0, endtime_0;
 double totaltime = 0;
 
-static void printfno(){
-    
-}
 
 static int send_cb(ompi_request_t *req);
 static int recv_cb(ompi_request_t *req);
 
 static int send_cb(ompi_request_t *req){
-    
-    req->req_complete_cb_called = 1;
-    
+
     mca_coll_adapt_allreduce_context_t *context = (mca_coll_adapt_allreduce_context_t *) req->req_complete_cb_data;
     
     TEST("[%d]: send_cb, peer = %d, distance = %d, inbuf_ready = %d, sendbuf_ready = %d, sendbuf[1] = %d, recvbuf[1] = %d\n", ompi_comm_rank(context->con->comm), context->peer, context->distance, context->con->inbuf_ready, context->con->sendbuf_ready, ((int *)context->con->sendbuf)[1], ((int *)context->inbuf->buff-context->con->lower_bound)[1]);
@@ -145,7 +140,6 @@ static int send_cb(ompi_request_t *req){
     
     opal_mutex_t * mutex_temp = context->con->mutex_total_send;
     OPAL_THREAD_LOCK(mutex_temp);
-    int * temp_total_send = &(context->con->total_send);
     TEST("[%d]: adjsize %d, new_distance %d, new_rank %d, total_send %d\n", rank, context->con->adjsize, new_distance, context->newrank, context->con->total_send);
     //this is the last send the node with newrank < 0 only do one send
     if (context->con->total_send == 1) {
@@ -183,6 +177,7 @@ static int send_cb(ompi_request_t *req){
         }
     }
     else{
+        context->con->total_send--;
         if (ready && context->newrank >= 0) {
             TEST("[%d]: send_cb return inbuf item\n", rank);
             opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
@@ -190,7 +185,6 @@ static int send_cb(ompi_request_t *req){
         opal_free_list_t * temp = context->con->context_list;
         OBJ_RELEASE(context->con);
         opal_free_list_return(temp, (opal_free_list_item_t*)context);
-        opal_atomic_add_32(temp_total_send, -1);
         OPAL_THREAD_UNLOCK(mutex_temp);
     }
     OPAL_THREAD_UNLOCK (req->req_lock);
@@ -200,9 +194,7 @@ static int send_cb(ompi_request_t *req){
 }
 
 static int recv_cb(ompi_request_t *req){
-    
-    req->req_complete_cb_called = 1;
-    
+
     mca_coll_adapt_allreduce_context_t *context = (mca_coll_adapt_allreduce_context_t *) req->req_complete_cb_data;
     
     TEST("[%d]: recv_cb, peer = %d, distance = %d, inbuf_ready = %d, sendbuf_ready = %d, sendbuf[1] = %d, recvbuf[1] = %d\n", ompi_comm_rank(context->con->comm), context->peer, context->distance, context->con->inbuf_ready, context->con->sendbuf_ready, ((int *)context->con->sendbuf)[1], ((int *)context->inbuf->buff-context->con->lower_bound)[1]);
@@ -314,7 +306,6 @@ static int recv_cb(ompi_request_t *req){
     
     opal_mutex_t * mutex_temp = context->con->mutex_total_recv;
     OPAL_THREAD_LOCK(mutex_temp);
-    int * temp_total_recv = &(context->con->total_recv);
     //this is the last recv, the node with newrank < 0 only do one recv
     if (context->con->total_recv == 1){
         OPAL_THREAD_UNLOCK(mutex_temp);
@@ -349,6 +340,7 @@ static int recv_cb(ompi_request_t *req){
         }
     }
     else{
+        context->con->total_recv--;
         if (ready && context->newrank >= 0) {
             TEST("[%d]: recv_cb return inbuf item\n", rank);
             opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
@@ -356,7 +348,6 @@ static int recv_cb(ompi_request_t *req){
         opal_free_list_t * temp = context->con->context_list;
         OBJ_RELEASE(context->con);
         opal_free_list_return(temp, (opal_free_list_item_t*)context);
-        opal_atomic_add_32(temp_total_recv, -1);
         OPAL_THREAD_UNLOCK(mutex_temp);
     }
     OPAL_THREAD_UNLOCK (req->req_lock);

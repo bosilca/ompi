@@ -124,6 +124,10 @@ int mca_coll_adapt_ialltoallv(const void *sbuf, const int *scounts, const int *s
 //    return threadId;
 //}
 
+static void printfno(){
+    
+}
+
 static int log2_int(int n)
 {
     int i=0;
