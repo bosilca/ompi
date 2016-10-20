@@ -16,10 +16,6 @@
 #define FREE_LIST_INC_CONTEXT_LIST 10    //The incresment of the context free list
 #define TEST printfno
 
-static void printfno(){
-    
-}
-
 //return value indicate the whole operation is finished or not
 static int send_cb(ompi_request_t *req){
     mca_coll_adapt_alltoallv_context_t *context = (mca_coll_adapt_alltoallv_context_t *) req->req_complete_cb_data;

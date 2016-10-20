@@ -16,10 +16,6 @@
 #define FREE_LIST_INC_CONTEXT_LIST 10    //The incresment of the context free list
 #define TEST printf
 
-static void printfno(){
-    
-}
-
 int test = 0;
 
 //return value indicate the whole operation is finished or not

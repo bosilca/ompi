@@ -24,11 +24,6 @@
 
 //Can only work on commutative op
 
-static void printfno(){
-    
-}
-
-
 static mca_coll_adapt_item_t * get_next_ready_item(opal_list_t* list, int num_children){
     mca_coll_adapt_item_t *item;
     if (opal_list_is_empty(list)) {

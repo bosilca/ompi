@@ -165,7 +165,7 @@ mca_coll_adapt_comm_query(struct ompi_communicator_t *comm, int *priority)
     }
     mca_coll_base_comm_t * data = OBJ_NEW(mca_coll_base_comm_t);
     if (NULL == data) {
-        return OMPI_ERROR;
+        return NULL;
     }
 
     /* All is good -- return a module */
@@ -187,7 +187,7 @@ mca_coll_adapt_comm_query(struct ompi_communicator_t *comm, int *priority)
     adapt_module->super.coll_scan       = NULL;
     adapt_module->super.coll_scatter    = NULL;
     adapt_module->super.coll_scatterv   = NULL;
-    //adapt_module->super.coll_ibcast     = mca_coll_adapt_ibcast;
+    adapt_module->super.coll_ibcast     = mca_coll_adapt_ibcast;
     //adapt_module->super.coll_ireduce    = mca_coll_adapt_ireduce;
     //adapt_module->super.coll_ialltoallv = mca_coll_adapt_ialltoallv;
     adapt_module->super.coll_iallreduce = mca_coll_adapt_iallreduce;

@@ -19,9 +19,7 @@
 #define FREE_LIST_NUM 10    //The start size of the free list
 #define FREE_LIST_MAX 10000  //The max size of the free list
 #define FREE_LIST_INC 10    //The incresment of the free list
-#define TEST printfno
-
-
+#define TEST printf
 
 //send call back
 static int send_cb(ompi_request_t *req)
@@ -192,7 +190,12 @@ static int recv_cb(ompi_request_t *req){
 }
 
 int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
-    return mca_coll_adapt_ibcast_two_trees_binomial(buff, count, datatype, root, comm, request, module);
+    if (count == 0) {
+        return MPI_SUCCESS;
+    }
+    else {
+        return mca_coll_adapt_ibcast_two_trees_binomial(buff, count, datatype, root, comm, request, module);
+    }
 }
 
 //non-blocking broadcast using binomial tree with pipeline
@@ -407,7 +410,7 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
                 }
                 //invoke send call back
                 OPAL_THREAD_UNLOCK(mutex);
-                ompi_request_set_callback(send_req, send_cb, context)
+                ompi_request_set_callback(send_req, send_cb, context);
                 OPAL_THREAD_LOCK(mutex);
             }
         }
