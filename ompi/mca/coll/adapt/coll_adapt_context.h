@@ -10,6 +10,7 @@
 /* bcast constant context in bcast context */
 struct mca_coll_adapt_constant_bcast_context_s {
     opal_object_t  super;
+    int root;
     size_t count;
     size_t seg_count;
     ompi_datatype_t * datatype;

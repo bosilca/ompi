@@ -19,7 +19,7 @@
 #define FREE_LIST_NUM 10    //The start size of the free list
 #define FREE_LIST_MAX 10000  //The max size of the free list
 #define FREE_LIST_INC 10    //The incresment of the free list
-#define TEST printf
+#define TEST printfno
 
 //send call back
 static int send_cb(ompi_request_t *req)
@@ -61,10 +61,14 @@ static int send_cb(ompi_request_t *req)
     }
     
     int num_sent = ++(context->con->num_sent_segs);
+    int num_recv_fini_t = context->con->num_recv_fini;
+    int rank = ompi_comm_rank(context->con->comm);
     opal_free_list_t * temp = context->con->context_list;
     opal_mutex_t * mutex_temp = context->con->mutex;
     //check whether signal the condition
-    if (num_sent == context->con->tree->tree_nextsize * context->con->num_segs) {
+    if ((rank == context->con->root && num_sent == context->con->tree->tree_nextsize * context->con->num_segs) ||
+        (context->con->tree->tree_nextsize > 0 && rank != context->con->root && num_sent == context->con->tree->tree_nextsize * context->con->num_segs && num_recv_fini_t == context->con->num_segs) ||
+        (context->con->tree->tree_nextsize == 0 && num_recv_fini_t == context->con->num_segs)) {
         TEST("[%d]: Singal in send\n", ompi_comm_rank(context->con->comm));
         OPAL_THREAD_UNLOCK(mutex_temp);
         ompi_request_t *temp_req = context->con->request;
@@ -157,12 +161,16 @@ static int recv_cb(ompi_request_t *req){
         }
     }
     
+    int num_sent = context->con->num_sent_segs;
     int num_recv_fini_t = ++(context->con->num_recv_fini);
+    int rank = ompi_comm_rank(context->con->comm);
     opal_free_list_t * temp = context->con->context_list;
     opal_mutex_t * mutex_temp = context->con->mutex;
 
     //if this is leaf and has received all the segments
-    if (context->con->tree->tree_nextsize == 0 && num_recv_fini_t == context->con->num_segs) {
+    if ((rank == context->con->root && num_sent == context->con->tree->tree_nextsize * context->con->num_segs) ||
+        (context->con->tree->tree_nextsize > 0 && rank != context->con->root && num_sent == context->con->tree->tree_nextsize * context->con->num_segs && num_recv_fini_t == context->con->num_segs) ||
+        (context->con->tree->tree_nextsize == 0 && num_recv_fini_t == context->con->num_segs)) {
         TEST("[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm));
         OPAL_THREAD_UNLOCK(mutex_temp);
         ompi_request_t *temp_req = context->con->request;
@@ -191,10 +199,22 @@ static int recv_cb(ompi_request_t *req){
 
 int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
     if (count == 0) {
+        ompi_request_t *temp_request;
+        temp_request = OBJ_NEW(ompi_request_t);
+        OMPI_REQUEST_INIT(temp_request, false);
+        temp_request->req_type = 0;
+        temp_request->req_free = adapt_request_free;
+        temp_request->req_status.MPI_SOURCE = 0;
+        temp_request->req_status.MPI_TAG = 0;
+        temp_request->req_status.MPI_ERROR = 0;
+        temp_request->req_status._cancelled = 0;
+        temp_request->req_status._ucount = 0;
+        ompi_request_complete(temp_request, 1);
+        *request = temp_request;
         return MPI_SUCCESS;
     }
     else {
-        return mca_coll_adapt_ibcast_two_trees_binomial(buff, count, datatype, root, comm, request, module);
+        return mca_coll_adapt_ibcast_binomial(buff, count, datatype, root, comm, request, module);
     }
 }
 
@@ -347,6 +367,7 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     
     //Set constant context for send and recv call back
     mca_coll_adapt_constant_bcast_context_t *con = OBJ_NEW(mca_coll_adapt_constant_bcast_context_t);
+    con->root = root;
     con->count = count;
     con->seg_count = seg_count;
     con->datatype = datatype;
@@ -364,7 +385,7 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     con->tree = tree;
     
     TEST("[%d, %" PRIx64 "]: Ibcast, root %d\n", rank, gettid(), root);
-    TEST("[%d, %" PRIx64 "]: con->mutex = %p, num_children = %d, num_segs = %d, real_seg_size = %d, seg_count = %d， tree_adreess = %p\n", rank, gettid(), (void *)con->mutex, tree->tree_nextsize, num_segs, (int)real_seg_size, seg_count, (void *)con->tree);
+    TEST("[%d, %" PRIx64 "]: con->mutex = %p, num_children = %d, num_segs = %d, real_seg_size = %d, seg_count = %d, tree_adreess = %p\n", rank, gettid(), (void *)con->mutex, tree->tree_nextsize, num_segs, (int)real_seg_size, seg_count, (void *)con->tree);
     
     OPAL_THREAD_LOCK(mutex);
     
