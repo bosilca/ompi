@@ -20,6 +20,7 @@
 #define FREE_LIST_NUM_INBUF_LIST 10    //The start size of the context free list
 #define FREE_LIST_MAX_INBUF_LIST 10000  //The max size of the context free list
 #define FREE_LIST_INC_INBUF_LIST 10    //The incresment of the context free list
+#define TEST printfno
 
 //static int times = 0;   //how many times to invoke the ireduce
 
@@ -65,7 +66,7 @@ static int add_to_list(opal_list_t* list, int id){
 
 static int send_cb(ompi_request_t *req){
     mca_coll_adapt_ireduce_context_t *context = (mca_coll_adapt_ireduce_context_t *) req->req_complete_cb_data;
-    //printf("[%d]: send_cb\n", context->con->rank);
+    TEST("[%d]: send_cb\n", context->con->rank);
     int i, err;
     
     int32_t num_sent = opal_atomic_add_32(&(context->con->num_sent_segs), 1);
@@ -93,8 +94,8 @@ static int send_cb(ompi_request_t *req){
             send_count = send_context->con->count - item->id * send_context->con->seg_count;
         }
         
-        //int* ta1 = (int *)(context->buff + (item->id - context->frag_id) * context->con->segment_increment);
-        //printf("[%d]: In send_cb, create isend to seg %d, peer %d, sbuf contains %d, %d\n", send_context->con->rank, send_context->frag_id, send_context->peer, ta1[0], ta1[1]);
+        int* ta1 = (int *)(context->buff + (item->id - context->frag_id) * context->con->segment_increment);
+        TEST("[%d]: In send_cb, create isend to seg %d, peer %d, sbuf contains %d, %d\n", send_context->con->rank, send_context->frag_id, send_context->peer, ta1[0], ta1[1]);
         
         ompi_request_t *send_req;
         err = MCA_PML_CALL(isend(send_context->buff, send_count, send_context->con->datatype, send_context->peer, send_context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, send_context->con->comm, &send_req));
@@ -150,18 +151,18 @@ static int send_cb(ompi_request_t *req){
 
 static int recv_cb(ompi_request_t *req){
     mca_coll_adapt_ireduce_context_t *context = (mca_coll_adapt_ireduce_context_t *) req->req_complete_cb_data;
-    //printf("[%d]: recv_cb\n", context->con->rank);
+    TEST("[%d]: recv_cb\n", context->con->rank);
     
-    //int* ta1 = (int *)(context->con->accumbuf + (ptrdiff_t)context->frag_id * (ptrdiff_t)context->con->segment_increment);
-    //printf("[%d]: Before op, seg %d, abuf contains %d, %d\n", context->con->rank, context->frag_id, ta1[0], ta1[1]);
+    int* ta1 = (int *)(context->con->accumbuf + (ptrdiff_t)context->frag_id * (ptrdiff_t)context->con->segment_increment);
+    TEST("[%d]: Before op, seg %d, abuf contains %d, %d\n", context->con->rank, context->frag_id, ta1[0], ta1[1]);
     
-    //int* ta2 = (int *)(context->inbuf->buff - context->con->lower_bound);
-    //printf("[%d]: Before op, seg %d, rbuf contains %d, %d\n", context->con->rank, context->frag_id, ta2[0], ta2[1]);
+    int* ta2 = (int *)(context->inbuf->buff - context->con->lower_bound);
+    TEST("[%d]: Before op, seg %d, rbuf contains %d, %d\n", context->con->rank, context->frag_id, ta2[0], ta2[1]);
     
     int err, i;
     //atomic
     int32_t new_id = opal_atomic_add_32(&(context->con->next_recv_segs[context->child_id]), 1);
-    //printf("[%d]: num_recv_segs_t = %d, new_id = %d\n", context->con->rank, num_recv_segs_t, new_id);
+    TEST("[%d]: new_id = %d\n", context->con->rank, new_id);
 
     //receive new segment
     if (new_id < context->con->num_segs) {
@@ -169,7 +170,7 @@ static int recv_cb(ompi_request_t *req){
         mca_coll_adapt_inbuf_t * inbuf = (mca_coll_adapt_inbuf_t *) opal_free_list_wait(context->con->inbuf_list);
         //get new context item from free list
         mca_coll_adapt_ireduce_context_t * recv_context = (mca_coll_adapt_ireduce_context_t *) opal_free_list_wait(context->con->context_list);
-        //        recv_context->buff = context->buff + (new_id - context->frag_id) * context->con->segment_increment;
+        //recv_context->buff = context->buff + (new_id - context->frag_id) * context->con->segment_increment;
         recv_context->frag_id = new_id;
         recv_context->child_id = context->child_id;
         recv_context->peer = context->peer;
@@ -181,7 +182,7 @@ static int recv_cb(ompi_request_t *req){
             recv_count = recv_context->con->count - new_id * recv_context->con->seg_count;
         }
         
-        //printf("[%d]: In recv_cb, create irecv for seg %d, peer %d\n", context->con->rank, recv_context->frag_id, recv_context->peer);
+        TEST("[%d]: In recv_cb, create irecv for seg %d, peer %d\n", context->con->rank, recv_context->frag_id, recv_context->peer);
         
         ompi_request_t *recv_req;
         MCA_PML_CALL(irecv(recv_context->inbuf->buff - recv_context->con->lower_bound, recv_count, recv_context->con->datatype, recv_context->peer, recv_context->frag_id, recv_context->con->comm, &recv_req));
@@ -206,8 +207,8 @@ static int recv_cb(ompi_request_t *req){
                    context->con->accumbuf + (ptrdiff_t)context->frag_id * (ptrdiff_t)context->con->segment_increment,
                    op_count, context->con->datatype);
     opal_mutex_unlock(context->con->mutex_op_list[context->frag_id]);
-    //int* ta0 = (int *)(context->con->accumbuf + (ptrdiff_t)context->frag_id * (ptrdiff_t)context->con->segment_increment);
-    //printf("[%d]: After op, seg %d, contains %d, %d\n", context->con->rank, context->frag_id, ta0[0], ta0[1]);
+    int* ta0 = (int *)(context->con->accumbuf + (ptrdiff_t)context->frag_id * (ptrdiff_t)context->con->segment_increment);
+    TEST("[%d]: After op, seg %d, contains %d, %d\n", context->con->rank, context->frag_id, ta0[0], ta0[1]);
     
     //set recv list
     opal_mutex_lock (context->con->mutex_recv_list);
@@ -237,8 +238,8 @@ static int recv_cb(ompi_request_t *req){
                 send_count = send_context->con->count - item->id * send_context->con->seg_count;
             }
             
-            //int* ta3 = (int *)(context->con->accumbuf + item->id * context->con->segment_increment);
-            //printf("[%d]: In recv_cb, create isend to seg %d, peer %d, sbuf contains %d, %d\n", send_context->con->rank, send_context->frag_id, send_context->peer, ta3[0], ta3[1]);
+            int* ta3 = (int *)(context->con->accumbuf + item->id * context->con->segment_increment);
+            TEST("[%d]: In recv_cb, create isend to seg %d, peer %d, sbuf contains %d, %d\n", send_context->con->rank, send_context->frag_id, send_context->peer, ta3[0], ta3[1]);
             
             ompi_request_t *send_req;
             err = MCA_PML_CALL(isend(send_context->buff, send_count, send_context->con->datatype, send_context->peer, send_context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, send_context->con->comm, &send_req));
@@ -259,11 +260,11 @@ static int recv_cb(ompi_request_t *req){
     
     opal_mutex_lock (context->con->mutex_num_recv_segs);
     int num_recv_segs_t = ++(context->con->num_recv_segs);
-    //printf("[%d]: In recv_cb, root = %d, num_recv = %d, num_segs = %d, num_child = %d\n", context->con->rank, context->con->tree->tree_root, num_recv_segs_t, context->con->num_segs, context->con->tree->tree_nextsize);
+    TEST("[%d]: In recv_cb, root = %d, num_recv = %d, num_segs = %d, num_child = %d\n", context->con->rank, context->con->tree->tree_root, num_recv_segs_t, context->con->num_segs, context->con->tree->tree_nextsize);
     //if this is root and has received all the segments
     if (context->con->tree->tree_root == context->con->rank && num_recv_segs_t == context->con->num_segs * context->con->tree->tree_nextsize) {
         opal_mutex_unlock (context->con->mutex_num_recv_segs);
-        //printf("[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm));
+        TEST("[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm));
         opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
         ompi_request_t *temp_req = context->con->request;
         opal_free_list_t * temp = context->con->context_list;
@@ -372,8 +373,7 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
     ompi_datatype_get_true_extent(dtype, &true_lower_bound, &true_extent);
     real_seg_size = true_extent + (ptrdiff_t)(seg_count - 1) * extent;
     
-    //printf("[%d]: adapt ireduce generic\n", rank);
-    
+    TEST("[%d]: adapt ireduce generic\n", rank);
     
     //set up free list
     context_list = OBJ_NEW(opal_free_list_t);
@@ -507,7 +507,7 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
                     OBJ_RETAIN(con);
                     context->inbuf = inbuf;
                     
-                    //printf("[%d]: In ireduce, create irecv for seg %d, peer %d\n", context->con->rank, context->frag_id, context->peer);
+                    TEST("[%d]: In ireduce, create irecv for seg %d, peer %d\n", context->con->rank, context->frag_id, context->peer);
                     
                     
                     //create a recv request
@@ -557,8 +557,8 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
                 OBJ_RETAIN(con);
                 //atomic
                 opal_atomic_add_32(&(context->con->ongoing_send), 1);
-                //int* ta1 = (int *)((char*)sbuf + (ptrdiff_t)item->id * (ptrdiff_t)segment_increment);
-                //printf("[%d]: In ireduce, create isend to seg %d, peer %d, sbuf contains %d, %d\n", context->con->rank, context->frag_id, context->peer, ta1[0], ta1[1]);
+                int* ta1 = (int *)((char*)sbuf + (ptrdiff_t)item->id * (ptrdiff_t)segment_increment);
+                TEST("[%d]: In ireduce, create isend to seg %d, peer %d, sbuf contains %d, %d\n", context->con->rank, context->frag_id, context->peer, ta1[0], ta1[1]);
                 
                 //create send request
                 ompi_request_t *send_req;

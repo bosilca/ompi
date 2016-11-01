@@ -47,9 +47,6 @@ typedef struct mca_coll_adapt_bcast_context_s mca_coll_adapt_bcast_context_t;
 
 OBJ_CLASS_DECLARATION(mca_coll_adapt_bcast_context_t);
 
-
-
-
 /* reduce constant context in reduce context */
 struct mca_coll_adapt_constant_reduce_context_s {
     opal_object_t  super;
@@ -68,6 +65,7 @@ struct mca_coll_adapt_constant_reduce_context_s {
     opal_mutex_t * mutex;     //old, only for test
     opal_mutex_t * mutex_recv_list;     //use to lock recv list
     opal_mutex_t * mutex_num_recv_segs;     //use to lock num_recv_segs
+    opal_mutex_t * mutex_num_sent;     //use to lock num_sent
     opal_mutex_t ** mutex_op_list;   //use to lock each segment when do the reduce op
     ompi_op_t * op;  //reduce operation
     ompi_coll_tree_t * tree;
@@ -76,7 +74,10 @@ struct mca_coll_adapt_constant_reduce_context_s {
     opal_list_t *recv_list;    //a list to store the segments which are received and not yet be sent
     ptrdiff_t lower_bound;
     int32_t ongoing_send;   //how many send is posted but not finished
-    char * sbuf;    //input sbuf
+    char * sbuf;    //inputed sbuf
+    char * rbuf;    //inputed rbuf
+    int root;
+    int distance;   //address of inbuf->buff to address of inbuf
 };
 
 typedef struct mca_coll_adapt_constant_reduce_context_s mca_coll_adapt_constant_reduce_context_t;
@@ -92,7 +93,7 @@ struct mca_coll_adapt_reduce_context_s {
     int child_id;
     int peer;
     mca_coll_adapt_constant_reduce_context_t * con;
-    mca_coll_adapt_inbuf_t *inbuf;  //only used in reduce, store the incoming segmetn
+    mca_coll_adapt_inbuf_t *inbuf;  //only used in reduce, store the incoming segment
 };
 
 typedef struct mca_coll_adapt_reduce_context_s mca_coll_adapt_reduce_context_t;

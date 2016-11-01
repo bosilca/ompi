@@ -24,14 +24,14 @@ double starttime_0, endtime_0;
 double totaltime = 0;
 
 
-static int send_cb(ompi_request_t *req);
-static int recv_cb(ompi_request_t *req);
+static int send_rd_cb(ompi_request_t *req);
+static int recv_rd_cb(ompi_request_t *req);
 
-static int send_cb(ompi_request_t *req){
+static int send_rd_cb(ompi_request_t *req){
 
     mca_coll_adapt_allreduce_context_t *context = (mca_coll_adapt_allreduce_context_t *) req->req_complete_cb_data;
     
-    TEST("[%d]: send_cb, peer = %d, distance = %d, inbuf_ready = %d, sendbuf_ready = %d, sendbuf[1] = %d, recvbuf[1] = %d\n", ompi_comm_rank(context->con->comm), context->peer, context->distance, context->con->inbuf_ready, context->con->sendbuf_ready, ((int *)context->con->sendbuf)[1], ((int *)context->inbuf->buff-context->con->lower_bound)[1]);
+    TEST("[%d]: send_rd_cb, peer = %d, distance = %d, inbuf_ready = %d, sendbuf_ready = %d, sendbuf[1] = %d, recvbuf[1] = %d\n", ompi_comm_rank(context->con->comm), context->peer, context->distance, context->con->inbuf_ready, context->con->sendbuf_ready, ((int *)context->con->sendbuf)[1], ((int *)context->inbuf->buff-context->con->lower_bound)[1]);
     int err;
     int rank = ompi_comm_rank(context->con->comm);
     //set new distance
@@ -73,7 +73,7 @@ static int send_cb(ompi_request_t *req){
                 return err;
             }
             //invoke recv call back
-            ompi_request_set_callback(recv_req, recv_cb, recv_context);
+            ompi_request_set_callback(recv_req, recv_rd_cb, recv_context);
         }
         //do the operation, commutative
         char* recvbuf;
@@ -84,9 +84,9 @@ static int send_cb(ompi_request_t *req){
             recvbuf = context->con->recvbuf;
         }
         //sendbuf = recvbuf + sendbuf
-        TEST("[%d]: send_cb, distance = %d, recvbuf[1] = %d,sendbuf[1] = %d\n", rank, context->distance, ((int *)recvbuf)[1], ((int *)context->con->sendbuf)[1]);
+        TEST("[%d]: send_rd_cb, distance = %d, recvbuf[1] = %d,sendbuf[1] = %d\n", rank, context->distance, ((int *)recvbuf)[1], ((int *)context->con->sendbuf)[1]);
         ompi_op_reduce(context->con->op, recvbuf, context->con->sendbuf, context->con->count, context->con->datatype);
-        TEST("[%d]: send_cb, distance = %d, sendbuf[1] = %d\n", rank, context->distance, ((int *)context->con->sendbuf)[1]);
+        TEST("[%d]: send_rd_cb, distance = %d, sendbuf[1] = %d\n", rank, context->distance, ((int *)context->con->sendbuf)[1]);
         //send to new distance
         if (new_distance < context->con->adjsize && context->newrank >= 0) {
             mca_coll_adapt_allreduce_context_t * send_context = (mca_coll_adapt_allreduce_context_t *) opal_free_list_wait(context->con->context_list);
@@ -105,7 +105,7 @@ static int send_cb(ompi_request_t *req){
                 return err;
             }
             //invoke send call back
-            ompi_request_set_callback(send_req, send_cb, send_context);
+            ompi_request_set_callback(send_req, send_rd_cb, send_context);
         }
         
         //this is the last send
@@ -130,7 +130,7 @@ static int send_cb(ompi_request_t *req){
                         return err;
                     }
                     //invoke send call back
-                    ompi_request_set_callback(send_req, send_cb, send_context);
+                    ompi_request_set_callback(send_req, send_rd_cb, send_context);
                 }
                 //copy to recvbuf
                 ompi_datatype_copy_content_same_ddt(context->con->datatype, context->con->count, context->con->recvbuf, context->con->sendbuf);
@@ -153,7 +153,7 @@ static int send_cb(ompi_request_t *req){
             TEST("[%d]: last send, signal\n", ompi_comm_rank(context->con->comm));
             ompi_request_t *temp_req = context->con->request;
             if (ready && context->newrank >= 0) {
-                TEST("[%d]: send_cb return inbuf item\n", rank);
+                TEST("[%d]: send_rd_cb return inbuf item\n", rank);
                 opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
             }
             opal_free_list_t * temp = context->con->context_list;
@@ -179,7 +179,7 @@ static int send_cb(ompi_request_t *req){
     else{
         context->con->total_send--;
         if (ready && context->newrank >= 0) {
-            TEST("[%d]: send_cb return inbuf item\n", rank);
+            TEST("[%d]: send_rd_cb return inbuf item\n", rank);
             opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
         }
         opal_free_list_t * temp = context->con->context_list;
@@ -189,15 +189,15 @@ static int send_cb(ompi_request_t *req){
     }
     OPAL_THREAD_UNLOCK (req->req_lock);
     req->req_free(&req);
-    TEST("[%d]: send_cb finish\n", rank);
+    TEST("[%d]: send_rd_cb finish\n", rank);
     return 1;
 }
 
-static int recv_cb(ompi_request_t *req){
+static int recv_rd_cb(ompi_request_t *req){
 
     mca_coll_adapt_allreduce_context_t *context = (mca_coll_adapt_allreduce_context_t *) req->req_complete_cb_data;
     
-    TEST("[%d]: recv_cb, peer = %d, distance = %d, inbuf_ready = %d, sendbuf_ready = %d, sendbuf[1] = %d, recvbuf[1] = %d\n", ompi_comm_rank(context->con->comm), context->peer, context->distance, context->con->inbuf_ready, context->con->sendbuf_ready, ((int *)context->con->sendbuf)[1], ((int *)context->inbuf->buff-context->con->lower_bound)[1]);
+    TEST("[%d]: recv_rd_cb, peer = %d, distance = %d, inbuf_ready = %d, sendbuf_ready = %d, sendbuf[1] = %d, recvbuf[1] = %d\n", ompi_comm_rank(context->con->comm), context->peer, context->distance, context->con->inbuf_ready, context->con->sendbuf_ready, ((int *)context->con->sendbuf)[1], ((int *)context->inbuf->buff-context->con->lower_bound)[1]);
     int err;
     int rank = ompi_comm_rank(context->con->comm);
     //set new distance
@@ -240,7 +240,7 @@ static int recv_cb(ompi_request_t *req){
                 return err;
             }
             //invoke recv call back
-            ompi_request_set_callback(recv_req, recv_cb, recv_context);
+            ompi_request_set_callback(recv_req, recv_rd_cb, recv_context);
         }
         //do the operation, commutative
         char* recvbuf;
@@ -251,9 +251,9 @@ static int recv_cb(ompi_request_t *req){
             recvbuf = context->con->recvbuf;
         }
         //sendbuf = recvbuf + sendbuf
-        TEST("[%d]: recv_cb, distance = %d, recvbuf[1] = %d,sendbuf[1] = %d\n", rank, context->distance, ((int *)recvbuf)[1], ((int *)context->con->sendbuf)[1]);
+        TEST("[%d]: recv_rd_cb, distance = %d, recvbuf[1] = %d,sendbuf[1] = %d\n", rank, context->distance, ((int *)recvbuf)[1], ((int *)context->con->sendbuf)[1]);
         ompi_op_reduce(context->con->op, recvbuf, context->con->sendbuf, context->con->count, context->con->datatype);
-        TEST("[%d]: recv_cb, distance = %d, sendbuf[1] = %d\n", rank, context->distance, ((int *)context->con->sendbuf)[1]);
+        TEST("[%d]: recv_rd_cb, distance = %d, sendbuf[1] = %d\n", rank, context->distance, ((int *)context->con->sendbuf)[1]);
         //send to new distance
         if (new_distance < context->con->adjsize && context->newrank >= 0) {
             mca_coll_adapt_allreduce_context_t * send_context = (mca_coll_adapt_allreduce_context_t *) opal_free_list_wait(context->con->context_list);
@@ -272,7 +272,7 @@ static int recv_cb(ompi_request_t *req){
                 return err;
             }
             //invoke send call back
-            ompi_request_set_callback(send_req, send_cb, send_context);
+            ompi_request_set_callback(send_req, send_rd_cb, send_context);
         }
         
         //this is the last recv
@@ -296,7 +296,7 @@ static int recv_cb(ompi_request_t *req){
                         return err;
                     }
                     //invoke send call back
-                    ompi_request_set_callback(send_req, send_cb, send_context);
+                    ompi_request_set_callback(send_req, send_rd_cb, send_context);
                 }
                 //copy to recvbuf
                 ompi_datatype_copy_content_same_ddt(context->con->datatype, context->con->count, context->con->recvbuf, context->con->sendbuf);
@@ -316,7 +316,7 @@ static int recv_cb(ompi_request_t *req){
             TEST("[%d]: last recv, signal\n", ompi_comm_rank(context->con->comm));
             ompi_request_t *temp_req = context->con->request;
             if (ready && context->newrank >= 0) {
-                TEST("[%d]: recv_cb return inbuf item\n", rank);
+                TEST("[%d]: recv_rd_cb return inbuf item\n", rank);
                 opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
             }
             opal_free_list_t * temp = context->con->context_list;
@@ -342,7 +342,7 @@ static int recv_cb(ompi_request_t *req){
     else{
         context->con->total_recv--;
         if (ready && context->newrank >= 0) {
-            TEST("[%d]: recv_cb return inbuf item\n", rank);
+            TEST("[%d]: recv_rd_cb return inbuf item\n", rank);
             opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
         }
         opal_free_list_t * temp = context->con->context_list;
@@ -352,7 +352,7 @@ static int recv_cb(ompi_request_t *req){
     }
     OPAL_THREAD_UNLOCK (req->req_lock);
     req->req_free(&req);
-    TEST("[%d]: recv_cb finish\n", rank);
+    TEST("[%d]: recv_rd_cb finish\n", rank);
     return 1;
 }
 
@@ -368,11 +368,27 @@ int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rb
     size = ompi_comm_size(comm);
     rank = ompi_comm_rank(comm);
     int err;
+    //set up request
+    ompi_request_t * temp_request = NULL;
+    temp_request = OBJ_NEW(ompi_request_t);
+    OMPI_REQUEST_INIT(temp_request, false);
+    temp_request->req_type = 0;
+    temp_request->req_free = adapt_request_free;
+    temp_request->req_status.MPI_SOURCE = 0;
+    temp_request->req_status.MPI_TAG = 0;
+    temp_request->req_status.MPI_ERROR = 0;
+    temp_request->req_status._cancelled = 0;
+    temp_request->req_status._ucount = 0;
+    *request = temp_request;
+    
     /* Special case for size == 1 */
     if (1 == size) {
         if (MPI_IN_PLACE != sbuf) {
             ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
         }
+        OPAL_THREAD_LOCK(&ompi_request_lock);
+        ompi_request_complete(temp_request, 1);
+        OPAL_THREAD_UNLOCK(&ompi_request_lock);
         return MPI_SUCCESS;
     }
     
@@ -394,18 +410,7 @@ int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rb
     adjsize >>= 1;
     extra_ranks = size - adjsize;
     
-    ompi_request_t * temp_request = NULL;
-    //set up request
-    temp_request = OBJ_NEW(ompi_request_t);
-    OMPI_REQUEST_INIT(temp_request, false);
-    temp_request->req_type = 0;
-    temp_request->req_free = adapt_request_free;
-    temp_request->req_status.MPI_SOURCE = 0;
-    temp_request->req_status.MPI_TAG = 0;
-    temp_request->req_status.MPI_ERROR = 0;
-    temp_request->req_status._cancelled = 0;
-    temp_request->req_status._ucount = 0;
-    *request = temp_request;
+
     
     //set up free list
     opal_free_list_t * context_list = OBJ_NEW(opal_free_list_t);
@@ -493,7 +498,7 @@ int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rb
                 return err;
             }
             //invoke send call back
-            ompi_request_set_callback(send_req, send_cb, send_context);
+            ompi_request_set_callback(send_req, send_rd_cb, send_context);
             
             //recv from rank+1 at last round, since this node just recv once at last,
             //so there is no need to use inbuf_list, set distance to adjsize+1
@@ -512,7 +517,7 @@ int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rb
                 return err;
             }
             //invoke recv call back
-            ompi_request_set_callback(recv_req, recv_cb, recv_context);
+            ompi_request_set_callback(recv_req, recv_rd_cb, recv_context);
         }
         else {
             TEST("[%d]: Case 2\n", rank);
@@ -538,7 +543,7 @@ int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rb
                 return err;
             }
             //invoke recv call back
-            ompi_request_set_callback(recv_req, recv_cb, recv_context);
+            ompi_request_set_callback(recv_req, recv_rd_cb, recv_context);
         }
     }
     else {
@@ -568,7 +573,7 @@ int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rb
             return err;
         }
         //invoke recv call back
-        ompi_request_set_callback(recv_req, recv_cb, recv_context);
+        ompi_request_set_callback(recv_req, recv_rd_cb, recv_context);
         
         //send to distance = 1
         mca_coll_adapt_allreduce_context_t * send_context = (mca_coll_adapt_allreduce_context_t *) opal_free_list_wait(context_list);
@@ -588,11 +593,12 @@ int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rb
             return err;
         }
         //invoke send call back
-        ompi_request_set_callback(send_req, send_cb, send_context);
+        ompi_request_set_callback(send_req, send_rd_cb, send_context);
     }
     
     return MPI_SUCCESS;
 }
+
 
 int temp_count = 0;
 
