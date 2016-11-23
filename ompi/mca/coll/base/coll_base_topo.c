@@ -1634,3 +1634,69 @@ void build_topoaware_linear(int count, int *start_loc, int rank, int rank_loc, i
     }
 }
 
+ompi_coll_tree_t*
+ompi_coll_base_topo_build_topoaware_ring(struct ompi_communicator_t* comm,
+                                         mca_coll_base_module_t *module ){
+    int i, j;
+    ompi_coll_tree_t *tree = (ompi_coll_tree_t*)malloc(sizeof(ompi_coll_tree_t));
+    if (!tree) {
+        OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"coll:base:topo_build_tree PANIC::out of memory"));
+        return NULL;
+    }
+    
+    //Initialize tree
+    tree->tree_fanout   = 0;
+    tree->tree_bmtree   = 0;
+    tree->tree_root     = -1;       //use to store vrank here
+    tree->tree_prev     = -1;
+    tree->tree_nextsize = 0;
+    for( i = 0; i < MAXTREEFANOUT; i++ ) {
+        tree->tree_next[i] = -1;
+    }
+    
+    int size, rank;
+    size = ompi_comm_size(comm);
+    rank = ompi_comm_rank(comm);
+    
+    int *topo;
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_topo) && (coll_comm->cached_old_comm == comm) ) ) {
+        if( coll_comm->cached_topo ) {
+            free(coll_comm->cached_topo);
+        }
+        topo = (int *)malloc(sizeof(int)*size*TOPO_LEVEL);
+        get_topo(topo, comm);
+        coll_comm->cached_topo = topo;
+        coll_comm->cached_old_comm = comm;
+    }
+    else{
+        topo = coll_comm->cached_topo;
+    }
+
+    int *ranks_a = (int *)malloc(sizeof(int)*size);   //ranks[0] store which actual rank has shift rank 0
+    sort_topo(topo, 0, size-1, size, ranks_a, 0);
+    
+//            for (i=0; i<size; i++) {
+//                printf("[%d]: ", i);
+//                int j;
+//                for (j=0; j<TOPO_LEVEL; j++) {
+//                    printf("%d ", topo[i*TOPO_LEVEL+j]);
+//                }
+//                printf("\n");
+//            }
+//        printf("ranks_a: ");
+//        for (i=0; i<size; i++) {
+//            printf("%d ", ranks_a[i]);
+//        }
+//        printf("\n");
+//    
+    int vrank = to_vrank(rank, ranks_a, size);
+    tree->tree_root = vrank;
+    tree->tree_prev = to_rank((vrank-1+size)%size, ranks_a, size);
+    tree->tree_nextsize = 1;
+    tree->tree_next[0] = to_rank((vrank+1)%size, ranks_a, size);
+    
+    free(ranks_a);
+    return tree;
+}
+

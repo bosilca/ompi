@@ -20,7 +20,7 @@
 #define FREE_LIST_NUM_INBUF_LIST 10    //The start size of the context free list
 #define FREE_LIST_MAX_INBUF_LIST 10000  //The max size of the context free list
 #define FREE_LIST_INC_INBUF_LIST 10    //The incresment of the context free list
-#define TEST printfno
+#define TEST printf
 
 //Can only work on commutative op
 //TODO: fix lower bound stuff
@@ -77,9 +77,9 @@ static int send_cb(ompi_request_t *req){
     
     //send a new segment
     //list is not empty
-    opal_mutex_lock (context->con->mutex_recv_list);
+    OPAL_THREAD_LOCK (context->con->mutex_recv_list);
     mca_coll_adapt_item_t *item = get_next_ready_item(context->con->recv_list, context->con->tree->tree_nextsize);
-    opal_mutex_unlock (context->con->mutex_recv_list);
+    OPAL_THREAD_UNLOCK (context->con->mutex_recv_list);
     
     if (item != NULL) {
         //get new context item from free list
@@ -115,12 +115,12 @@ static int send_cb(ompi_request_t *req){
         ompi_request_set_callback(send_req, send_cb, send_context);
     }
     
-    opal_mutex_lock(context->con->mutex_num_sent);
+    OPAL_THREAD_LOCK(context->con->mutex_num_sent);
     int32_t num_sent = ++(context->con->num_sent_segs);
     TEST("[%d]: In send_cb, root = %d, num_sent = %d, num_segs = %d\n", context->con->rank, context->con->tree->tree_root, num_sent, context->con->num_segs);
     //check whether signal the condition, non root and sent all the segments
     if (context->con->tree->tree_root != context->con->rank && num_sent == context->con->num_segs) {
-        opal_mutex_unlock(context->con->mutex_num_sent);
+        OPAL_THREAD_UNLOCK(context->con->mutex_num_sent);
         TEST("[%d]: Singal in send\n", ompi_comm_rank(context->con->comm));
         int i;
         ompi_request_t *temp_req = context->con->request;
@@ -153,7 +153,7 @@ static int send_cb(ompi_request_t *req){
         ompi_request_complete(temp_req, 1);
     }
     else{
-        opal_mutex_unlock(context->con->mutex_num_sent);
+        OPAL_THREAD_UNLOCK(context->con->mutex_num_sent);
         opal_free_list_t * temp = context->con->context_list;
         OBJ_RELEASE(context->con);
         TEST("return context_list\n");
@@ -211,7 +211,7 @@ static int recv_cb(ompi_request_t *req){
     }
     
     int keep_inbuf = 0;
-    opal_mutex_lock(context->con->mutex_op_list[context->frag_id]);
+    OPAL_THREAD_LOCK(context->con->mutex_op_list[context->frag_id]);
     if (context->con->accumbuf[context->frag_id] == NULL) {
         if (context->inbuf == NULL) {
             TEST("[%d]: set accumbuf to rbuf\n", context->con->rank);
@@ -243,19 +243,19 @@ static int recv_cb(ompi_request_t *req){
         }
     }
 
-    opal_mutex_unlock(context->con->mutex_op_list[context->frag_id]);
+    OPAL_THREAD_UNLOCK(context->con->mutex_op_list[context->frag_id]);
     
     //set recv list
-    opal_mutex_lock (context->con->mutex_recv_list);
+    OPAL_THREAD_LOCK (context->con->mutex_recv_list);
     add_to_list(context->con->recv_list, context->frag_id);
-    opal_mutex_unlock (context->con->mutex_recv_list);
+    OPAL_THREAD_UNLOCK (context->con->mutex_recv_list);
     
     //send to parent
     if (context->con->rank != context->con->tree->tree_root && context->con->ongoing_send < SEND_NUM) {
         //atomic
-        opal_mutex_lock (context->con->mutex_recv_list);
+        OPAL_THREAD_LOCK (context->con->mutex_recv_list);
         mca_coll_adapt_item_t *item = get_next_ready_item(context->con->recv_list, context->con->tree->tree_nextsize);
-        opal_mutex_unlock (context->con->mutex_recv_list);
+        OPAL_THREAD_UNLOCK (context->con->mutex_recv_list);
         
         if (item != NULL) {
             //get new context item from free list
@@ -286,12 +286,12 @@ static int recv_cb(ompi_request_t *req){
         }
     }
     
-    opal_mutex_lock (context->con->mutex_num_recv_segs);
+    OPAL_THREAD_LOCK (context->con->mutex_num_recv_segs);
     int num_recv_segs_t = ++(context->con->num_recv_segs);
     TEST("[%d]: In recv_cb, root = %d, num_recv = %d, num_segs = %d, num_child = %d\n", context->con->rank, context->con->tree->tree_root, num_recv_segs_t, context->con->num_segs, context->con->tree->tree_nextsize);
     //if this is root and has received all the segments
     if (context->con->tree->tree_root == context->con->rank && num_recv_segs_t == context->con->num_segs * context->con->tree->tree_nextsize) {
-        opal_mutex_unlock (context->con->mutex_num_recv_segs);
+        OPAL_THREAD_UNLOCK (context->con->mutex_num_recv_segs);
         int i;
         TEST("[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm));
         ompi_request_t *temp_req = context->con->request;
@@ -327,7 +327,7 @@ static int recv_cb(ompi_request_t *req){
         ompi_request_complete(temp_req, 1);
     }
     else{
-        opal_mutex_unlock (context->con->mutex_num_recv_segs);
+        OPAL_THREAD_UNLOCK (context->con->mutex_num_recv_segs);
         if (!keep_inbuf && context->inbuf != NULL) {
             TEST("return inbuf\n");
             opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
@@ -618,9 +618,9 @@ int mca_coll_adapt_reduce_generic(const void *sbuf, void *rbuf, int count, struc
         }
         con->accumbuf = accumbuf;
         for(i = 0; i < min; i++) {
-            opal_mutex_lock (mutex_recv_list);
+            OPAL_THREAD_LOCK (mutex_recv_list);
             item = get_next_ready_item(recv_list, tree->tree_nextsize);
-            opal_mutex_unlock (mutex_recv_list);
+            OPAL_THREAD_UNLOCK (mutex_recv_list);
             if (item != NULL) {
                 send_count = seg_count;
                 if(item->id == (num_segs-1)){

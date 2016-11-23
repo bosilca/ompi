@@ -276,6 +276,52 @@ typedef struct mca_coll_adapt_allreduce_context_s mca_coll_adapt_allreduce_conte
 
 OBJ_CLASS_DECLARATION(mca_coll_adapt_allreduce_context_t);
 
+/* allreduce constant context in allreduce context */
+struct mca_coll_adapt_constant_allreduce_ring_context_s {
+    opal_object_t  super;
+    char *rbuf;
+    char *sbuf;
+    ompi_datatype_t * dtype;
+    ompi_communicator_t * comm;
+    int count;
+    opal_mutex_t * mutex_complete;
+    int complete;
+    int split_block;
+    opal_free_list_t *inbuf_list;
+    opal_free_list_t * context_list;
+    int num_phases;
+    int early_blockcount;
+    int late_blockcount;
+    ptrdiff_t lower_bound;
+    ptrdiff_t extent;
+    ompi_op_t * op;  //reduce operation
+    ompi_request_t * request;
+};
+
+typedef struct mca_coll_adapt_constant_allreduce_ring_context_s mca_coll_adapt_constant_allreduce_ring_context_t;
+
+OBJ_CLASS_DECLARATION(mca_coll_adapt_constant_allreduce_ring_context_t);
+
+
+//allreduce context
+struct mca_coll_adapt_allreduce_ring_context_s {
+    opal_free_list_item_t super;
+    char *buff;
+    int peer;
+    int block;
+    int phase;
+    ptrdiff_t phase_offset;
+    ptrdiff_t block_offset;
+    int phase_count;
+    mca_coll_adapt_inbuf_t *inbuf;  //store the incoming segment
+    mca_coll_adapt_constant_allreduce_ring_context_t * con;
+};
+
+typedef struct mca_coll_adapt_allreduce_ring_context_s mca_coll_adapt_allreduce_ring_context_t;
+
+OBJ_CLASS_DECLARATION(mca_coll_adapt_allreduce_ring_context_t);
+
+
 /* alltoallv constant context in alltoallv context */
 struct mca_coll_adapt_constant_alltoallv_context_s {
     opal_object_t  super;

@@ -1,5 +1,6 @@
 #include "ompi/mca/coll/coll.h"
 #include "ompi/mca/coll/base/coll_base_topo.h"  //ompi_coll_tree_t
+#include "ompi/mca/coll/base/coll_base_functions.h" //COLL_BASE_COMPUTE_BLOCKCOUNT
 
 int mca_coll_adapt_bcast(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
@@ -104,6 +105,8 @@ int mca_coll_adapt_allreduce(const void *sbuf, void *rbuf, int count, struct omp
 
 int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module);
 
+int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, ompi_coll_tree_t* tree, uint32_t segsize);
+
 int mca_coll_adapt_iallreduce(void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module);
 
 int mca_coll_adapt_alltoallv(const void *sbuf, const int *scounts, const int *sdisps, struct ompi_datatype_t *sdtype, void* rbuf, const int *rcounts, const int *rdisps, struct ompi_datatype_t *rdtype, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
@@ -138,7 +141,7 @@ static int log2_int(int n)
 //print tree for test
 static inline void print_tree(ompi_coll_tree_t* tree, int rank) {
     int i;
-    printf("[%d, prev = %d, next_size = %d]:", rank, tree->tree_prev, tree->tree_nextsize);
+    printf("[%d, prev = %d, next_size = %d, root =%d]:", rank, tree->tree_prev, tree->tree_nextsize, tree->root);
     for( i = 0; i < tree->tree_nextsize; i++ ){
         printf(" %d", tree->tree_next[i]);
     }

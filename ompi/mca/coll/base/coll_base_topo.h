@@ -79,6 +79,10 @@ ompi_coll_tree_t*
 ompi_coll_base_topo_build_topoaware_chain(struct ompi_communicator_t* comm,
                                           int root, mca_coll_base_module_t *module );
 
+ompi_coll_tree_t*
+ompi_coll_base_topo_build_topoaware_ring(struct ompi_communicator_t* comm,
+                                          mca_coll_base_module_t *module );
+
 void get_topo(int *topo, struct ompi_communicator_t* comm);
 
 typedef struct ompi_coll_topo_helper_t {
