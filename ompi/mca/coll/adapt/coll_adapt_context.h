@@ -296,6 +296,7 @@ struct mca_coll_adapt_constant_allreduce_ring_context_s {
     ptrdiff_t extent;
     ompi_op_t * op;  //reduce operation
     ompi_request_t * request;
+    ompi_coll_tree_t * tree;
 };
 
 typedef struct mca_coll_adapt_constant_allreduce_ring_context_s mca_coll_adapt_constant_allreduce_ring_context_t;

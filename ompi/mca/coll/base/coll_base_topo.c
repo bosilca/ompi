@@ -1674,22 +1674,10 @@ ompi_coll_base_topo_build_topoaware_ring(struct ompi_communicator_t* comm,
     }
 
     int *ranks_a = (int *)malloc(sizeof(int)*size);   //ranks[0] store which actual rank has shift rank 0
+    for (i=0; i<size; i++) {
+        ranks_a[i] = i;
+    }
     sort_topo(topo, 0, size-1, size, ranks_a, 0);
-    
-//            for (i=0; i<size; i++) {
-//                printf("[%d]: ", i);
-//                int j;
-//                for (j=0; j<TOPO_LEVEL; j++) {
-//                    printf("%d ", topo[i*TOPO_LEVEL+j]);
-//                }
-//                printf("\n");
-//            }
-//        printf("ranks_a: ");
-//        for (i=0; i<size; i++) {
-//            printf("%d ", ranks_a[i]);
-//        }
-//        printf("\n");
-//    
     int vrank = to_vrank(rank, ranks_a, size);
     tree->tree_root = vrank;
     tree->tree_prev = to_rank((vrank-1+size)%size, ranks_a, size);

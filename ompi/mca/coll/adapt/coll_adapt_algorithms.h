@@ -141,7 +141,7 @@ static int log2_int(int n)
 //print tree for test
 static inline void print_tree(ompi_coll_tree_t* tree, int rank) {
     int i;
-    printf("[%d, prev = %d, next_size = %d, root =%d]:", rank, tree->tree_prev, tree->tree_nextsize, tree->root);
+    printf("[%d, prev = %d, next_size = %d, root =%d]:", rank, tree->tree_prev, tree->tree_nextsize, tree->tree_root);
     for( i = 0; i < tree->tree_nextsize; i++ ){
         printf(" %d", tree->tree_next[i]);
     }

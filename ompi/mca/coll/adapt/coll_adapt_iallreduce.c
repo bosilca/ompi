@@ -609,7 +609,6 @@ static int send_ring_cb(ompi_request_t *req){
     mca_coll_adapt_allreduce_ring_context_t *context = (mca_coll_adapt_allreduce_ring_context_t *) req->req_complete_cb_data;
     
     TEST("[%d]: send_ring_cb, peer = %d, seg = %d\n", ompi_comm_rank(context->con->comm), context->peer, context->block*context->con->num_phases+context->phase);
-    int size = ompi_comm_size(context->con->comm);
     int rank = ompi_comm_rank(context->con->comm);
     int err;
     
@@ -617,7 +616,7 @@ static int send_ring_cb(ompi_request_t *req){
     mca_coll_adapt_allreduce_ring_context_t * recv_context_t = (mca_coll_adapt_allreduce_ring_context_t *) opal_free_list_wait(context->con->context_list);
     //no matter MPI_IN_PLACE or not, always recv on rbuf
     recv_context_t->buff = ((char*)context->con->rbuf) + (ptrdiff_t)(context->block_offset + context->phase_offset) * context->con->extent;
-    recv_context_t->peer = (rank + size - 1) % size;
+    recv_context_t->peer = context->con->tree->tree_prev; //(rank + size - 1) % size;
     recv_context_t->block = context->block;
     recv_context_t->block_offset = context->block_offset;
     recv_context_t->phase = context->phase;
@@ -628,7 +627,7 @@ static int send_ring_cb(ompi_request_t *req){
     OBJ_RETAIN(recv_context_t->con);
     //create a recv request
     ompi_request_t *recv_req_t;
-    TEST("[%d]: Recv(start in send_ring_cb, whole): seg %d from %d count %d\n", ompi_comm_rank(recv_context_t->con->comm), recv_context_t->block * recv_context_t->con->num_phases + recv_context_t->phase, recv_context_t->peer, recv_context_t->phase_count);
+    TEST("[%d]: Recv(start in send_ring_cb, whole): seg %d from %d count %d\n", rank, recv_context_t->block * recv_context_t->con->num_phases + recv_context_t->phase, recv_context_t->peer, recv_context_t->phase_count);
     err = MCA_PML_CALL(irecv(recv_context_t->buff, recv_context_t->phase_count, recv_context_t->con->dtype, recv_context_t->peer, recv_context_t->block * recv_context_t->con->num_phases + recv_context_t->phase, recv_context_t->con->comm, &recv_req_t));
     if (MPI_SUCCESS != err) {
         return err;
@@ -652,6 +651,7 @@ static int recv_ring_cb(ompi_request_t *req){
     TEST("[%d]: recv_ring_cb, peer = %d, seg = %d\n", ompi_comm_rank(context->con->comm), context->peer, context->block*context->con->num_phases+context->phase);
     int size = ompi_comm_size(context->con->comm);
     int rank = ompi_comm_rank(context->con->comm);
+    int vrank = context->con->tree->tree_root;
     int err;
     //recv from rank-1 for seg (block-1)*num_phases+phase
     int block = (context->block + size - 1) % size;
@@ -661,7 +661,7 @@ static int recv_ring_cb(ompi_request_t *req){
     int late_segcount;
     int split_phase;
     char *sbuf = context->con->sbuf;
-    if (context->block != ((rank+1+size) % size)) {
+    if (context->block != ((vrank+1+size) % size)) {
         block_count = ((block < context->con->split_block)? context->con->early_blockcount : context->con->late_blockcount);
         block_offset = ((block < context->con->split_block) ? ((ptrdiff_t)block * (ptrdiff_t)context->con->early_blockcount) : ((ptrdiff_t)block * (ptrdiff_t)context->con->late_blockcount + context->con->split_block));
         COLL_BASE_COMPUTE_BLOCKCOUNT(block_count, context->con->num_phases, split_phase, early_segcount, late_segcount);
@@ -687,7 +687,7 @@ static int recv_ring_cb(ompi_request_t *req){
         OBJ_RETAIN(recv_context->con);
         //create a recv request
         ompi_request_t *recv_req;
-        TEST("[%d]: Recv(start in recv_cb): seg %d from %d count %d\n", ompi_comm_rank(recv_context->con->comm), recv_context->block * recv_context->con->num_phases + recv_context->phase, recv_context->peer, recv_context->phase_count);
+        TEST("[%d]: Recv(start in recv_cb): seg %d from %d count %d\n", rank, recv_context->block * recv_context->con->num_phases + recv_context->phase, recv_context->peer, recv_context->phase_count);
         err = MCA_PML_CALL(irecv(recv_context->buff, recv_context->phase_count, recv_context->con->dtype, recv_context->peer, recv_context->block * recv_context->con->num_phases + recv_context->phase, recv_context->con->comm, &recv_req));
         if (MPI_SUCCESS != err) {
             return err;
@@ -700,24 +700,24 @@ static int recv_ring_cb(ompi_request_t *req){
     char * tmprecv = ((char*)context->con->rbuf) + (ptrdiff_t)(context->block_offset + context->phase_offset) * context->con->extent;
     if (sbuf == MPI_IN_PLACE) {
         //op inbuf and rbuf to rbuf
-        TEST("[%d]: Op(in recv_cb), seg %d, rbuf %f, inbuf %f\n", ompi_comm_rank(context->con->comm), block * context->con->num_phases + context->phase, ((float *)tmprecv)[0], ((float *)context->buff)[0]);
+        TEST("[%d]: Op(in recv_cb), seg %d, rbuf %f, inbuf %f\n", rank, block * context->con->num_phases + context->phase, ((float *)tmprecv)[0], ((float *)context->buff)[0]);
         ompi_op_reduce(context->con->op, context->buff, tmprecv, context->phase_count, context->con->dtype);
-        TEST("[%d]: Op(in recv_cb), seg %d, rbuf %f, inbuf %f\n", ompi_comm_rank(context->con->comm), block * context->con->num_phases + context->phase, ((float *)tmprecv)[0], ((float *)context->buff)[0]);
+        TEST("[%d]: Op(in recv_cb), seg %d, rbuf %f, inbuf %f\n", rank, block * context->con->num_phases + context->phase, ((float *)tmprecv)[0], ((float *)context->buff)[0]);
     }
     else {
         //op sbuf and rbuf to rbuf
         char * tmpsend = ((char*)context->con->sbuf) + (ptrdiff_t)(context->block_offset + context->phase_offset) * context->con->extent;
-        TEST("[%d]: Op(in recv_cb), seg %d, rbuf %f, sbuf %f\n", ompi_comm_rank(context->con->comm), block * context->con->num_phases + context->phase, ((float *)tmprecv)[0], ((float *)tmpsend)[0]);
+        TEST("[%d]: Op(in recv_cb), seg %d, rbuf %f, sbuf %f\n", rank, block * context->con->num_phases + context->phase, ((float *)tmprecv)[0], ((float *)tmpsend)[0]);
         ompi_op_reduce(context->con->op, tmpsend, tmprecv, context->phase_count, context->con->dtype);
-        TEST("[%d]: Op(in recv_cb), seg %d, rbuf %f, sbuf %f\n", ompi_comm_rank(context->con->comm), block * context->con->num_phases + context->phase, ((float *)tmprecv)[0], ((float *)tmpsend)[0]);
+        TEST("[%d]: Op(in recv_cb), seg %d, rbuf %f, sbuf %f\n", rank, block * context->con->num_phases + context->phase, ((float *)tmprecv)[0], ((float *)tmpsend)[0]);
         
     }
     
-    if (context->block != ((rank+1+size) % size)) {
+    if (context->block != ((vrank+1+size) % size)) {
         //send rbuf to rank+1
         mca_coll_adapt_allreduce_ring_context_t * send_context = (mca_coll_adapt_allreduce_ring_context_t *) opal_free_list_wait(context->con->context_list);
         send_context->buff = tmprecv;
-        send_context->peer = (rank+1) % size;
+        send_context->peer = context->con->tree->tree_next[0]; //(rank+1) % size;
         send_context->block = block;
         send_context->block_offset = context->block_offset;
         send_context->phase = context->phase;
@@ -728,8 +728,8 @@ static int recv_ring_cb(ompi_request_t *req){
         OBJ_RETAIN(send_context->con);
         //send op result to rank+1
         ompi_request_t *send_req;
-        TEST("[%d]: Send(start in recv_cb): seg %d to %d count %d\n", ompi_comm_rank(context->con->comm), block * context->con->num_phases + context->phase, (rank+1) % size, context->phase_count);
-        err = MCA_PML_CALL(isend(tmprecv, context->phase_count, context->con->dtype, (rank+1) % size, block * context->con->num_phases + context->phase, MCA_PML_BASE_SEND_SYNCHRONOUS, context->con->comm, &send_req));
+        TEST("[%d]: Send(start in recv_cb): seg %d to %d count %d\n", rank, block * context->con->num_phases + context->phase, send_context->peer, context->phase_count);
+        err = MCA_PML_CALL(isend(tmprecv, context->phase_count, context->con->dtype, send_context->peer, block * context->con->num_phases + context->phase, MCA_PML_BASE_SEND_SYNCHRONOUS, context->con->comm, &send_req));
         if (MPI_SUCCESS != err) {
             return err;
         }
@@ -741,7 +741,7 @@ static int recv_ring_cb(ompi_request_t *req){
         //send final op result to rank+1
         mca_coll_adapt_allreduce_ring_context_t * send_context = (mca_coll_adapt_allreduce_ring_context_t *) opal_free_list_wait(context->con->context_list);
         send_context->buff = tmprecv;
-        send_context->peer = (rank+1) % size;
+        send_context->peer = context->con->tree->tree_next[0];
         send_context->block = block;
         send_context->block_offset = context->block_offset;
         send_context->phase = context->phase;
@@ -751,8 +751,8 @@ static int recv_ring_cb(ompi_request_t *req){
         send_context->con = context->con;
         OBJ_RETAIN(send_context->con);
         ompi_request_t *send_req;
-        TEST("[%d]: Send(start in recv_cb, whole): seg %d to %d count %d\n", ompi_comm_rank(context->con->comm), context->block * context->con->num_phases + context->phase, (rank + 1) % size, context->phase_count);
-        err = MCA_PML_CALL(isend(tmprecv, context->phase_count, context->con->dtype, (rank + 1) % size, context->block * context->con->num_phases + context->phase, MCA_PML_BASE_SEND_SYNCHRONOUS, context->con->comm, &send_req));
+        TEST("[%d]: Send(start in recv_cb, whole): seg %d to %d count %d\n", rank, context->block * context->con->num_phases + context->phase, send_context->peer, context->phase_count);
+        err = MCA_PML_CALL(isend(tmprecv, context->phase_count, context->con->dtype, send_context->peer, context->block * context->con->num_phases + context->phase, MCA_PML_BASE_SEND_SYNCHRONOUS, context->con->comm, &send_req));
         if (MPI_SUCCESS != err) {
             return err;
         }
@@ -781,13 +781,12 @@ static int send_ring_allgather_cb(ompi_request_t *req){
     TEST("[%d]: send_ring_allgather_cb, peer = %d, seg = %d\n", ompi_comm_rank(context->con->comm), context->peer, context->block*context->con->num_phases+context->phase);
     int size = ompi_comm_size(context->con->comm);
     int rank = ompi_comm_rank(context->con->comm);
-    int err;
     
     OPAL_THREAD_LOCK(context->con->mutex_complete);
     int complete = ++context->con->complete;
     if (complete == context->con->num_phases*size) {
         //signal
-        TEST("[%d]: send_ring_allgather_cb signal, complete %d\n", ompi_comm_rank(context->con->comm), context->con->complete);
+        TEST("[%d]: send_ring_allgather_cb signal, complete %d\n", rank, context->con->complete);
         ompi_request_t *temp_req = context->con->request;
         if (context->inbuf != NULL) {
             opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
@@ -829,13 +828,14 @@ static int recv_ring_allgather_cb(ompi_request_t *req){
     TEST("[%d]: recv_ring_allgather_cb, peer = %d, seg = %d\n", ompi_comm_rank(context->con->comm), context->peer, context->block*context->con->num_phases+context->phase);
     int size = ompi_comm_size(context->con->comm);
     int rank = ompi_comm_rank(context->con->comm);
+    int vrank = context->con->tree->tree_root;
     int err;
     
     //TODO:rank+2 notice
-    if (context->block != ((rank+2) % size)) {
+    if (context->block != ((vrank+2) % size)) {
         mca_coll_adapt_allreduce_ring_context_t * send_context = (mca_coll_adapt_allreduce_ring_context_t *) opal_free_list_wait(context->con->context_list);
         send_context->buff = context->buff;
-        send_context->peer = (rank+1) % size;
+        send_context->peer = context->con->tree->tree_next[0];  //(rank+1) % size;
         send_context->block = context->block;
         send_context->block_offset = context->block_offset;
         send_context->phase = context->phase;
@@ -845,8 +845,8 @@ static int recv_ring_allgather_cb(ompi_request_t *req){
         send_context->con = context->con;
         OBJ_RETAIN(send_context->con);
         ompi_request_t *send_req;
-        TEST("[%d]: Send(start in recv_allgather_cb): seg %d to %d count %d\n", ompi_comm_rank(context->con->comm), context->block * context->con->num_phases + context->phase, (rank + 1) % size, context->phase_count);
-        err = MCA_PML_CALL(isend(send_context->buff, context->phase_count, context->con->dtype, (rank + 1) % size, context->block * context->con->num_phases + context->phase, MCA_PML_BASE_SEND_SYNCHRONOUS, context->con->comm, &send_req));
+        TEST("[%d]: Send(start in recv_allgather_cb): seg %d to %d count %d\n", rank, context->block * context->con->num_phases + context->phase, send_context->peer, context->phase_count);
+        err = MCA_PML_CALL(isend(send_context->buff, context->phase_count, context->con->dtype, send_context->peer, context->block * context->con->num_phases + context->phase, MCA_PML_BASE_SEND_SYNCHRONOUS, context->con->comm, &send_req));
         if (MPI_SUCCESS != err) {
             return err;
         }
@@ -858,7 +858,7 @@ static int recv_ring_allgather_cb(ompi_request_t *req){
         int complete = ++context->con->complete;
         if (complete == context->con->num_phases*size) {
             //signal
-            TEST("[%d]: send_ring_allgather_cb signal, complete %d\n", ompi_comm_rank(context->con->comm), context->con->complete);
+            TEST("[%d]: send_ring_allgather_cb signal, complete %d\n", rank, context->con->complete);
             ompi_request_t *temp_req = context->con->request;
             if (context->inbuf != NULL) {
                 opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
@@ -906,6 +906,7 @@ int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf,
     int err;
     int size = ompi_comm_size(comm);
     int rank = ompi_comm_rank(comm);
+    int vrank = tree->tree_root;
     int segcount = count;
     int split_block;
     int split_phase;
@@ -1040,6 +1041,7 @@ int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf,
     con->extent = extent;
     con->op = op;
     con->request = temp_request;
+    con->tree = tree;
     
     int phase;
     int block;
@@ -1048,7 +1050,7 @@ int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf,
     //for the first block
     for (phase=0; phase<num_phases; phase++) {
         //recv from rank-1
-        block = (rank + size - 1) % size;
+        block = (vrank + size - 1) % size;
         block_count = ((block < split_block)? early_blockcount : late_blockcount);
         block_offset = ((block < split_block) ? ((ptrdiff_t)block * (ptrdiff_t)early_blockcount) : ((ptrdiff_t)block * (ptrdiff_t)late_blockcount + split_block));
         COLL_BASE_COMPUTE_BLOCKCOUNT(block_count, num_phases, split_phase, early_segcount, late_segcount);
@@ -1064,7 +1066,7 @@ int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf,
             recv_context->buff = ((char*)rbuf) + (ptrdiff_t)(block_offset + phase_offset) * extent;
             recv_context->inbuf = NULL;
         }
-        recv_context->peer = (rank + size - 1) % size;
+        recv_context->peer = tree->tree_prev; //(rank + size - 1) % size;
         recv_context->block = block;
         recv_context->block_offset = block_offset;
         recv_context->phase = phase;
@@ -1074,7 +1076,7 @@ int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf,
         OBJ_RETAIN(con);
         //create a recv request
         ompi_request_t *recv_req;
-        TEST("[%d]: Recv(start in main): seg %d from %d count %d inbuf %p\n", ompi_comm_rank(recv_context->con->comm), block*num_phases+phase, recv_context->peer, phase_count, (void *)recv_context->inbuf);
+        TEST("[%d]: Recv(start in main): seg %d from %d count %d inbuf %p\n", rank, block*num_phases+phase, recv_context->peer, phase_count, (void *)recv_context->inbuf);
         err = MCA_PML_CALL(irecv(recv_context->buff, phase_count, dtype, recv_context->peer, block*num_phases+phase, comm, &recv_req));
         if (MPI_SUCCESS != err) {
             return err;
@@ -1083,7 +1085,7 @@ int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf,
         ompi_request_set_callback(recv_req, recv_ring_cb, recv_context);
         
         //send to rank+1
-        block = rank;
+        block = vrank;
         block_count = ((block < split_block)? early_blockcount : late_blockcount);
         block_offset = ((block < split_block) ? ((ptrdiff_t)block * (ptrdiff_t)early_blockcount) : ((ptrdiff_t)block * (ptrdiff_t)late_blockcount + split_block));
         COLL_BASE_COMPUTE_BLOCKCOUNT(block_count, num_phases, split_phase, early_segcount, late_segcount);
@@ -1096,7 +1098,7 @@ int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf,
         else {
             send_context->buff = ((char*)sbuf) + (ptrdiff_t)(block_offset + phase_offset) * extent;
         }
-        send_context->peer = (rank + 1) % size;
+        send_context->peer = tree->tree_next[0]; //(rank + 1) % size;
         send_context->block = block;
         send_context->block_offset = block_offset;
         send_context->phase = phase;
@@ -1107,8 +1109,8 @@ int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf,
         OBJ_RETAIN(con);
         //create a send request
         ompi_request_t *send_req;
-        TEST("[%d]: Send(start in main): seg %d to %d count %d\n", ompi_comm_rank(comm), block*num_phases+phase, (rank + 1) % size, phase_count);
-        err = MCA_PML_CALL(isend(send_context->buff, phase_count, dtype, (rank + 1) % size, block*num_phases+phase, MCA_PML_BASE_SEND_SYNCHRONOUS, comm, &send_req));
+        TEST("[%d]: Send(start in main): seg %d to %d count %d\n", ompi_comm_rank(comm), block*num_phases+phase, send_context->peer, phase_count);
+        err = MCA_PML_CALL(isend(send_context->buff, phase_count, dtype, send_context->peer, block*num_phases+phase, MCA_PML_BASE_SEND_SYNCHRONOUS, comm, &send_req));
         if (MPI_SUCCESS != err) {
             return err;
         }
@@ -1124,8 +1126,8 @@ int temp_count = 0;
 
 int mca_coll_adapt_iallreduce(void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
     TEST("[%" PRIx64 "] Adapt iallreduce %d, count %d, sbuf %f\n", gettid(), temp_count++, count, ((float *)sbuf)[0]);
-//    ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_ring(comm, module);
-//    print_tree(tree, ompi_comm_rank(comm));
-    return mca_coll_adapt_iallreduce_intra_ring_segmented(sbuf, rbuf, count, dtype, op, comm, request, module, NULL, 1024000);
+    ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_ring(comm, module);
+    //print_tree(tree, ompi_comm_rank(comm));
+    return mca_coll_adapt_iallreduce_intra_ring_segmented(sbuf, rbuf, count, dtype, op, comm, request, module, tree, 1024000);
     
 }
