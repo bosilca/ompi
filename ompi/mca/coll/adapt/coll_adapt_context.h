@@ -190,48 +190,6 @@ typedef struct mca_coll_adapt_bcast_two_trees_context_s mca_coll_adapt_bcast_two
 
 OBJ_CLASS_DECLARATION(mca_coll_adapt_bcast_two_trees_context_t);
 
-
-/* bcast constant context in ibcast context for two trees */
-struct mca_coll_adapt_constant_ibcast_two_trees_context_s {
-    opal_object_t  super;
-    size_t count;
-    size_t seg_count;
-    ompi_datatype_t * datatype;
-    ompi_communicator_t * comm;
-    int real_seg_size;
-    int* num_segs;
-    opal_free_list_t ** context_lists;
-    int** recv_arrays;
-    int** send_arrays;
-    int *num_recv_segs; //store the length of the fragment array, how many fragments are recevied
-    int *num_sent_segs;  //number of sent segments
-    opal_mutex_t * mutex;
-    ompi_request_t * request;
-    ompi_coll_tree_t ** trees;
-    int complete;
-};
-
-typedef struct mca_coll_adapt_constant_ibcast_two_trees_context_s mca_coll_adapt_constant_ibcast_two_trees_context_t;
-
-OBJ_CLASS_DECLARATION(mca_coll_adapt_constant_ibcast_two_trees_context_t);
-
-
-//bcast context for two trees
-struct mca_coll_adapt_ibcast_two_trees_context_s {
-    opal_free_list_item_t super;
-    char *buff;
-    int frag_id;
-    int child_id;
-    int peer;
-    int tree; //which tree are using
-    mca_coll_adapt_constant_ibcast_two_trees_context_t * con;
-};
-
-typedef struct mca_coll_adapt_ibcast_two_trees_context_s mca_coll_adapt_ibcast_two_trees_context_t;
-
-OBJ_CLASS_DECLARATION(mca_coll_adapt_ibcast_two_trees_context_t);
-
-
 /* allreduce constant context in allreduce context */
 struct mca_coll_adapt_constant_allreduce_context_s {
     opal_object_t  super;

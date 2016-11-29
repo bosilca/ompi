@@ -220,83 +220,116 @@ int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatyp
 
 //non-blocking broadcast using binomial tree with pipeline
 int mca_coll_adapt_ibcast_binomial(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_bmtree(comm, root);
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree);
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_bmtree) && (coll_comm->cached_bmtree_root == root) ) ) {
+        if( coll_comm->cached_bmtree ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_bmtree) );
+        }
+        coll_comm->cached_bmtree = ompi_coll_base_topo_build_bmtree(comm, root);
+        coll_comm->cached_bmtree_root = root;
+    }
+    //print_tree(coll_comm->cached_bmtree, ompi_comm_rank(comm));
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bmtree);
+
 }
 
 int mca_coll_adapt_ibcast_in_order_binomial(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_in_order_bmtree(comm, root);
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree);
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_in_order_bmtree) && (coll_comm->cached_in_order_bmtree_root == root) ) ) {
+        if( coll_comm->cached_in_order_bmtree ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_in_order_bmtree) );
+        }
+        coll_comm->cached_in_order_bmtree = ompi_coll_base_topo_build_in_order_bmtree(comm, root);
+        coll_comm->cached_in_order_bmtree_root = root;
+    }
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_in_order_bmtree);
 }
 
 
 int mca_coll_adapt_ibcast_bininary(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_tree(2, comm, root);
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree);
-
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_bintree) && (coll_comm->cached_bintree_root == root) ) ) {
+        if( coll_comm->cached_bintree ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_bintree) );
+        }
+        coll_comm->cached_bintree = ompi_coll_base_topo_build_tree(2, comm, root);
+        coll_comm->cached_bintree_root = root;
+    }
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bintree);
 }
 
 int mca_coll_adapt_ibcast_pipeline(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_chain(1, comm, root);
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree);
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_pipeline) && (coll_comm->cached_pipeline_root == root) ) ) {
+        if( coll_comm->cached_pipeline ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_pipeline) );
+        }
+        coll_comm->cached_pipeline = ompi_coll_base_topo_build_chain(1, comm, root);
+        coll_comm->cached_pipeline_root = root;
+    }
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_pipeline);
 }
 
 int mca_coll_adapt_ibcast_chain(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_chain(4, comm, root);
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree);
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_chain) && (coll_comm->cached_chain_root == root) ) ) {
+        if( coll_comm->cached_chain ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_chain) );
+        }
+        coll_comm->cached_chain = ompi_coll_base_topo_build_chain(4, comm, root);
+        coll_comm->cached_chain_root = root;
+    }
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_chain);
 }
 
 int mca_coll_adapt_ibcast_linear(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
-    int fanout = ompi_comm_size(comm) - 1;
-    ompi_coll_tree_t * tree;
-    if (fanout > 1) {
-        tree = ompi_coll_base_topo_build_tree(ompi_comm_size(comm) - 1, comm, root);
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_linear) && (coll_comm->cached_linear_root == root) ) ) {
+        if( coll_comm->cached_linear ) { /* destroy previous tree if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_linear) );
+        }
+        int fanout = ompi_comm_size(comm) - 1;
+        ompi_coll_tree_t * tree;
+        if (fanout > 1) {
+            tree = ompi_coll_base_topo_build_tree(ompi_comm_size(comm) - 1, comm, root);
+        }
+        else{
+            tree = ompi_coll_base_topo_build_chain(1, comm, root);
+        }
+        coll_comm->cached_linear = tree;
+        coll_comm->cached_linear_root = root;
     }
-    else{
-        tree = ompi_coll_base_topo_build_chain(1, comm, root);
-    }
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree);
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_linear);
+
 }
 
-int mca_coll_adapt_ibcast_two_trees_binary(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
-    size_t type_size;                       //the size of a datatype
-    size_t seg_size = SEG_SIZE;            //the size of a segment
-    int seg_count = count;      //number of datatype in a segment
-    ompi_datatype_type_size(datatype, &type_size);
-    COLL_BASE_COMPUTED_SEGCOUNT(seg_size, type_size, seg_count);
-    int total_num_segs = (count + seg_count - 1) / seg_count;
-    int size = ompi_comm_size(comm);
-    if (total_num_segs > 1 && size >= 3) {
-        ompi_coll_tree_t ** two_trees = ompi_coll_base_topo_build_two_trees_binary(comm, root);
-        //print_tree(two_trees[0], ompi_comm_rank(comm));
-        //print_tree(two_trees[1], ompi_comm_rank(comm));
-        return mca_coll_adapt_ibcast_two_trees_generic(buff, count, datatype, root, comm, request, module, two_trees);
+int mca_coll_adapt_ibcast_topoaware_linear(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_topolinear) && (coll_comm->cached_topolinear_root == root) ) ) {
+        if( coll_comm->cached_topolinear ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topolinear) );
+        }
+        coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module);
+        coll_comm->cached_topolinear_root = root;
     }
-    else{
-        ompi_coll_tree_t * tree = ompi_coll_base_topo_build_bmtree(comm, root);
-        return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree);
-    }
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topolinear);
 }
 
-int mca_coll_adapt_ibcast_two_trees_binomial(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
-    size_t type_size;                       //the size of a datatype
-    size_t seg_size = SEG_SIZE;            //the size of a segment
-    int seg_count = count;      //number of datatype in a segment
-    ompi_datatype_type_size(datatype, &type_size);
-    COLL_BASE_COMPUTED_SEGCOUNT(seg_size, type_size, seg_count);
-    int total_num_segs = (count + seg_count - 1) / seg_count;
-    int size = ompi_comm_size(comm);
-    if (total_num_segs > 1 && size >= 3) {
-        ompi_coll_tree_t ** two_trees = ompi_coll_base_topo_build_two_trees_binomial(comm, root);
-        //print_tree(two_trees[0], ompi_comm_rank(comm));
-        //print_tree(two_trees[1], ompi_comm_rank(comm));
-        return mca_coll_adapt_ibcast_two_trees_generic(buff, count, datatype, root, comm, request, module, two_trees);
+int mca_coll_adapt_ibcast_topoaware_chain(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_topochain) && (coll_comm->cached_topochain_root == root) ) ) {
+        if( coll_comm->cached_topochain ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topochain) );
+        }
+        coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module);
+        coll_comm->cached_topochain_root = root;
     }
-    else{
-        ompi_coll_tree_t * tree = ompi_coll_base_topo_build_bmtree(comm, root);
-        return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree);
+    else {
     }
+    //print_tree(coll_comm->cached_topochain, ompi_comm_rank(comm));
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topochain);
 }
+
 
 int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, ompi_coll_tree_t* tree){
     int i, j;       //temp variable for iteration
@@ -486,17 +519,96 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     }
     
     OPAL_THREAD_UNLOCK(mutex);
-
+    
     TEST("[%d, %" PRIx64 "]: End of Ibcast\n", rank, gettid());
     
     return MPI_SUCCESS;
 }
 
+int mca_coll_adapt_ibcast_two_trees_binary(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
+    size_t type_size;                       //the size of a datatype
+    size_t seg_size = SEG_SIZE;            //the size of a segment
+    int seg_count = count;      //number of datatype in a segment
+    ompi_datatype_type_size(datatype, &type_size);
+    COLL_BASE_COMPUTED_SEGCOUNT(seg_size, type_size, seg_count);
+    int total_num_segs = (count + seg_count - 1) / seg_count;
+    int size = ompi_comm_size(comm);
+    if (total_num_segs > 1 && size >= 3) {
+        mca_coll_base_comm_t *coll_comm = module->base_data;
+        if( !( (coll_comm->cached_two_trees_binary) && (coll_comm->cached_two_trees_binary_root == root) ) ) {
+            if( coll_comm->cached_two_trees_binary ) { /* destroy previous binomial if defined */
+                ompi_coll_base_topo_destroy_two_trees(coll_comm->cached_two_trees_binary);
+            }
+            coll_comm->cached_two_trees_binary = ompi_coll_base_topo_build_two_trees_binary(comm, root);
+            coll_comm->cached_two_trees_binary_root = root;
+            //print_tree(two_trees[0], ompi_comm_rank(comm));
+            //print_tree(two_trees[1], ompi_comm_rank(comm));
+        }
+        return mca_coll_adapt_ibcast_two_trees_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_two_trees_binary);
+    }
+    else{
+        return mca_coll_adapt_ibcast_binary(buff, count, datatype, root, comm, request, module);
+    }
+}
+
+int mca_coll_adapt_ibcast_two_trees_binomial(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
+    size_t type_size;                       //the size of a datatype
+    size_t seg_size = SEG_SIZE;            //the size of a segment
+    int seg_count = count;      //number of datatype in a segment
+    ompi_datatype_type_size(datatype, &type_size);
+    COLL_BASE_COMPUTED_SEGCOUNT(seg_size, type_size, seg_count);
+    int total_num_segs = (count + seg_count - 1) / seg_count;
+    int size = ompi_comm_size(comm);
+    if (total_num_segs > 1 && size >= 3) {
+        mca_coll_base_comm_t *coll_comm = module->base_data;
+        if( !( (coll_comm->cached_two_trees_binomial) && (coll_comm->cached_two_trees_binomial_root == root) ) ) {
+            if( coll_comm->cached_two_trees_binomial ) { /* destroy previous binomial if defined */
+                ompi_coll_base_topo_destroy_two_trees(coll_comm->cached_two_trees_binomial);
+            }
+            coll_comm->cached_two_trees_binomial = ompi_coll_base_topo_build_two_trees_binomial(comm, root);
+            coll_comm->cached_two_trees_binomial_root = root;
+            //print_tree(two_trees[0], ompi_comm_rank(comm));
+            //print_tree(two_trees[1], ompi_comm_rank(comm));
+        }
+        return mca_coll_adapt_ibcast_two_trees_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_two_trees_binomial);
+    }
+    else{
+        return mca_coll_adapt_ibcast_binomial(buff, count, datatype, root, comm, request, module);
+    }
+}
+
+int mca_coll_adapt_ibcast_two_chains(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
+    size_t type_size;                       //the size of a datatype
+    size_t seg_size = SEG_SIZE;            //the size of a segment
+    int seg_count = count;      //number of datatype in a segment
+    ompi_datatype_type_size(datatype, &type_size);
+    COLL_BASE_COMPUTED_SEGCOUNT(seg_size, type_size, seg_count);
+    int total_num_segs = (count + seg_count - 1) / seg_count;
+    int size = ompi_comm_size(comm);
+    if (total_num_segs > 1 && size >= 3) {
+        mca_coll_base_comm_t *coll_comm = module->base_data;
+        if( !( (coll_comm->cached_two_chains) && (coll_comm->cached_two_chains_root == root) ) ) {
+            if( coll_comm->cached_two_chains ) { /* destroy previous binomial if defined */
+                ompi_coll_base_topo_destroy_two_trees(coll_comm->cached_two_chains);
+            }
+            coll_comm->cached_two_chains = ompi_coll_base_topo_build_two_chains(comm, root);
+            coll_comm->cached_two_chains_root = root;
+            //print_tree(two_trees[0], ompi_comm_rank(comm));
+            //print_tree(two_trees[1], ompi_comm_rank(comm));
+        }
+        return mca_coll_adapt_ibcast_two_trees_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_two_chains);
+    }
+    else{
+        return mca_coll_adapt_ibcast_binomial(buff, count, datatype, root, comm, request, module);
+    }
+}
+
+
 
 //send call back
 static int two_trees_send_cb(ompi_request_t *req)
 {
-    mca_coll_adapt_ibcast_two_trees_context_t *context = (mca_coll_adapt_ibcast_two_trees_context_t *) req->req_complete_cb_data;
+    mca_coll_adapt_bcast_two_trees_context_t *context = (mca_coll_adapt_bcast_two_trees_context_t *) req->req_complete_cb_data;
     
     int err;
     
@@ -513,7 +625,7 @@ static int two_trees_send_cb(ompi_request_t *req)
         if (new_id == (context->con->num_segs[0] + context->con->num_segs[1]- 1)) {
             send_count = context->con->count - new_id * context->con->seg_count;
         }
-        mca_coll_adapt_ibcast_two_trees_context_t * send_context = (mca_coll_adapt_ibcast_two_trees_context_t *) opal_free_list_wait(context->con->context_lists[context->tree]);
+        mca_coll_adapt_bcast_two_trees_context_t * send_context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(context->con->context_lists[context->tree]);
         send_context->buff = context->buff + (new_id - context->frag_id) * context->con->real_seg_size;
         send_context->frag_id = new_id;
         send_context->child_id = context->child_id;
@@ -587,7 +699,7 @@ static int two_trees_send_cb(ompi_request_t *req)
 //receive call back
 static int two_trees_recv_cb(ompi_request_t *req){
     //get necessary info from request
-    mca_coll_adapt_ibcast_two_trees_context_t *context = (mca_coll_adapt_ibcast_two_trees_context_t *) req->req_complete_cb_data;
+    mca_coll_adapt_bcast_two_trees_context_t *context = (mca_coll_adapt_bcast_two_trees_context_t *) req->req_complete_cb_data;
     
     int err, i;
     
@@ -614,7 +726,7 @@ static int two_trees_recv_cb(ompi_request_t *req){
             recv_count = context->con->count - new_id * context->con->seg_count;
         }
         //get new context item from free list
-        mca_coll_adapt_ibcast_two_trees_context_t * recv_context = (mca_coll_adapt_ibcast_two_trees_context_t *) opal_free_list_wait(context->con->context_lists[context->tree]);
+        mca_coll_adapt_bcast_two_trees_context_t * recv_context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(context->con->context_lists[context->tree]);
         recv_context->buff = context->buff + (new_id - context->frag_id) * context->con->real_seg_size;
         recv_context->frag_id = new_id;
         recv_context->child_id = context->child_id;
@@ -644,7 +756,7 @@ static int two_trees_recv_cb(ompi_request_t *req){
             if (context->frag_id == (context->con->num_segs[0] + context->con->num_segs[1] - 1)) {
                 send_count = context->con->count - context->frag_id * context->con->seg_count;
             }
-            mca_coll_adapt_ibcast_two_trees_context_t * send_context = (mca_coll_adapt_ibcast_two_trees_context_t *) opal_free_list_wait(context->con->context_lists[context->tree]);
+            mca_coll_adapt_bcast_two_trees_context_t * send_context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(context->con->context_lists[context->tree]);
             send_context->buff = context->buff;
             send_context->frag_id = context->frag_id;
             send_context->child_id = i;
@@ -820,7 +932,7 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
     }
     
     //Set constant context for send and recv call back
-    mca_coll_adapt_constant_ibcast_two_trees_context_t *con = OBJ_NEW(mca_coll_adapt_constant_ibcast_two_trees_context_t);
+    mca_coll_adapt_constant_bcast_two_trees_context_t *con = OBJ_NEW(mca_coll_adapt_constant_bcast_two_trees_context_t);
     con->count = count;
     con->seg_count = seg_count;
     con->datatype = datatype;
@@ -884,7 +996,7 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
                     send_count = count - (num_segs[0]+i) * seg_count;
                 }
                 for (j=0; j<trees[t]->tree_nextsize; j++) {
-                    mca_coll_adapt_ibcast_two_trees_context_t * context = (mca_coll_adapt_ibcast_two_trees_context_t *) opal_free_list_wait(context_lists[t]);
+                    mca_coll_adapt_bcast_two_trees_context_t * context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(context_lists[t]);
                     context->buff = (char *)buff + recv_arrays[t][i] * real_seg_size;
                     context->frag_id = recv_arrays[t][i];
                     context->child_id = j;              //the id of peer in in tree->tree_next
@@ -954,7 +1066,7 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
                 if (t == 1 && i == (num_segs[1] - 1)) {
                     recv_count = count - (num_segs[0]+i) * seg_count;
                 }
-                mca_coll_adapt_ibcast_two_trees_context_t * context = (mca_coll_adapt_ibcast_two_trees_context_t *) opal_free_list_wait(context_lists[t]);
+                mca_coll_adapt_bcast_two_trees_context_t * context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(context_lists[t]);
                 context->buff = (char *)buff + (t*num_segs[0]+i) * real_seg_size;
                 context->frag_id = t*num_segs[0]+i;
                 context->peer = trees[t]->tree_prev;

@@ -20,7 +20,7 @@
 #define FREE_LIST_NUM_INBUF_LIST 10    //The start size of the context free list
 #define FREE_LIST_MAX_INBUF_LIST 10000  //The max size of the context free list
 #define FREE_LIST_INC_INBUF_LIST 10    //The incresment of the context free list
-#define TEST printf
+#define TEST printfno
 
 //Can only work on commutative op
 //TODO: fix lower bound stuff

@@ -1637,7 +1637,7 @@ void build_topoaware_linear(int count, int *start_loc, int rank, int rank_loc, i
 ompi_coll_tree_t*
 ompi_coll_base_topo_build_topoaware_ring(struct ompi_communicator_t* comm,
                                          mca_coll_base_module_t *module ){
-    int i, j;
+    int i;
     ompi_coll_tree_t *tree = (ompi_coll_tree_t*)malloc(sizeof(ompi_coll_tree_t));
     if (!tree) {
         OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"coll:base:topo_build_tree PANIC::out of memory"));

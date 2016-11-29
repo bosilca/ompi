@@ -206,6 +206,8 @@ mca_coll_adapt_comm_query(struct ompi_communicator_t *comm, int *priority)
     data->cached_pipeline = NULL;
     /* in-order binary tree */
     data->cached_in_order_bintree = NULL;
+    /* linear */
+    data->cached_linear = NULL;
     /* topo linear */
     data->cached_topolinear = NULL;
     /* topo chain */

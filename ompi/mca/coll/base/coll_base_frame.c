@@ -104,6 +104,9 @@ coll_base_comm_destruct(mca_coll_base_comm_t *data)
     if (data->cached_in_order_bintree) { /* destroy in order bintree if defined */
         ompi_coll_base_topo_destroy_tree (&data->cached_in_order_bintree);
     }
+    if (data->cached_linear) {
+        ompi_coll_base_topo_destroy_tree (&data->cached_linear);
+    }
     if (data->cached_topolinear) {
         ompi_coll_base_topo_destroy_tree (&data->cached_topolinear);
     }

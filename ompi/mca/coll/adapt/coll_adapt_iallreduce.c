@@ -1122,12 +1122,126 @@ int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf,
     
 }
 
+int mca_coll_adapt_iallreduce_intra_generic(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, ompi_coll_tree_t* tree, uint32_t segsize){
+    
+    int size = ompi_comm_size(comm);
+    int rank = ompi_comm_rank(comm);
+    
+    //set up request
+    ompi_request_t * temp_request = NULL;
+    temp_request = OBJ_NEW(ompi_request_t);
+    OMPI_REQUEST_INIT(temp_request, false);
+    temp_request->req_type = 0;
+    temp_request->req_free = adapt_request_free;
+    temp_request->req_status.MPI_SOURCE = 0;
+    temp_request->req_status.MPI_TAG = 0;
+    temp_request->req_status.MPI_ERROR = 0;
+    temp_request->req_status._cancelled = 0;
+    temp_request->req_status._ucount = 0;
+    *request = temp_request;
+    
+    /* Special case for size == 1 */
+    if (1 == size) {
+        if (MPI_IN_PLACE != sbuf) {
+            ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
+        }
+        OPAL_THREAD_LOCK(&ompi_request_lock);
+        ompi_request_complete(temp_request, 1);
+        OPAL_THREAD_UNLOCK(&ompi_request_lock);
+        
+        return MPI_SUCCESS;
+    }
+    
+    size_t typelng;
+    int segcount = count;
+    int split_block;
+    int split_phase;
+    int early_blockcount;
+    int late_blockcount;
+    int early_segcount;
+    int late_segcount;
+    int num_phases;
+    ptrdiff_t max_real_segsize;
+    ptrdiff_t lower_bound, extent, gap;
+    /* Determine segment count based on the suggested segment size */
+    ompi_datatype_type_size(dtype, &typelng);
+    COLL_BASE_COMPUTED_SEGCOUNT(segsize, typelng, segcount);
+    TEST("segsize %d, typelng %d, segcount %d, count %d\n", segsize, typelng, segcount, count);
+    
+    /* Special case for count less than size * segcount - use regular ring */
+    if (count < (size * segcount)) {
+        TEST("Segsize is too big\n");
+        if (count < size) {
+            TEST("Message is too small\n");
+            return mca_coll_adapt_iallreduce_intra_recursivedoubling(sbuf, rbuf, count, dtype, op, comm, request, module);
+        }
+        else {
+            TEST("Set num phases = 1\n");
+            COLL_BASE_COMPUTE_BLOCKCOUNT(count, size, split_block, early_segcount, late_segcount );
+            num_phases = 1;
+        }
+    }
+    else {
+        /* Determine the number of phases of the algorithm */
+        num_phases = count / (size * segcount);
+        if ((count % (size * segcount) >= size) &&
+            (count % (size * segcount) > ((size * segcount) / 2))) {
+            num_phases++;
+        }
+    }
+    
+    //for test
+    num_phases = 1;
+    
+    /* Determine the number of elements per block and corresponding
+     block sizes.
+     The blocks are divided into "early" and "late" ones:
+     blocks 0 .. (split_block - 1) are "early" and
+     blocks (split_block) .. (size - 1) are "late".
+     Early blocks are at most 1 element larger than the late ones.
+     Note, these blocks will be split into num_phases segments,
+     out of the largest one will have early_segcount elements.
+     */
+    
+    COLL_BASE_COMPUTE_BLOCKCOUNT(count, size, split_block, early_blockcount, late_blockcount );
+    COLL_BASE_COMPUTE_BLOCKCOUNT(early_blockcount, num_phases, split_phase, early_segcount, late_segcount);
+    
+    ompi_datatype_get_extent(dtype, &lower_bound, &extent);
+    max_real_segsize = opal_datatype_span(&dtype->super, early_segcount, &gap);
+    
+    TEST("num_phases = %d, max_real_segsize = %d, lower_bound = %d\n", num_phases, max_real_segsize, lower_bound);
+
+    int phase;
+    int block;
+    int block_count, phase_count;
+    ptrdiff_t phase_offset, block_offset;
+    //for the first block
+    for (phase=0; phase<num_phases; phase++) {
+        for (block=0; block<size; block++) {
+            block_count = ((block < split_block)? early_blockcount : late_blockcount);
+            block_offset = ((block < split_block) ? ((ptrdiff_t)block * (ptrdiff_t)early_blockcount) : ((ptrdiff_t)block * (ptrdiff_t)late_blockcount + split_block));
+            COLL_BASE_COMPUTE_BLOCKCOUNT(block_count, num_phases, split_phase, early_segcount, late_segcount);
+            phase_count = ((phase < split_phase) ? early_segcount : late_segcount);
+            phase_offset = ((phase < split_phase) ? ((ptrdiff_t)phase * (ptrdiff_t)early_segcount) : ((ptrdiff_t)phase * (ptrdiff_t)late_segcount + split_phase));
+            mca_coll_adapt_reduce_chain(((char*)sbuf) + (ptrdiff_t)(block_offset + phase_offset) * extent, ((char*)rbuf) + (ptrdiff_t)(block_offset + phase_offset) * extent, phase_count, dtype, op, block, comm, module);
+            ompi_request_t * temp = NULL;
+            mca_coll_adapt_ibcast_chain(((char*)rbuf) + (ptrdiff_t)(block_offset + phase_offset) * extent, phase_count, dtype, block, comm, &temp, module);
+            ompi_request_wait(&temp, MPI_STATUS_IGNORE);
+        }
+    }
+    ompi_request_complete(temp_request, 1);
+    
+    return MPI_SUCCESS;
+}
+
 int temp_count = 0;
 
 int mca_coll_adapt_iallreduce(void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
     TEST("[%" PRIx64 "] Adapt iallreduce %d, count %d, sbuf %f\n", gettid(), temp_count++, count, ((float *)sbuf)[0]);
-    ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_ring(comm, module);
-    //print_tree(tree, ompi_comm_rank(comm));
-    return mca_coll_adapt_iallreduce_intra_ring_segmented(sbuf, rbuf, count, dtype, op, comm, request, module, tree, 1024000);
-    
+//    ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_ring(comm, module);
+//    //print_tree(tree, ompi_comm_rank(comm));
+//    return mca_coll_adapt_iallreduce_intra_ring_segmented(sbuf, rbuf, count, dtype, op, comm, request, module, tree, 1024000);
+    int r = mca_coll_adapt_iallreduce_intra_generic(sbuf, rbuf, count, dtype, op, comm, request, module, NULL, 1024000);
+    return r;
 }
+
