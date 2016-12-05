@@ -37,24 +37,6 @@ OBJ_CLASS_INSTANCE(mca_coll_adapt_reduce_context_t, opal_free_list_item_t, mca_c
 
 OBJ_CLASS_INSTANCE(mca_coll_adapt_constant_reduce_context_t, opal_object_t, mca_coll_adapt_constant_reduce_context_constructor, mca_coll_adapt_constant_reduce_context_destructor);
 
-static void mca_coll_adapt_ireduce_context_constructor(mca_coll_adapt_ireduce_context_t *ireduce_context){
-}
-
-static void mca_coll_adapt_ireduce_context_destructor(mca_coll_adapt_ireduce_context_t *ireduce_context){
-    
-}
-
-static void mca_coll_adapt_constant_ireduce_context_constructor(mca_coll_adapt_constant_ireduce_context_t *con){
-}
-
-static void mca_coll_adapt_constant_ireduce_context_destructor(mca_coll_adapt_constant_ireduce_context_t *con){
-}
-
-
-OBJ_CLASS_INSTANCE(mca_coll_adapt_ireduce_context_t, opal_free_list_item_t, mca_coll_adapt_ireduce_context_constructor, mca_coll_adapt_ireduce_context_destructor);
-
-OBJ_CLASS_INSTANCE(mca_coll_adapt_constant_ireduce_context_t, opal_object_t, mca_coll_adapt_constant_ireduce_context_constructor, mca_coll_adapt_constant_ireduce_context_destructor);
-
 static void mca_coll_adapt_bcast_two_trees_context_constructor(mca_coll_adapt_bcast_two_trees_context_t *bcast_context){
 }
 

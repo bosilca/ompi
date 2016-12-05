@@ -312,8 +312,6 @@ int mca_coll_adapt_bcast_topoaware_chain(void *buff, int count, struct ompi_data
         coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module);
         coll_comm->cached_topochain_root = root;
     }
-    else {
-    }
     //print_tree(coll_comm->cached_topochain, ompi_comm_rank(comm));
     return mca_coll_adapt_bcast_generic(buff, count, datatype, root, comm, module, coll_comm->cached_topochain);
 }

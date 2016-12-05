@@ -352,65 +352,108 @@ int mca_coll_adapt_reduce(const void *sbuf, void *rbuf, int count, struct ompi_d
 }
 
 int mca_coll_adapt_reduce_binomial(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_bmtree(comm, root);
-    int r = mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, tree);
-    ompi_coll_base_topo_destroy_tree(&tree);
-    return r;
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_bmtree) && (coll_comm->cached_bmtree_root == root) ) ) {
+        if( coll_comm->cached_bmtree ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_bmtree) );
+        }
+        coll_comm->cached_bmtree = ompi_coll_base_topo_build_bmtree(comm, root);
+        coll_comm->cached_bmtree_root = root;
+    }
+    return mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, coll_comm->cached_bmtree);
 }
 
 int mca_coll_adapt_reduce_in_order_binomial(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_in_order_bmtree(comm, root);
-    int r =  mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, tree);
-    ompi_coll_base_topo_destroy_tree(&tree);
-    return r;
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_in_order_bmtree) && (coll_comm->cached_in_order_bmtree_root == root) ) ) {
+        if( coll_comm->cached_in_order_bmtree ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_in_order_bmtree) );
+        }
+        coll_comm->cached_in_order_bmtree = ompi_coll_base_topo_build_in_order_bmtree(comm, root);
+        coll_comm->cached_in_order_bmtree_root = root;
+    }
+    return mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, coll_comm->cached_in_order_bmtree);
 }
 
 int mca_coll_adapt_reduce_binary(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_tree(2, comm, root);
-    int r =  mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, tree);
-    ompi_coll_base_topo_destroy_tree(&tree);
-    return r;
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_bintree) && (coll_comm->cached_bintree_root == root) ) ) {
+        if( coll_comm->cached_bintree ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_bintree) );
+        }
+        coll_comm->cached_bintree = ompi_coll_base_topo_build_tree(2, comm, root);
+        coll_comm->cached_bintree_root = root;
+    }
+    return mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, coll_comm->cached_bintree);
 }
 
-int t_count = 0;
 
 int mca_coll_adapt_reduce_pipeline(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module){
-    
-        TEST("Adapt reduce pipeline %d\n", t_count++);
-    
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_chain(1, comm, root);
-    int r =  mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, tree);
-    ompi_coll_base_topo_destroy_tree(&tree);
-    return r;
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_pipeline) && (coll_comm->cached_pipeline_root == root) ) ) {
+        if( coll_comm->cached_pipeline ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_pipeline) );
+        }
+        coll_comm->cached_pipeline = ompi_coll_base_topo_build_chain(1, comm, root);
+        coll_comm->cached_pipeline_root = root;
+    }
+    return mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, coll_comm->cached_pipeline);
 }
 
 int mca_coll_adapt_reduce_chain(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_chain(4, comm, root);
-    int r =  mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, tree);
-    ompi_coll_base_topo_destroy_tree(&tree);
-    return r;
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_chain) && (coll_comm->cached_chain_root == root) ) ) {
+        if( coll_comm->cached_chain ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_chain) );
+        }
+        coll_comm->cached_chain = ompi_coll_base_topo_build_chain(4, comm, root);
+        coll_comm->cached_chain_root = root;
+    }
+    return mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, coll_comm->cached_chain);
 }
 
 int mca_coll_adapt_reduce_linear(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module){
-    //TODO: has problem when comm_size = 2
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_tree(ompi_comm_size(comm) - 1, comm, root);
-    int r =  mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, tree);
-    ompi_coll_base_topo_destroy_tree(&tree);
-    return r;
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_linear) && (coll_comm->cached_linear_root == root) ) ) {
+        if( coll_comm->cached_linear ) { /* destroy previous tree if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_linear) );
+        }
+        int fanout = ompi_comm_size(comm) - 1;
+        ompi_coll_tree_t * tree;
+        if (fanout > 1) {
+            tree = ompi_coll_base_topo_build_tree(ompi_comm_size(comm) - 1, comm, root);
+        }
+        else{
+            tree = ompi_coll_base_topo_build_chain(1, comm, root);
+        }
+        coll_comm->cached_linear = tree;
+        coll_comm->cached_linear_root = root;
+    }
+    return mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, coll_comm->cached_linear);
 }
 
 int mca_coll_adapt_reduce_topoaware_linear(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_topoaware_linear(comm, root, module);
-    int r =  mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, tree);
-    ompi_coll_base_topo_destroy_tree(&tree);
-    return r;
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_topolinear) && (coll_comm->cached_topolinear_root == root) ) ) {
+        if( coll_comm->cached_topolinear ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topolinear) );
+        }
+        coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module);
+        coll_comm->cached_topolinear_root = root;
+    }
+    return mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, coll_comm->cached_topolinear);
 }
 
 int mca_coll_adapt_reduce_topoaware_chain(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module){
-    ompi_coll_tree_t * tree = ompi_coll_base_topo_build_topoaware_chain(comm, root, module);
-    int r =  mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, tree);
-    ompi_coll_base_topo_destroy_tree(&tree);
-    return r;
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_topochain) && (coll_comm->cached_topochain_root == root) ) ) {
+        if( coll_comm->cached_topochain ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topochain) );
+        }
+        coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module);
+        coll_comm->cached_topochain_root = root;
+    }
+    return mca_coll_adapt_reduce_generic(sbuf, rbuf, count, dtype, op, root, comm, module, coll_comm->cached_topochain);
 }
 
 
