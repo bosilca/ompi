@@ -697,7 +697,6 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
         
     }
     
-    
     return MPI_SUCCESS;
 }
 
