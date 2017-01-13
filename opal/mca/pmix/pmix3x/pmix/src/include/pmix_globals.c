@@ -41,18 +41,6 @@
 #include "src/class/pmix_list.h"
 
 
-pmix_globals_t pmix_globals = {
-    .init_cntr = 0,
-    .pindex = 0,
-    .evbase = NULL,
-    .debug_output = -1,
-    .server = false,
-    .connected = false,
-    .cache_local = NULL,
-    .cache_remote = NULL
-};
-
-
 void pmix_globals_init(void)
 {
     memset(&pmix_globals.myid, 0, sizeof(pmix_proc_t));
@@ -85,8 +73,21 @@ static void nscon(pmix_nspace_t *p)
 }
 static void nsdes(pmix_nspace_t *p)
 {
+    uint64_t key;
+    pmix_object_t *obj;
+
     PMIX_LIST_DESTRUCT(&p->nodes);
+    PMIX_HASH_TABLE_FOREACH(key, uint64, obj, &p->internal) {
+        if (NULL != obj) {
+            PMIX_RELEASE(obj);
+        }
+    }
     PMIX_DESTRUCT(&p->internal);
+    PMIX_HASH_TABLE_FOREACH(key, uint64, obj, &p->modex) {
+        if (NULL != obj) {
+            PMIX_RELEASE(obj);
+        }
+    }
     PMIX_DESTRUCT(&p->modex);
     if (NULL != p->server) {
         PMIX_RELEASE(p->server);

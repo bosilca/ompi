@@ -55,7 +55,6 @@
 #include "src/util/output.h"
 #include "src/util/pmix_environ.h"
 #include "src/usock/usock.h"
-#include "src/sec/pmix_sec.h"
 
 #include "pmix_server_ops.h"
 
@@ -1189,8 +1188,8 @@ void pmix_server_deregister_events(pmix_peer_t *peer,
     /* unpack the number of codes */
     cnt=1;
     if (PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, &ncodes, &cnt, PMIX_SIZE))) {
-        PMIX_ERROR_LOG(rc);
-        return;
+        /* it is okay if there aren't any - equivalent to a wildcard */
+        ncodes = 0;
     }
     /* unpack the array of codes */
     if (0 < ncodes) {
@@ -1583,11 +1582,23 @@ static void pccon(pmix_pending_connection_t *p)
     memset(p->nspace, 0, PMIX_MAX_NSLEN+1);
     p->info = NULL;
     p->ninfo = 0;
+    p->bfrop = NULL;
+    p->psec = NULL;
+    p->cred = NULL;
 }
 static void pcdes(pmix_pending_connection_t *p)
 {
     if (NULL != p->info) {
         PMIX_INFO_FREE(p->info, p->ninfo);
+    }
+    if (NULL != p->bfrop) {
+        free(p->bfrop);
+    }
+    if (NULL != p->psec) {
+        free(p->psec);
+    }
+    if (NULL != p->cred) {
+        free(p->cred);
     }
 }
 PMIX_CLASS_INSTANCE(pmix_pending_connection_t,

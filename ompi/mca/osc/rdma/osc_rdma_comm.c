@@ -301,10 +301,10 @@ static inline int ompi_osc_rdma_master (ompi_osc_rdma_sync_t *sync, void *local_
         }
 
         /* ignore failure here */
-        (void) ompi_datatype_get_extent (local_datatype, &lb, &extent);
+        (void) ompi_datatype_get_true_extent (local_datatype, &lb, &extent);
         local_address = (void *)((intptr_t) local_address + lb);
 
-        (void) ompi_datatype_get_extent (remote_datatype, &lb, &extent);
+        (void) ompi_datatype_get_true_extent (remote_datatype, &lb, &extent);
         remote_address += lb;
 
         OSC_RDMA_VERBOSE(MCA_BASE_VERBOSE_TRACE, "performing rdma on contiguous region. local: %p, "
@@ -732,7 +732,7 @@ static int ompi_osc_rdma_get_contig (ompi_osc_rdma_sync_t *sync, ompi_osc_rdma_p
             }
         } else {
             OSC_RDMA_VERBOSE(MCA_BASE_VERBOSE_TRACE, "using internal buffer %p in fragment %p for get of size %lu bytes, source address 0x%lx",
-                             ptr, (void *) frag, aligned_len, (unsigned long) aligned_source_base);
+                             ptr, (void *) frag, (unsigned long) aligned_len, (unsigned long) aligned_source_base);
             local_handle = frag->handle;
         }
     }
