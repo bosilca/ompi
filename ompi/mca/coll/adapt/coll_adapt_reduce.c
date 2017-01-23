@@ -13,7 +13,7 @@
 
 #define SEND_NUM 2    //send how many fragments at once
 #define RECV_NUM 3    //receive how many fragments at once
-#define SEG_SIZE 163740   //size of a segment
+#define SEG_SIZE 131072   //size of a segment
 #define FREE_LIST_NUM_CONTEXT_LIST 10    //The start size of the context free list
 #define FREE_LIST_MAX_CONTEXT_LIST 10000  //The max size of the context free list
 #define FREE_LIST_INC_CONTEXT_LIST 10    //The incresment of the context free list
@@ -347,7 +347,7 @@ int mca_coll_adapt_reduce(const void *sbuf, void *rbuf, int count, struct ompi_d
         return MPI_SUCCESS;
     }
     else {
-        return mca_coll_adapt_reduce_pipeline(sbuf, rbuf, count, dtype, op, root, comm, module);
+        return mca_coll_adapt_reduce_topoaware_chain(sbuf, rbuf, count, dtype, op, root, comm, module);
     }
 }
 

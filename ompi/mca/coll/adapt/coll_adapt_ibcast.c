@@ -78,7 +78,6 @@ static int send_cb(ompi_request_t *req)
         if (context->con->num_segs !=0) {
             free(context->con->recv_array);
         }
-        ompi_coll_base_topo_destroy_tree(&(context->con->tree));
         OBJ_RELEASE(context->con->mutex);
         OBJ_RELEASE(context->con);
         OBJ_RELEASE(context->con);
@@ -180,7 +179,6 @@ static int recv_cb(ompi_request_t *req){
         if (context->con->num_segs !=0) {
             free(context->con->recv_array);
         }
-        ompi_coll_base_topo_destroy_tree(&(context->con->tree));
         OBJ_RELEASE(context->con->mutex);
         OBJ_RELEASE(context->con);
         OBJ_RELEASE(context->con);

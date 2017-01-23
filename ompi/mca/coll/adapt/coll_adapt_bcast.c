@@ -15,7 +15,7 @@
 
 #define SEND_NUM 2    //send how many fragments at once
 #define RECV_NUM 3    //receive how many fragments at once
-#define SEG_SIZE 163740   //size of a segment
+#define SEG_SIZE 32768   //size of a segment
 #define FREE_LIST_NUM 10    //The start size of the free list
 #define FREE_LIST_MAX 10000  //The max size of the free list
 #define FREE_LIST_INC 10    //The incresment of the free list
@@ -78,7 +78,6 @@ static int send_cb(ompi_request_t *req)
         if (context->con->num_segs !=0) {
             free(context->con->recv_array);
         }
-        ompi_coll_base_topo_destroy_tree(&(context->con->tree));
         OBJ_RELEASE(context->con->mutex);
         OBJ_RELEASE(context->con);
         OBJ_RELEASE(context->con);
@@ -180,7 +179,6 @@ static int recv_cb(ompi_request_t *req){
         if (context->con->num_segs !=0) {
             free(context->con->recv_array);
         }
-        ompi_coll_base_topo_destroy_tree(&(context->con->tree));
         OBJ_RELEASE(context->con->mutex);
         OBJ_RELEASE(context->con);
         OBJ_RELEASE(context->con);
@@ -202,7 +200,7 @@ int mca_coll_adapt_bcast(void *buff, int count, struct ompi_datatype_t *datatype
         return MPI_SUCCESS;
     }
     else {
-        return mca_coll_adapt_bcast_binomial(buff, count, datatype, root, comm, module);
+        return mca_coll_adapt_bcast_topoaware_chain(buff, count, datatype, root, comm, module);
     }
 }
 
@@ -318,6 +316,7 @@ int mca_coll_adapt_bcast_topoaware_chain(void *buff, int count, struct ompi_data
 
 
 int mca_coll_adapt_bcast_generic(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, ompi_coll_tree_t* tree){
+
     int i, j;       //temp variable for iteration
     int size;       //size of the communicator
     int rank;       //rank of this node
@@ -402,7 +401,7 @@ int mca_coll_adapt_bcast_generic(void *buff, int count, struct ompi_datatype_t *
     con->request = temp_request;
     con->tree = tree;
     
-    TEST("[%d, %" PRIx64 "]: Ibcast, root %d\n", rank, gettid(), root);
+    TEST("[%d, %" PRIx64 "]: Bcast, root %d\n", rank, gettid(), root);
     TEST("[%d, %" PRIx64 "]: con->mutex = %p, num_children = %d, num_segs = %d, real_seg_size = %d, seg_count = %d, tree_adreess = %p\n", rank, gettid(), (void *)con->mutex, tree->tree_nextsize, num_segs, (int)real_seg_size, seg_count, (void *)con->tree);
     
     OPAL_THREAD_LOCK(mutex);
