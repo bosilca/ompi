@@ -12,14 +12,18 @@
 #include "opal/sys/atomic.h"                //atomic
 #include "ompi/mca/pml/ob1/pml_ob1.h"       //dump
 
+#include <math.h>
 
 #define SEND_NUM 2    //send how many fragments at once
 #define RECV_NUM 3    //receive how many fragments at once
-#define SEG_SIZE 32768   //size of a segment
+#define SEG_SIZE 2048   //size of a segment
 #define FREE_LIST_NUM 10    //The start size of the free list
 #define FREE_LIST_MAX 10000  //The max size of the free list
 #define FREE_LIST_INC 10    //The incresment of the free list
 #define TEST printfno
+
+
+int last_size; //for test
 
 //send call back
 static int send_cb(ompi_request_t *req)
@@ -200,7 +204,7 @@ int mca_coll_adapt_bcast(void *buff, int count, struct ompi_datatype_t *datatype
         return MPI_SUCCESS;
     }
     else {
-        return mca_coll_adapt_bcast_topoaware_chain(buff, count, datatype, root, comm, module);
+        return mca_coll_adapt_bcast_pipeline(buff, count, datatype, root, comm, module);
     }
 }
 
@@ -362,9 +366,46 @@ int mca_coll_adapt_bcast_generic(void *buff, int count, struct ompi_datatype_t *
     //set up mutex
     mutex = OBJ_NEW(opal_mutex_t);
     
-    seg_size = SEG_SIZE;
     size = ompi_comm_size(comm);
     rank = ompi_comm_rank(comm);
+    
+//    ompi_datatype_type_size(datatype, &type_size);
+//    double min_segsize = DBL_MAX;
+//    size_t seg_sizes[9];
+//    double bandwidth[9];
+//    seg_sizes[0] = 2048;    //Bytes
+//    bandwidth[0] = 1735.22; //MBPS
+//    seg_sizes[1] = 4096;
+//    bandwidth[1] = 2887.28;
+//    seg_sizes[2] = 8192;
+//    bandwidth[2] = 4268.57;
+//    seg_sizes[3] = 16384;
+//    bandwidth[3] = 4865.03;
+//    seg_sizes[4] = 32768;
+//    bandwidth[4] = 6931.08;
+//    seg_sizes[5] = 65536;
+//    bandwidth[5] = 8818.56;
+//    seg_sizes[6] = 131072;
+//    bandwidth[6] = 10204.29;
+//    seg_sizes[7] = 262144;
+//    bandwidth[7] = 11075.77;
+//    seg_sizes[8] = 524288;
+//    bandwidth[8] = 11514.60;
+//    double latency = 0;
+//    seg_size = seg_sizes[0];
+//    for (i=0; i<9; i++) {
+//        latency = (size + ((count * type_size)/seg_sizes[i]) - 2) * (seg_sizes[i] / bandwidth[i]) * 1000000 / 8;
+//        if (latency < min_segsize) {
+//            min_segsize = latency;
+//            seg_size = seg_sizes[i];
+//        }
+//    }
+//    if (last_size != count * type_size) {
+//        printf("m = %d, p = %d, seg_size = %d\n", count * type_size, size, seg_size);
+//        last_size = count * type_size;
+//    }
+    seg_size = SEG_SIZE;
+
     
     //Determine number of elements sent per operation
     ompi_datatype_type_size(datatype, &type_size);

@@ -137,6 +137,7 @@ int ompi_coll_base_bcast_intra_pipeline(BCAST_ARGS, uint32_t segsize);
 int ompi_coll_base_bcast_intra_binomial(BCAST_ARGS, uint32_t segsize);
 int ompi_coll_base_bcast_intra_bintree(BCAST_ARGS, uint32_t segsize);
 int ompi_coll_base_bcast_intra_split_bintree(BCAST_ARGS, uint32_t segsize);
+int ompi_coll_base_bcast_intra_topoaware_chain(BCAST_ARGS, uint32_t segsize);
 
 /* Exscan */
 

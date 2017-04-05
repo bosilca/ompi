@@ -26,6 +26,7 @@ struct mca_coll_adapt_constant_bcast_context_s {
     int num_recv_fini;  //store how many segs is finish recving
     int num_sent_segs;  //number of sent segments
     ompi_coll_tree_t * tree;
+    int ibcast_tag;
 };
 
 typedef struct mca_coll_adapt_constant_bcast_context_s mca_coll_adapt_constant_bcast_context_t;
@@ -78,6 +79,7 @@ struct mca_coll_adapt_constant_reduce_context_s {
     char * rbuf;    //inputed rbuf
     int root;
     int distance;   //address of inbuf->buff to address of inbuf
+    int ireduce_tag;
 };
 
 typedef struct mca_coll_adapt_constant_reduce_context_s mca_coll_adapt_constant_reduce_context_t;
@@ -99,56 +101,6 @@ struct mca_coll_adapt_reduce_context_s {
 typedef struct mca_coll_adapt_reduce_context_s mca_coll_adapt_reduce_context_t;
 
 OBJ_CLASS_DECLARATION(mca_coll_adapt_reduce_context_t);
-
-
-/* ireduce constant context in ireduce context */
-struct mca_coll_adapt_constant_ireduce_context_s {
-    opal_object_t  super;
-    size_t count;
-    size_t seg_count;
-    ompi_datatype_t * datatype;
-    ompi_communicator_t * comm;
-    int segment_increment;      //increment of each segment
-    int num_segs;
-    int rank;      //change, unused
-    opal_free_list_t * context_list;
-    int num_recv_segs; //store the length of the fragment array, how many fragments are recevied
-    int num_sent_segs;  //number of sent segments
-    int* next_recv_segs;  //next seg need to be received for every children
-    opal_mutex_t * mutex_recv_list;     //use to lock recv list
-    opal_mutex_t * mutex_num_recv_segs;     //use to lock num_recv_segs
-    opal_mutex_t ** mutex_op_list;   //use to lock each segment when do the reduce op
-    ompi_request_t * request;
-    ompi_op_t * op;  //reduce operation
-    ompi_coll_tree_t * tree;
-    char * accumbuf;   //accumulate buff
-    opal_free_list_t *inbuf_list;
-    opal_list_t *recv_list;    //a list to store the segments which are received and not yet be sent
-    ptrdiff_t lower_bound;
-    int ongoing_send;   //how many send is posted but not finished
-    char * accumbuf_free;   //use to free the accumbuf
-    
-};
-
-typedef struct mca_coll_adapt_constant_ireduce_context_s mca_coll_adapt_constant_ireduce_context_t;
-
-OBJ_CLASS_DECLARATION(mca_coll_adapt_constant_ireduce_context_t);
-
-
-//ireduce context
-struct mca_coll_adapt_ireduce_context_s {
-    opal_free_list_item_t super;
-    char *buff;
-    int frag_id;
-    int child_id;
-    int peer;
-    mca_coll_adapt_constant_ireduce_context_t * con;
-    mca_coll_adapt_inbuf_t *inbuf;  //store the incoming segmetn
-};
-
-typedef struct mca_coll_adapt_ireduce_context_s mca_coll_adapt_ireduce_context_t;
-
-OBJ_CLASS_DECLARATION(mca_coll_adapt_ireduce_context_t);
 
 /* bcast constant context in bcast context for two trees */
 struct mca_coll_adapt_constant_bcast_two_trees_context_s {
@@ -279,6 +231,41 @@ struct mca_coll_adapt_allreduce_ring_context_s {
 typedef struct mca_coll_adapt_allreduce_ring_context_s mca_coll_adapt_allreduce_ring_context_t;
 
 OBJ_CLASS_DECLARATION(mca_coll_adapt_allreduce_ring_context_t);
+
+/* allreduce constant context in allreduce generic context */
+struct mca_coll_adapt_constant_allreduce_generic_context_s {
+    opal_object_t  super;
+    ompi_datatype_t * dtype;
+    ompi_op_t * op;  //reduce operation
+    ompi_communicator_t * comm;
+    mca_coll_base_module_t *module;
+    ompi_request_t * request;
+    int rank;
+    int num_blocks;
+    opal_mutex_t * mutex_num_finished;
+    int num_finished;
+    opal_free_list_t * context_list;
+};
+
+typedef struct mca_coll_adapt_constant_allreduce_generic_context_s mca_coll_adapt_constant_allreduce_generic_context_t;
+
+OBJ_CLASS_DECLARATION(mca_coll_adapt_constant_allreduce_generic_context_t);
+
+
+//allreduce context
+struct mca_coll_adapt_allreduce_generic_context_s {
+    opal_free_list_item_t super;
+    char *sbuf;
+    char *rbuf;
+    int count;
+    int root;
+    int tag;
+    mca_coll_adapt_constant_allreduce_generic_context_t * con;
+};
+
+typedef struct mca_coll_adapt_allreduce_generic_context_s mca_coll_adapt_allreduce_generic_context_t;
+
+OBJ_CLASS_DECLARATION(mca_coll_adapt_allreduce_generic_context_t);
 
 
 /* alltoallv constant context in alltoallv context */

@@ -125,9 +125,6 @@ static int send_cb(ompi_request_t *req){
         int i;
         ompi_request_t *temp_req = context->con->request;
         opal_free_list_t * temp = context->con->context_list;
-        OBJ_RELEASE(context->con);
-        TEST("return context_list\n");
-        opal_free_list_return(temp, (opal_free_list_item_t*)context);
         if (context->con->accumbuf != NULL) {
             if (context->con->rank != context->con->root ) {
                 for (i=0; i<context->con->num_segs; i++) {
@@ -148,8 +145,11 @@ static int send_cb(ompi_request_t *req){
             OBJ_RELEASE(context->con->inbuf_list);
             free(context->con->next_recv_segs);
         }
-        OBJ_RELEASE(context->con->context_list);
         OBJ_RELEASE(context->con);
+        OBJ_RELEASE(context->con);
+        TEST("return context_list\n");
+        opal_free_list_return(temp, (opal_free_list_item_t*)context);
+        OBJ_RELEASE(temp);
         ompi_request_complete(temp_req, 1);
     }
     else{
@@ -299,9 +299,6 @@ static int recv_cb(ompi_request_t *req){
             opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
         }
         opal_free_list_t * temp = context->con->context_list;
-        OBJ_RELEASE(context->con);
-        TEST("return context_list\n");
-        opal_free_list_return(temp, (opal_free_list_item_t*)context);
         if (context->con->accumbuf != NULL) {
             if (context->con->rank != context->con->root) {
                 for (i=0; i<context->con->num_segs; i++) {
@@ -322,8 +319,11 @@ static int recv_cb(ompi_request_t *req){
             OBJ_RELEASE(context->con->inbuf_list);
             free(context->con->next_recv_segs);
         }
-        OBJ_RELEASE(context->con->context_list);
         OBJ_RELEASE(context->con);
+        OBJ_RELEASE(context->con);
+        TEST("return context_list\n");
+        opal_free_list_return(temp, (opal_free_list_item_t*)context);
+        OBJ_RELEASE(temp);
         ompi_request_complete(temp_req, 1);
     }
     else{

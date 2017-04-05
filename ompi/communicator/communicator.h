@@ -169,6 +169,14 @@ struct ompi_communicator_t {
 
     /* Collectives module interface and data */
     mca_coll_base_comm_coll_t c_coll;
+    
+    /* For adapt module, handle concurrent non blocking collective
+       Count number of non blocking issued for tag
+       | 16 bits          | 16 bits    |
+       | collective count | segment id | */
+    int c_ibcast_tag;
+    int c_ireduce_tag;
+    int c_iallreduce_tag;
 };
 typedef struct ompi_communicator_t ompi_communicator_t;
 
