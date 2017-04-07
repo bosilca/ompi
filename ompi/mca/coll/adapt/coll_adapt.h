@@ -57,6 +57,9 @@ typedef struct mca_coll_adapt_component_t {
     /** MCA parameter: Number of processes to use in the
         calculation of the "info" MCA parameter */
     int adapt_info_comm_size;
+    
+    /** MCA parameter: Output verbose level */
+    int adapt_output;
 
     /******* end of MCA params ********/
 
@@ -119,10 +122,17 @@ struct mca_coll_adapt_module_t {
 };
 OBJ_CLASS_DECLARATION(mca_coll_adapt_module_t);
 
+typedef struct mca_coll_adapt_algorithm_index_s {
+    int algorithm_index;
+    void *algorithm_func;
+}mca_coll_adapt_algorithm_index_t;
+
 /**
  * Global component instance
  */
 OMPI_MODULE_DECLSPEC extern mca_coll_adapt_component_t mca_coll_adapt_component;
+
+
 
 /*
  * coll module functions

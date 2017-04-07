@@ -13,13 +13,70 @@
 #include "ompi/mca/pml/ob1/pml_ob1.h"       //dump
 
 
-#define SEND_NUM 2    //send how many fragments at once
-#define RECV_NUM 3    //receive how many fragments at once
-#define SEG_SIZE 163740   //size of a segment
+//#define SEND_NUM 2    //send how many fragments at once
+//#define RECV_NUM 3    //receive how many fragments at once
+//#define SEG_SIZE 163740   //size of a segment
 #define FREE_LIST_NUM 10    //The start size of the free list
 #define FREE_LIST_MAX 10000  //The max size of the free list
 #define FREE_LIST_INC 10    //The incresment of the free list
 #define TEST printfno
+
+/* bcast algorithm variables */
+static int coll_adapt_ibcast_algorithm = 0;
+static int coll_adapt_ibcast_segment_size = 163740;
+static int coll_adapt_ibcast_max_send_requests = 2;
+static int coll_adapt_ibcast_max_recv_requests = 3;
+
+typedef int (*mca_coll_adapt_ibcast_fn_t)(
+    void *buff, 
+    int count, 
+    struct ompi_datatype_t *datatype, 
+    int root, 
+    struct ompi_communicator_t *comm, 
+    ompi_request_t ** request, 
+    mca_coll_base_module_t *module, 
+    int ibcast_tag
+);
+    
+static mca_coll_adapt_algorithm_index_t mca_coll_adapt_ibcast_algorithm_index[] = {
+    {0, (void *)mca_coll_adapt_ibcast_tuned},
+    {1, (void *)mca_coll_adapt_ibcast_binomial}
+};
+
+int mca_coll_adapt_ibcast_check_forced_init (void)
+{
+    mca_base_component_t *c = &mca_coll_adapt_component.super.collm_version;
+    
+    mca_base_component_var_register(c, "bcast_algorithm",
+                                    "Algorithm of broadcast",
+                                    MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                    OPAL_INFO_LVL_5,
+                                    MCA_BASE_VAR_SCOPE_READONLY,
+                                    &coll_adapt_ibcast_algorithm);
+    
+    mca_base_component_var_register(c, "bcast_segment_size",
+                                    "Segment size in bytes used by default for bcast algorithms. Only has meaning if algorithm is forced and supports segmenting. 0 bytes means no segmentation.",
+                                    MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                    OPAL_INFO_LVL_5,
+                                    MCA_BASE_VAR_SCOPE_READONLY,
+                                    &coll_adapt_ibcast_segment_size);
+
+    mca_base_component_var_register(c, "bcast_max_send_requests",
+                                    "Maximum number of send requests",
+                                    MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                    OPAL_INFO_LVL_5,
+                                    MCA_BASE_VAR_SCOPE_READONLY,
+                                    &coll_adapt_ibcast_max_send_requests);
+                                    
+    mca_base_component_var_register(c, "bcast_max_recv_requests",
+                                    "Maximum number of receive requests",
+                                    MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                    OPAL_INFO_LVL_5,
+                                    MCA_BASE_VAR_SCOPE_READONLY,
+                                    &coll_adapt_ibcast_max_recv_requests);
+    return MPI_SUCCESS;
+}
+
 
 //send call back
 static int send_cb(ompi_request_t *req)
@@ -109,7 +166,7 @@ static int recv_cb(ompi_request_t *req){
     int num_recv_segs_t = ++(context->con->num_recv_segs);
     context->con->recv_array[num_recv_segs_t-1] = context->frag_id;
     
-    int new_id = num_recv_segs_t + RECV_NUM - 1;
+    int new_id = num_recv_segs_t + coll_adapt_ibcast_max_recv_requests - 1;
     //receive new segment
     if (new_id < context->con->num_segs) {
         ompi_request_t *recv_req;
@@ -213,14 +270,37 @@ int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatyp
         return MPI_SUCCESS;
     }
     else {
+        int rank = ompi_comm_rank(comm);
+        if (rank == root) {
+            OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "ibcast root %d, algorithm %d, coll_adapt_ibcast_segment_size %d, coll_adapt_ibcast_max_send_requests %d, coll_adapt_ibcast_max_recv_requests %d\n", 
+            root, coll_adapt_ibcast_algorithm, coll_adapt_ibcast_segment_size, coll_adapt_ibcast_max_send_requests, coll_adapt_ibcast_max_recv_requests));
+        }
         int ibcast_tag = opal_atomic_add_32(&(comm->c_ibcast_tag), 1);
         ibcast_tag = ibcast_tag % 4096;
-        return mca_coll_adapt_ibcast_binomial(buff, count, datatype, root, comm, request, module, ibcast_tag);
+        mca_coll_adapt_ibcast_fn_t bcast_func = (mca_coll_adapt_ibcast_fn_t)mca_coll_adapt_ibcast_algorithm_index[coll_adapt_ibcast_algorithm].algorithm_func;
+        return bcast_func(buff, count, datatype, root, comm, request, module, ibcast_tag);
+        //return mca_coll_adapt_ibcast_binomial(buff, count, datatype, root, comm, request, module, ibcast_tag);
     }
 }
 
-//non-blocking broadcast using binomial tree with pipeline
+int mca_coll_adapt_ibcast_tuned(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
+    OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "tuned\n"));
+    mca_coll_base_comm_t *coll_comm = module->base_data;
+    if( !( (coll_comm->cached_bmtree) && (coll_comm->cached_bmtree_root == root) ) ) {
+        if( coll_comm->cached_bmtree ) { /* destroy previous binomial if defined */
+            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_bmtree) );
+        }
+        coll_comm->cached_bmtree = ompi_coll_base_topo_build_bmtree(comm, root);
+        coll_comm->cached_bmtree_root = root;
+    }
+    //print_tree(coll_comm->cached_bmtree, ompi_comm_rank(comm));
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bmtree, ibcast_tag);
+
+}
+
+/* Binomial tree with pipeline */
 int mca_coll_adapt_ibcast_binomial(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
+    OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "bino\n"));
     mca_coll_base_comm_t *coll_comm = module->base_data;
     if( !( (coll_comm->cached_bmtree) && (coll_comm->cached_bmtree_root == root) ) ) {
         if( coll_comm->cached_bmtree ) { /* destroy previous binomial if defined */
@@ -247,7 +327,7 @@ int mca_coll_adapt_ibcast_in_order_binomial(void *buff, int count, struct ompi_d
 }
 
 
-int mca_coll_adapt_ibcast_bininary(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
+int mca_coll_adapt_ibcast_binary(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
     mca_coll_base_comm_t *coll_comm = module->base_data;
     if( !( (coll_comm->cached_bintree) && (coll_comm->cached_bintree_root == root) ) ) {
         if( coll_comm->cached_bintree ) { /* destroy previous binomial if defined */
@@ -394,7 +474,7 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     //set up mutex
     mutex = OBJ_NEW(opal_mutex_t);
     
-    seg_size = SEG_SIZE;
+    seg_size = coll_adapt_ibcast_segment_size;
     size = ompi_comm_size(comm);
     rank = ompi_comm_rank(comm);
     
@@ -443,11 +523,11 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     //if root, send segment to every children.
     if (rank == root){
         //handle the situation when num_segs < SEND_NUM
-        if (num_segs <= SEND_NUM) {
+        if (num_segs <= coll_adapt_ibcast_max_send_requests) {
             min = num_segs;
         }
         else{
-            min = SEND_NUM;
+            min = coll_adapt_ibcast_max_send_requests;
         }
         
         //set recv_array, root has already had all the segments
@@ -457,7 +537,7 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
         con->num_recv_segs = num_segs;
         //set send_array, has not sent any segments
         for (i = 0; i < tree->tree_nextsize; i++) {
-            send_array[i] = SEND_NUM;
+            send_array[i] = coll_adapt_ibcast_max_send_requests;
         }
         
         ompi_request_t *send_req;
@@ -492,11 +572,11 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     //if not root, receive data from parent in the tree.
     else{
         //handle the situation is num_segs < RECV_NUM
-        if (num_segs <= RECV_NUM) {
+        if (num_segs <= coll_adapt_ibcast_max_recv_requests) {
             min = num_segs;
         }
         else{
-            min = RECV_NUM;
+            min = coll_adapt_ibcast_max_recv_requests;
         }
         
         //set recv_array, recv_array is empty
@@ -545,7 +625,7 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
 
 int mca_coll_adapt_ibcast_two_trees_binary(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
     size_t type_size;                       //the size of a datatype
-    size_t seg_size = SEG_SIZE;            //the size of a segment
+    size_t seg_size = coll_adapt_ibcast_segment_size;            //the size of a segment
     int seg_count = count;      //number of datatype in a segment
     ompi_datatype_type_size(datatype, &type_size);
     COLL_BASE_COMPUTED_SEGCOUNT(seg_size, type_size, seg_count);
@@ -571,7 +651,7 @@ int mca_coll_adapt_ibcast_two_trees_binary(void *buff, int count, struct ompi_da
 
 int mca_coll_adapt_ibcast_two_trees_binomial(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
     size_t type_size;                       //the size of a datatype
-    size_t seg_size = SEG_SIZE;            //the size of a segment
+    size_t seg_size = coll_adapt_ibcast_segment_size;            //the size of a segment
     int seg_count = count;      //number of datatype in a segment
     ompi_datatype_type_size(datatype, &type_size);
     COLL_BASE_COMPUTED_SEGCOUNT(seg_size, type_size, seg_count);
@@ -597,7 +677,7 @@ int mca_coll_adapt_ibcast_two_trees_binomial(void *buff, int count, struct ompi_
 
 int mca_coll_adapt_ibcast_two_chains(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module){
     size_t type_size;                       //the size of a datatype
-    size_t seg_size = SEG_SIZE;            //the size of a segment
+    size_t seg_size = coll_adapt_ibcast_segment_size;            //the size of a segment
     int seg_count = count;      //number of datatype in a segment
     ompi_datatype_type_size(datatype, &type_size);
     COLL_BASE_COMPUTED_SEGCOUNT(seg_size, type_size, seg_count);
@@ -728,7 +808,7 @@ static int two_trees_recv_cb(ompi_request_t *req){
     int num_recv_segs_t = ++(context->con->num_recv_segs[context->tree]);
     context->con->recv_arrays[context->tree][num_recv_segs_t-1] = context->frag_id;
     
-    int new_position = num_recv_segs_t + RECV_NUM - 1;
+    int new_position = num_recv_segs_t + coll_adapt_ibcast_max_recv_requests - 1;
     //receive new segment
     if (new_position < context->con->num_segs[context->tree]) {
         ompi_request_t *recv_req;
@@ -912,7 +992,7 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
     //set up mutex
     mutex = OBJ_NEW(opal_mutex_t);
     
-    seg_size = SEG_SIZE;
+    seg_size = coll_adapt_ibcast_segment_size;
     size = ompi_comm_size(comm);
     rank = ompi_comm_rank(comm);
     
@@ -973,17 +1053,17 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
     //if root, send segment to the roots of two trees.
     if (rank == root){
         //handle the situation when num_segs < SEND_NUM
-        if (num_segs[0] < SEND_NUM) {
+        if (num_segs[0] < coll_adapt_ibcast_max_send_requests) {
             min[0] = num_segs[0];
         }
         else{
-            min[0] = SEND_NUM;
+            min[0] = coll_adapt_ibcast_max_send_requests;
         }
-        if (num_segs[1] < SEND_NUM) {
+        if (num_segs[1] < coll_adapt_ibcast_max_send_requests) {
             min[1] = num_segs[1];
         }
         else{
-            min[1] = SEND_NUM;
+            min[1] = coll_adapt_ibcast_max_send_requests;
         }
         
         //set recv_array and num_recv_segs, root has already had all the segments
@@ -1044,17 +1124,17 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
     //if not root, receive data from parent in the tree.
     else {
         //handle the situation when num_segs < RECV_NUM
-        if (num_segs[0] < RECV_NUM) {
+        if (num_segs[0] < coll_adapt_ibcast_max_recv_requests) {
             min[0] = num_segs[0];
         }
         else{
-            min[0] = RECV_NUM;
+            min[0] = coll_adapt_ibcast_max_recv_requests;
         }
-        if (num_segs[1] < RECV_NUM) {
+        if (num_segs[1] < coll_adapt_ibcast_max_recv_requests) {
             min[1] = num_segs[1];
         }
         else{
-            min[1] = RECV_NUM;
+            min[1] = coll_adapt_ibcast_max_recv_requests;
         }
         
         //set recv_array, recv_array is empty and num_recv_segs is 0

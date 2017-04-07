@@ -15,6 +15,7 @@
 #include "ompi/constants.h"
 #include "ompi/mca/coll/coll.h"
 #include "coll_adapt.h"
+#include "coll_adapt_algorithms.h"
 
 
 /*
@@ -22,7 +23,6 @@
  */
 const char *mca_coll_adapt_component_version_string =
     "Open MPI ADAPT collective MCA component version " OMPI_VERSION;
-
 
 /*
  * Local functions
@@ -97,6 +97,9 @@ mca_coll_adapt_component_t mca_coll_adapt_component = {
     /* (default) number of processes in coll_adapt_shared_mem_size
        information variable */
     4,
+    
+    /* (default) verbose level */
+    0,
 
     /* default values for non-MCA parameters */
     /* Not specifying values here gives us all 0's */
@@ -223,6 +226,16 @@ static int adapt_register(void)
                                            OPAL_INFO_LVL_9,
                                            MCA_BASE_VAR_SCOPE_READONLY,
                                            &cs->adapt_info_comm_size);
+   
+   int coll_adapt_verbose = 0;                                        
+   (void) mca_base_component_var_register(c, "verbose",
+                                          "Verbose level",
+                                          MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                          OPAL_INFO_LVL_9,
+                                          MCA_BASE_VAR_SCOPE_READONLY,
+                                          &coll_adapt_verbose);
+    cs->adapt_output = opal_output_open(NULL);
+    opal_output_set_verbosity(cs->adapt_output, coll_adapt_verbose);
 
     coll_adapt_shared_mem_used_data = (int)(4 * cs->adapt_control_size +
         (cs->adapt_comm_num_in_use_flags * cs->adapt_control_size) +
@@ -237,5 +250,8 @@ static int adapt_register(void)
                                            MCA_BASE_VAR_SCOPE_READONLY,
                                            &coll_adapt_shared_mem_used_data);
 
+    
+    mca_coll_adapt_ibcast_check_forced_init();
+    
     return adapt_verify_mca_variables();
 }
