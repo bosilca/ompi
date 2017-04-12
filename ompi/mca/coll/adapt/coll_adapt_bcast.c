@@ -18,7 +18,8 @@ int mca_coll_adapt_bcast(void *buff, int count, struct ompi_datatype_t *datatype
     }
     else {
         ompi_request_t * request;
-        mca_coll_adapt_ibcast(buff, count, datatype, root, comm, &request, module);
+        int retval = mca_coll_adapt_ibcast(buff, count, datatype, root, comm, &request, module);
         ompi_request_wait(&request, MPI_STATUS_IGNORE);
+        return retval;
     }
 }

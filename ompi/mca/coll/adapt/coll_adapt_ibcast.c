@@ -12,16 +12,9 @@
 #include "opal/sys/atomic.h"                //atomic
 #include "ompi/mca/pml/ob1/pml_ob1.h"       //dump
 
-
-//#define SEND_NUM 2    //send how many fragments at once
-//#define RECV_NUM 3    //receive how many fragments at once
-//#define SEG_SIZE 163740   //size of a segment
-//#define FREE_LIST_NUM 10    //The start size of the free list
-//#define FREE_LIST_MAX 10000  //The max size of the free list
-//#define FREE_LIST_INC 10    //The incresment of the free list
 #define TEST printfno
 
-/* bcast algorithm variables */
+/* Bcast algorithm variables */
 static int coll_adapt_ibcast_algorithm = 0;
 static int coll_adapt_ibcast_segment_size = 163740;
 static int coll_adapt_ibcast_max_send_requests = 2;
@@ -81,10 +74,12 @@ int mca_coll_adapt_ibcast_init(void)
 
 int mca_coll_adapt_ibcast_fini(void)
 {
-    OBJ_RELEASE(coll_adapt_ibcast_context_free_list);
-    coll_adapt_ibcast_context_free_list = NULL;
-    coll_adapt_ibcast_context_free_list_enabled = 0;
-    
+    if (NULL != coll_adapt_ibcast_context_free_list) {
+        OBJ_RELEASE(coll_adapt_ibcast_context_free_list);
+        coll_adapt_ibcast_context_free_list = NULL;
+        coll_adapt_ibcast_context_free_list_enabled = 0;
+        OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "bcast fini\n"));
+    }
 }
 
 //send call back
@@ -98,7 +93,7 @@ static int send_cb(ompi_request_t *req)
     
     int err;
     
-    TEST("[%d, %" PRIx64 "]: Send(cb): segment %d to %d at buff %p root %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->con->root);
+    OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d, %" PRIx64 "]: Send(cb): segment %d to %d at buff %p root %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->con->root));
 
     OPAL_THREAD_LOCK(context->con->mutex);
     int sent_id = context->con->send_array[context->child_id];
@@ -118,7 +113,7 @@ static int send_cb(ompi_request_t *req)
             send_count = send_context->con->count - new_id * send_context->con->seg_count;
         }
         ++(send_context->con->send_array[send_context->child_id]);
-        TEST("[%d]: Send(start in send cb): segment %d to %d at buff %p send_count %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (send_context->con->ibcast_tag << 16) + new_id);
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Send(start in send cb): segment %d to %d at buff %p send_count %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (send_context->con->ibcast_tag << 16) + new_id));
         err = MCA_PML_CALL(isend(send_context->buff, send_count, send_context->con->datatype, send_context->peer, (send_context->con->ibcast_tag << 16) + new_id, MCA_PML_BASE_SEND_SYNCHRONOUS, send_context->con->comm, &send_req));
         //invoke send call back
         OPAL_THREAD_UNLOCK(context->con->mutex);
@@ -134,7 +129,7 @@ static int send_cb(ompi_request_t *req)
     if ((rank == context->con->root && num_sent == context->con->tree->tree_nextsize * context->con->num_segs) ||
         (context->con->tree->tree_nextsize > 0 && rank != context->con->root && num_sent == context->con->tree->tree_nextsize * context->con->num_segs && num_recv_fini_t == context->con->num_segs) ||
         (context->con->tree->tree_nextsize == 0 && num_recv_fini_t == context->con->num_segs)) {
-        TEST("[%d]: Singal in send\n", ompi_comm_rank(context->con->comm));
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in send\n", ompi_comm_rank(context->con->comm)));
         OPAL_THREAD_UNLOCK(mutex_temp);
         ompi_request_t *temp_req = context->con->request;
         if (context->con->tree->tree_nextsize != 0) {
@@ -166,7 +161,7 @@ static int recv_cb(ompi_request_t *req){
     
     int err, i;
     
-    TEST("[%d, %" PRIx64 "]: Recv(cb): segment %d from %d at buff %p root %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->con->root);
+    OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d, %" PRIx64 "]: Recv(cb): segment %d from %d at buff %p root %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->con->root));
     
     //store the frag_id to seg array
     OPAL_THREAD_LOCK(context->con->mutex);
@@ -215,7 +210,7 @@ static int recv_cb(ompi_request_t *req){
             send_context->con = context->con;
             OBJ_RETAIN(context->con);
             ++(send_context->con->send_array[i]);
-            TEST("[%d]: Send(start in recv cb): segment %d to %d at buff %p send_count %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (send_context->con->ibcast_tag << 16) + send_context->frag_id);
+            OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Send(start in recv cb): segment %d to %d at buff %p send_count %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (send_context->con->ibcast_tag << 16) + send_context->frag_id));
             err = MCA_PML_CALL(isend(send_context->buff, send_count, send_context->con->datatype, send_context->peer, (send_context->con->ibcast_tag << 16) + send_context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, send_context->con->comm, &send_req));
             //invoke send call back
             OPAL_THREAD_UNLOCK(context->con->mutex);
@@ -233,7 +228,7 @@ static int recv_cb(ompi_request_t *req){
     if ((rank == context->con->root && num_sent == context->con->tree->tree_nextsize * context->con->num_segs) ||
         (context->con->tree->tree_nextsize > 0 && rank != context->con->root && num_sent == context->con->tree->tree_nextsize * context->con->num_segs && num_recv_fini_t == context->con->num_segs) ||
         (context->con->tree->tree_nextsize == 0 && num_recv_fini_t == context->con->num_segs)) {
-        TEST("[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm));
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm)));
         OPAL_THREAD_UNLOCK(mutex_temp);
         ompi_request_t *temp_req = context->con->request;
         if (context->con->tree->tree_nextsize != 0) {

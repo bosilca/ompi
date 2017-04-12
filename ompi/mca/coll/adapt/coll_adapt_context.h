@@ -58,7 +58,6 @@ struct mca_coll_adapt_constant_reduce_context_s {
     int num_segs;
     ompi_request_t * request;
     int rank;      //change, unused
-    opal_free_list_t * context_list;
     int32_t num_recv_segs; //store the length of the fragment array, how many fragments are recevied
     int32_t num_sent_segs;  //number of sent segments
     int32_t* next_recv_segs;  //next seg need to be received for every children
