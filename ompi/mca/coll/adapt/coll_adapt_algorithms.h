@@ -1,6 +1,7 @@
 #include "ompi/mca/coll/coll.h"
 #include "ompi/mca/coll/base/coll_base_topo.h"  //ompi_coll_tree_t
 #include "ompi/mca/coll/base/coll_base_functions.h" //COLL_BASE_COMPUTE_BLOCKCOUNT
+#include <math.h>		
 
 /* Bcast */
 int mca_coll_adapt_ibcast_check_forced_init(void);
@@ -9,7 +10,7 @@ int mca_coll_adapt_bcast(void *buff, int count, struct ompi_datatype_t *datatype
 
 int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module);
 
-int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, ompi_coll_tree_t* tree, int ibcast_tag);
+int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, ompi_coll_tree_t* tree, size_t seg_size, int ibcast_tag);
 int mca_coll_adapt_ibcast_tuned(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag);
 int mca_coll_adapt_ibcast_binomial(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag);
 int mca_coll_adapt_ibcast_in_order_binomial(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag);
