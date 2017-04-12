@@ -14,9 +14,11 @@
 
 #define TEST printfno
 
+static size_t last_size; //for test
+
 /* Bcast algorithm variables */
 static int coll_adapt_ibcast_algorithm = 0;
-static int coll_adapt_ibcast_segment_size = 163740;
+static size_t coll_adapt_ibcast_segment_size = 0;
 static int coll_adapt_ibcast_max_send_requests = 2;
 static int coll_adapt_ibcast_max_recv_requests = 3;
 static opal_free_list_t *coll_adapt_ibcast_context_free_list = NULL;
@@ -35,7 +37,14 @@ typedef int (*mca_coll_adapt_ibcast_fn_t)(
     
 static mca_coll_adapt_algorithm_index_t mca_coll_adapt_ibcast_algorithm_index[] = {
     {0, (void *)mca_coll_adapt_ibcast_tuned},
-    {1, (void *)mca_coll_adapt_ibcast_binomial}
+    {1, (void *)mca_coll_adapt_ibcast_binomial},
+    {2, (void *)mca_coll_adapt_ibcast_in_order_binomial},
+    {3, (void *)mca_coll_adapt_ibcast_binary},
+    {4, (void *)mca_coll_adapt_ibcast_pipeline},
+    {5, (void *)mca_coll_adapt_ibcast_chain},
+    {6, (void *)mca_coll_adapt_ibcast_linear},
+    {7, (void *)mca_coll_adapt_ibcast_topoaware_linear},
+    {8, (void *)mca_coll_adapt_ibcast_topoaware_chain}
 };
 
 int mca_coll_adapt_ibcast_init(void)
@@ -273,7 +282,7 @@ int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatyp
     else {
         int rank = ompi_comm_rank(comm);
         if (rank == root) {
-            OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "ibcast root %d, algorithm %d, coll_adapt_ibcast_segment_size %d, coll_adapt_ibcast_max_send_requests %d, coll_adapt_ibcast_max_recv_requests %d\n", 
+            OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "ibcast root %d, algorithm %d, coll_adapt_ibcast_segment_size %zu, coll_adapt_ibcast_max_send_requests %d, coll_adapt_ibcast_max_recv_requests %d\n", 
             root, coll_adapt_ibcast_algorithm, coll_adapt_ibcast_segment_size, coll_adapt_ibcast_max_send_requests, coll_adapt_ibcast_max_recv_requests));
         }
         int ibcast_tag = opal_atomic_add_32(&(comm->c_ibcast_tag), 1);
@@ -295,13 +304,59 @@ int mca_coll_adapt_ibcast_tuned(void *buff, int count, struct ompi_datatype_t *d
         coll_comm->cached_bmtree_root = root;
     }
     //print_tree(coll_comm->cached_bmtree, ompi_comm_rank(comm));
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bmtree, ibcast_tag);
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bmtree, coll_adapt_ibcast_segment_size, ibcast_tag);
 
 }
 
 /* Binomial tree with pipeline */
 int mca_coll_adapt_ibcast_binomial(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
-    OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "bino\n"));
+
+    size_t seg_size;
+    if (coll_adapt_ibcast_segment_size > 0) {
+        seg_size = coll_adapt_ibcast_segment_size;
+    }
+    else {
+        int i;
+        size_t type_size;           //the size of a datatype
+        int size = ompi_comm_size(comm);
+        ompi_datatype_type_size(datatype, &type_size);
+        double min_segsize = DBL_MAX;
+        size_t seg_sizes[9];
+        double bandwidth[9];
+        seg_sizes[0] = 2048;    //Bytes
+        bandwidth[0] = 1735.22; //MBPS
+        seg_sizes[1] = 4096;
+        bandwidth[1] = 2887.28;
+        seg_sizes[2] = 8192;
+        bandwidth[2] = 4268.57;
+        seg_sizes[3] = 16384;
+        bandwidth[3] = 4865.03;
+        seg_sizes[4] = 32768;
+        bandwidth[4] = 6931.08;
+        seg_sizes[5] = 65536;
+        bandwidth[5] = 8818.56;
+        seg_sizes[6] = 131072;
+        bandwidth[6] = 10204.29;
+        seg_sizes[7] = 262144;
+        bandwidth[7] = 11075.77;
+        seg_sizes[8] = 524288;
+        bandwidth[8] = 11514.60;
+        double latency = 0;
+        seg_size = seg_sizes[0];
+        for (i=0; i<9; i++) {
+            latency = ((count * type_size) * ceil(log(size)/log(2)) / bandwidth[i])* 1000000 / 8;
+            if (latency < min_segsize) {
+                min_segsize = latency;
+                seg_size = seg_sizes[i];
+            }
+        }
+        if (last_size != count * type_size) {
+            printf("Binomial: m = %zu, p = %d, seg_size = %zu\n", count * type_size, size, seg_size);
+            //OPAL_OUTPUT_VERBOSE((9, mca_coll_adapt_component.adapt_output, "Linear: m = %d, p = %d, seg_size = %d\n", count * type_size, size, seg_size));
+            last_size = count * type_size;
+        }
+    }
+    
     mca_coll_base_comm_t *coll_comm = module->base_data;
     if( !( (coll_comm->cached_bmtree) && (coll_comm->cached_bmtree_root == root) ) ) {
         if( coll_comm->cached_bmtree ) { /* destroy previous binomial if defined */
@@ -311,7 +366,7 @@ int mca_coll_adapt_ibcast_binomial(void *buff, int count, struct ompi_datatype_t
         coll_comm->cached_bmtree_root = root;
     }
     //print_tree(coll_comm->cached_bmtree, ompi_comm_rank(comm));
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bmtree, ibcast_tag);
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bmtree, coll_adapt_ibcast_segment_size, ibcast_tag);
 
 }
 
@@ -324,11 +379,66 @@ int mca_coll_adapt_ibcast_in_order_binomial(void *buff, int count, struct ompi_d
         coll_comm->cached_in_order_bmtree = ompi_coll_base_topo_build_in_order_bmtree(comm, root);
         coll_comm->cached_in_order_bmtree_root = root;
     }
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_in_order_bmtree, ibcast_tag);
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_in_order_bmtree, coll_adapt_ibcast_segment_size, ibcast_tag);
 }
 
 
 int mca_coll_adapt_ibcast_binary(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
+    
+    size_t seg_size;
+    if (coll_adapt_ibcast_segment_size > 0) {
+        seg_size = coll_adapt_ibcast_segment_size;
+    }
+    else {
+        int i;
+        size_t type_size;           //the size of a datatype
+        int size = ompi_comm_size(comm);
+        ompi_datatype_type_size(datatype, &type_size);
+        double min_segsize = DBL_MAX;
+        size_t seg_sizes[9];
+        double bandwidth[9];
+        seg_sizes[0] = 2048;    //Bytes
+        bandwidth[0] = 1735.22; //MBPS
+        seg_sizes[1] = 4096;
+        bandwidth[1] = 2887.28;
+        seg_sizes[2] = 8192;
+        bandwidth[2] = 4268.57;
+        seg_sizes[3] = 16384;
+        bandwidth[3] = 4865.03;
+        seg_sizes[4] = 32768;
+        bandwidth[4] = 6931.08;
+        seg_sizes[5] = 65536;
+        bandwidth[5] = 8818.56;
+        seg_sizes[6] = 131072;
+        bandwidth[6] = 10204.29;
+        seg_sizes[7] = 262144;
+        bandwidth[7] = 11075.77;
+        seg_sizes[8] = 524288;
+        bandwidth[8] = 11514.60;
+        double latency = 0;
+        seg_size = seg_sizes[0];
+        for (i=0; i<9; i++) {
+            latency = 2 * (ceil(log(size+1)/log(2)) + ((count * type_size)/seg_sizes[i]) - 2) * (seg_sizes[i] / bandwidth[i]) * 1000000 / 8;
+//            double j = 0;
+//            double sum = 0;
+//            while (sum < size) {
+//                sum += (pow(2, floor(j/2)));
+//                j++;
+//            }
+//            j--;
+//            latency = (j + 2*(((count * type_size)/seg_sizes[i]) - 1)) * (seg_sizes[i] / bandwidth[i]) * 1000000 / 8;
+            if (latency < min_segsize) {
+                min_segsize = latency;
+                seg_size = seg_sizes[i];
+            }
+        }
+        if (last_size != count * type_size) {
+            printf("Binary: m = %zu, p = %d, seg_size = %zu\n", count * type_size, size, seg_size);
+            //OPAL_OUTPUT_VERBOSE((9, mca_coll_adapt_component.adapt_output, "Linear: m = %d, p = %d, seg_size = %d\n", count * type_size, size, seg_size));
+            last_size = count * type_size;
+        }
+    }
+    
     mca_coll_base_comm_t *coll_comm = module->base_data;
     if( !( (coll_comm->cached_bintree) && (coll_comm->cached_bintree_root == root) ) ) {
         if( coll_comm->cached_bintree ) { /* destroy previous binomial if defined */
@@ -337,7 +447,7 @@ int mca_coll_adapt_ibcast_binary(void *buff, int count, struct ompi_datatype_t *
         coll_comm->cached_bintree = ompi_coll_base_topo_build_tree(2, comm, root);
         coll_comm->cached_bintree_root = root;
     }
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bintree, ibcast_tag);
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bintree, coll_adapt_ibcast_segment_size, ibcast_tag);
 }
 
 //int mca_coll_adapt_ibcast_pipeline(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
@@ -349,14 +459,61 @@ int mca_coll_adapt_ibcast_binary(void *buff, int count, struct ompi_datatype_t *
 //        coll_comm->cached_pipeline = ompi_coll_base_topo_build_chain(1, comm, root);
 //        coll_comm->cached_pipeline_root = root;
 //    }
-//    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_pipeline, ibcast_tag);
+//    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_pipeline, coll_adapt_ibcast_segment_size, ibcast_tag);
 //}
 
 int mca_coll_adapt_ibcast_pipeline(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
+    
+    size_t seg_size;
+    if (coll_adapt_ibcast_segment_size > 0) {
+        seg_size = coll_adapt_ibcast_segment_size;
+    }
+    else {
+        int i;
+        size_t type_size;           //the size of a datatype
+        int size = ompi_comm_size(comm);
+        ompi_datatype_type_size(datatype, &type_size);
+        double min_segsize = DBL_MAX;
+        size_t seg_sizes[9];
+        double bandwidth[9];
+        seg_sizes[0] = 2048;    //Bytes
+        bandwidth[0] = 1735.22; //MBPS
+        seg_sizes[1] = 4096;
+        bandwidth[1] = 2887.28;
+        seg_sizes[2] = 8192;
+        bandwidth[2] = 4268.57;
+        seg_sizes[3] = 16384;
+        bandwidth[3] = 4865.03;
+        seg_sizes[4] = 32768;
+        bandwidth[4] = 6931.08;
+        seg_sizes[5] = 65536;
+        bandwidth[5] = 8818.56;
+        seg_sizes[6] = 131072;
+        bandwidth[6] = 10204.29;
+        seg_sizes[7] = 262144;
+        bandwidth[7] = 11075.77;
+        seg_sizes[8] = 524288;
+        bandwidth[8] = 11514.60;
+        double latency = 0;
+        seg_size = seg_sizes[0];
+        for (i=0; i<9; i++) {
+            latency = (size + ((count * type_size)/seg_sizes[i]) - 2) * (seg_sizes[i] / bandwidth[i]) * 1000000 / 8;
+            if (latency < min_segsize) {
+                min_segsize = latency;
+                seg_size = seg_sizes[i];
+            }
+        }
+        if (last_size != count * type_size) {
+            OPAL_OUTPUT_VERBOSE((9, mca_coll_adapt_component.adapt_output, "Pipeline: m = %zu, p = %d, seg_size = %zu\n", count * type_size, size, seg_size));
+            last_size = count * type_size;
+        }
+    }
+
     ompi_coll_tree_t* tree = ompi_coll_base_topo_build_chain(1, comm, root);
-    int err = mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree, ibcast_tag);
+    int err = mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree, seg_size, ibcast_tag);
+    //TODO: cannot destroy tree here, need to destroy tree when finished
     //ompi_coll_base_topo_destroy_tree(&tree);
-    return tree;
+    return err;
 }
 
 int mca_coll_adapt_ibcast_chain(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
@@ -368,10 +525,57 @@ int mca_coll_adapt_ibcast_chain(void *buff, int count, struct ompi_datatype_t *d
         coll_comm->cached_chain = ompi_coll_base_topo_build_chain(4, comm, root);
         coll_comm->cached_chain_root = root;
     }
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_chain, ibcast_tag);
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_chain, coll_adapt_ibcast_segment_size, ibcast_tag);
 }
 
 int mca_coll_adapt_ibcast_linear(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
+    
+    size_t seg_size;
+    if (coll_adapt_ibcast_segment_size > 0) {
+        seg_size = coll_adapt_ibcast_segment_size;
+    }
+    else {
+        int i;
+        size_t type_size;           //the size of a datatype
+        int size = ompi_comm_size(comm);
+        ompi_datatype_type_size(datatype, &type_size);
+        double min_segsize = DBL_MAX;
+        size_t seg_sizes[9];
+        double bandwidth[9];
+        seg_sizes[0] = 2048;    //Bytes
+        bandwidth[0] = 1735.22; //MBPS
+        seg_sizes[1] = 4096;
+        bandwidth[1] = 2887.28;
+        seg_sizes[2] = 8192;
+        bandwidth[2] = 4268.57;
+        seg_sizes[3] = 16384;
+        bandwidth[3] = 4865.03;
+        seg_sizes[4] = 32768;
+        bandwidth[4] = 6931.08;
+        seg_sizes[5] = 65536;
+        bandwidth[5] = 8818.56;
+        seg_sizes[6] = 131072;
+        bandwidth[6] = 10204.29;
+        seg_sizes[7] = 262144;
+        bandwidth[7] = 11075.77;
+        seg_sizes[8] = 524288;
+        bandwidth[8] = 11514.60;
+        double latency = 0;
+        seg_size = seg_sizes[0];
+        for (i=0; i<9; i++) {
+            latency = ((count * type_size) * (size-1) / bandwidth[i]) * 1000000 / 8;
+            if (latency < min_segsize) {
+                min_segsize = latency;
+                seg_size = seg_sizes[i];
+            }
+        }
+        if (last_size != count * type_size) {
+            printf("Linear: m = %zu, p = %d, seg_size = %zu\n", count * type_size, size, seg_size);
+            //OPAL_OUTPUT_VERBOSE((9, mca_coll_adapt_component.adapt_output, "Linear: m = %d, p = %d, seg_size = %d\n", count * type_size, size, seg_size));
+            last_size = count * type_size;
+        }
+    }
+
     mca_coll_base_comm_t *coll_comm = module->base_data;
     if( !( (coll_comm->cached_linear) && (coll_comm->cached_linear_root == root) ) ) {
         if( coll_comm->cached_linear ) { /* destroy previous tree if defined */
@@ -388,7 +592,7 @@ int mca_coll_adapt_ibcast_linear(void *buff, int count, struct ompi_datatype_t *
         coll_comm->cached_linear = tree;
         coll_comm->cached_linear_root = root;
     }
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_linear, ibcast_tag);
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_linear, seg_size, ibcast_tag);
 
 }
 
@@ -401,7 +605,7 @@ int mca_coll_adapt_ibcast_topoaware_linear(void *buff, int count, struct ompi_da
         coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module);
         coll_comm->cached_topolinear_root = root;
     }
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topolinear, ibcast_tag);
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topolinear, coll_adapt_ibcast_segment_size, ibcast_tag);
 }
 
 //int mca_coll_adapt_ibcast_topoaware_chain(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
@@ -416,25 +620,24 @@ int mca_coll_adapt_ibcast_topoaware_linear(void *buff, int count, struct ompi_da
 //    else {
 //    }
 //    //print_tree(coll_comm->cached_topochain, ompi_comm_rank(comm));
-//    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topochain, ibcast_tag);
+//    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topochain, coll_adapt_ibcast_segment_size, ibcast_tag);
 //}
 
 int mca_coll_adapt_ibcast_topoaware_chain(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
     ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_chain(comm, root, module);
-    int err =  mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree, ibcast_tag);
+    int err =  mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree, coll_adapt_ibcast_segment_size, ibcast_tag);
     //ompi_coll_base_topo_destroy_tree(&tree);
-    return tree;
+    return err;
 }
 
 
-int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, ompi_coll_tree_t* tree, int ibcast_tag){
+int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, ompi_coll_tree_t* tree, size_t seg_size, int ibcast_tag){
     int i, j;       //temp variable for iteration
     int size;       //size of the communicator
     int rank;       //rank of this node
     int err;        //record return value
     int min;        //the min of num_segs and SEND_NUM or RECV_NUM, in case the num_segs is less than SEND_NUM or RECV_NUM
     
-    size_t seg_size;            //the size of a segment
     int seg_count = count;      //number of datatype in a segment
     size_t type_size;           //the size of a datatype
     size_t real_seg_size;       //the real size of a segment
@@ -478,7 +681,6 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     //set up mutex
     mutex = OBJ_NEW(opal_mutex_t);
     
-    seg_size = coll_adapt_ibcast_segment_size;
     size = ompi_comm_size(comm);
     rank = ompi_comm_rank(comm);
     
