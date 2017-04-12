@@ -16,9 +16,9 @@
 //#define SEND_NUM 2    //send how many fragments at once
 //#define RECV_NUM 3    //receive how many fragments at once
 //#define SEG_SIZE 163740   //size of a segment
-#define FREE_LIST_NUM 10    //The start size of the free list
-#define FREE_LIST_MAX 10000  //The max size of the free list
-#define FREE_LIST_INC 10    //The incresment of the free list
+//#define FREE_LIST_NUM 10    //The start size of the free list
+//#define FREE_LIST_MAX 10000  //The max size of the free list
+//#define FREE_LIST_INC 10    //The incresment of the free list
 #define TEST printfno
 
 size_t last_size; //for test
@@ -28,6 +28,8 @@ static int coll_adapt_ibcast_algorithm = 0;
 static size_t coll_adapt_ibcast_segment_size = 0;
 static int coll_adapt_ibcast_max_send_requests = 2;
 static int coll_adapt_ibcast_max_recv_requests = 3;
+static opal_free_list_t *coll_adapt_ibcast_context_free_list = NULL;
+static int32_t coll_adapt_ibcast_context_free_list_enabled = 0;
 
 typedef int (*mca_coll_adapt_ibcast_fn_t)(
     void *buff, 
@@ -52,7 +54,7 @@ static mca_coll_adapt_algorithm_index_t mca_coll_adapt_ibcast_algorithm_index[] 
     {8, (void *)mca_coll_adapt_ibcast_topoaware_chain}
 };
 
-int mca_coll_adapt_ibcast_check_forced_init (void)
+int mca_coll_adapt_ibcast_init(void)
 {
     mca_base_component_t *c = &mca_coll_adapt_component.super.collm_version;
     
@@ -86,6 +88,13 @@ int mca_coll_adapt_ibcast_check_forced_init (void)
     return MPI_SUCCESS;
 }
 
+int mca_coll_adapt_ibcast_fini(void)
+{
+    OBJ_RELEASE(coll_adapt_ibcast_context_free_list);
+    coll_adapt_ibcast_context_free_list = NULL;
+    coll_adapt_ibcast_context_free_list_enabled = 0;
+    
+}
 
 //send call back
 static int send_cb(ompi_request_t *req)
@@ -106,7 +115,7 @@ static int send_cb(ompi_request_t *req)
     if (sent_id < context->con->num_recv_segs) {
         ompi_request_t *send_req;
         int new_id = context->con->recv_array[sent_id];
-        mca_coll_adapt_bcast_context_t * send_context = (mca_coll_adapt_bcast_context_t *) opal_free_list_wait(context->con->context_list);
+        mca_coll_adapt_bcast_context_t * send_context = (mca_coll_adapt_bcast_context_t *) opal_free_list_wait(coll_adapt_ibcast_context_free_list);
         send_context->buff = context->buff + (new_id - context->frag_id) * context->con->real_seg_size;
         send_context->frag_id = new_id;
         send_context->child_id = context->child_id;
@@ -129,7 +138,6 @@ static int send_cb(ompi_request_t *req)
     int num_sent = ++(context->con->num_sent_segs);
     int num_recv_fini_t = context->con->num_recv_fini;
     int rank = ompi_comm_rank(context->con->comm);
-    opal_free_list_t * temp = context->con->context_list;
     opal_mutex_t * mutex_temp = context->con->mutex;
     //check whether signal the condition
     if ((rank == context->con->root && num_sent == context->con->tree->tree_nextsize * context->con->num_segs) ||
@@ -147,13 +155,12 @@ static int send_cb(ompi_request_t *req)
         OBJ_RELEASE(context->con->mutex);
         OBJ_RELEASE(context->con);
         OBJ_RELEASE(context->con);
-        opal_free_list_return(temp, (opal_free_list_item_t*)context);
-        OBJ_RELEASE(temp);
+        opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
         ompi_request_complete(temp_req, 1);
     }
     else {
         OBJ_RELEASE(context->con);
-        opal_free_list_return(temp, (opal_free_list_item_t*)context);
+        opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
         OPAL_THREAD_UNLOCK(mutex_temp);
     }
     OPAL_THREAD_UNLOCK(req->req_lock);
@@ -180,7 +187,7 @@ static int recv_cb(ompi_request_t *req){
     if (new_id < context->con->num_segs) {
         ompi_request_t *recv_req;
         //get new context item from free list
-        mca_coll_adapt_bcast_context_t * recv_context = (mca_coll_adapt_bcast_context_t *) opal_free_list_wait(context->con->context_list);
+        mca_coll_adapt_bcast_context_t * recv_context = (mca_coll_adapt_bcast_context_t *) opal_free_list_wait(coll_adapt_ibcast_context_free_list);
         recv_context->buff = context->buff + (new_id - context->frag_id) * context->con->real_seg_size;
         recv_context->frag_id = new_id;
         recv_context->child_id = context->child_id;
@@ -209,7 +216,7 @@ static int recv_cb(ompi_request_t *req){
                 send_count = context->con->count - context->frag_id * context->con->seg_count;
             }
             
-            mca_coll_adapt_bcast_context_t * send_context = (mca_coll_adapt_bcast_context_t *) opal_free_list_wait(context->con->context_list);
+            mca_coll_adapt_bcast_context_t * send_context = (mca_coll_adapt_bcast_context_t *) opal_free_list_wait(coll_adapt_ibcast_context_free_list);
             send_context->buff = context->buff;
             send_context->frag_id = context->frag_id;
             send_context->child_id = i;
@@ -229,7 +236,6 @@ static int recv_cb(ompi_request_t *req){
     int num_sent = context->con->num_sent_segs;
     int num_recv_fini_t = ++(context->con->num_recv_fini);
     int rank = ompi_comm_rank(context->con->comm);
-    opal_free_list_t * temp = context->con->context_list;
     opal_mutex_t * mutex_temp = context->con->mutex;
 
     //if this is leaf and has received all the segments
@@ -248,12 +254,12 @@ static int recv_cb(ompi_request_t *req){
         OBJ_RELEASE(context->con->mutex);
         OBJ_RELEASE(context->con);
         OBJ_RELEASE(context->con);
-        OBJ_RELEASE(temp);
+        opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
         ompi_request_complete(temp_req, 1);
     }
     else{
         OBJ_RELEASE(context->con);
-        opal_free_list_return(temp, (opal_free_list_item_t*)context);
+        opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
         OPAL_THREAD_UNLOCK(mutex_temp);
     }
     OPAL_THREAD_UNLOCK(req->req_lock);
@@ -643,24 +649,27 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     ptrdiff_t extent, lb;
     int num_segs;               //the number of segments
     
-    opal_free_list_t * context_list; //a free list contain all the context of call backs
     ompi_request_t * temp_request = NULL;  //the request be passed outside
     opal_mutex_t * mutex;
     int *recv_array = NULL;   //store those segments which are received
     int *send_array = NULL;   //record how many isend has been issued for every child
     
     //set up free list
-    context_list = OBJ_NEW(opal_free_list_t);
-    opal_free_list_init(context_list,
-                        sizeof(mca_coll_adapt_bcast_context_t),
-                        opal_cache_line_size,
-                        OBJ_CLASS(mca_coll_adapt_bcast_context_t),
-                        0,opal_cache_line_size,
-                        FREE_LIST_NUM,
-                        FREE_LIST_MAX,
-                        FREE_LIST_INC,
-                        NULL, 0, NULL, NULL, NULL);
-    
+    if (0 == coll_adapt_ibcast_context_free_list_enabled) {
+        int32_t context_free_list_enabled = opal_atomic_add_32(&(coll_adapt_ibcast_context_free_list_enabled), 1);
+        if (1 == context_free_list_enabled) {
+            coll_adapt_ibcast_context_free_list = OBJ_NEW(opal_free_list_t);
+            opal_free_list_init(coll_adapt_ibcast_context_free_list,
+                                sizeof(mca_coll_adapt_bcast_context_t),
+                                opal_cache_line_size,
+                                OBJ_CLASS(mca_coll_adapt_bcast_context_t),
+                                0,opal_cache_line_size,
+                                mca_coll_adapt_component.adapt_context_free_list_min,
+                                mca_coll_adapt_component.adapt_context_free_list_max,
+                                mca_coll_adapt_component.adapt_context_free_list_inc,
+                                NULL, 0, NULL, NULL, NULL);
+        }
+    }
     //set up request
     temp_request = OBJ_NEW(ompi_request_t);
     OMPI_REQUEST_INIT(temp_request, false);
@@ -706,7 +715,6 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     con->comm = comm;
     con->real_seg_size = real_seg_size;
     con->num_segs = num_segs;
-    con->context_list = context_list;
     con->recv_array = recv_array;
     con->num_recv_segs = 0;
     con->num_recv_fini = 0;
@@ -749,7 +757,7 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
                 send_count = count - i * seg_count;
             }
             for (j=0; j<tree->tree_nextsize; j++) {
-                mca_coll_adapt_bcast_context_t * context = (mca_coll_adapt_bcast_context_t *) opal_free_list_wait(context_list);
+                mca_coll_adapt_bcast_context_t * context = (mca_coll_adapt_bcast_context_t *) opal_free_list_wait(coll_adapt_ibcast_context_free_list);
                 context->buff = (char *)buff + i * real_seg_size;
                 context->frag_id = i;
                 context->child_id = j;              //the id of peer in in children_list
@@ -799,7 +807,7 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
             if (i == (num_segs - 1)) {
                 recv_count = count - i * seg_count;
             }
-            mca_coll_adapt_bcast_context_t * context = (mca_coll_adapt_bcast_context_t *) opal_free_list_wait(context_list);
+            mca_coll_adapt_bcast_context_t * context = (mca_coll_adapt_bcast_context_t *) opal_free_list_wait(coll_adapt_ibcast_context_free_list);
             context->buff = (char *)buff + i * real_seg_size;
             context->frag_id = i;
             context->peer = tree->tree_prev;
@@ -1164,9 +1172,9 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
                         opal_cache_line_size,
                         OBJ_CLASS(mca_coll_adapt_bcast_two_trees_context_t),
                         0,opal_cache_line_size,
-                        FREE_LIST_NUM,
-                        FREE_LIST_MAX,
-                        FREE_LIST_INC,
+                        mca_coll_adapt_component.adapt_context_free_list_min,
+                        mca_coll_adapt_component.adapt_context_free_list_max,
+                        mca_coll_adapt_component.adapt_context_free_list_inc,
                         NULL, 0, NULL, NULL, NULL);
     context_lists[1] = OBJ_NEW(opal_free_list_t);
     opal_free_list_init(context_lists[1],
@@ -1174,9 +1182,9 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
                         opal_cache_line_size,
                         OBJ_CLASS(mca_coll_adapt_bcast_two_trees_context_t),
                         0,opal_cache_line_size,
-                        FREE_LIST_NUM,
-                        FREE_LIST_MAX,
-                        FREE_LIST_INC,
+                        mca_coll_adapt_component.adapt_context_free_list_min,
+                        mca_coll_adapt_component.adapt_context_free_list_max,
+                        mca_coll_adapt_component.adapt_context_free_list_inc,
                         NULL, 0, NULL, NULL, NULL);
     
     //set up request

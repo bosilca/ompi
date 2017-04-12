@@ -111,6 +111,7 @@ mca_coll_adapt_component_t mca_coll_adapt_component = {
  */
 static int adapt_close(void)
 {
+    mca_coll_adapt_ibcast_fini();
     return OMPI_SUCCESS;
 }
 
@@ -250,8 +251,30 @@ static int adapt_register(void)
                                            MCA_BASE_VAR_SCOPE_READONLY,
                                            &coll_adapt_shared_mem_used_data);
 
-    
-    mca_coll_adapt_ibcast_check_forced_init();
+    cs->adapt_context_free_list_min = 10;
+    (void) mca_base_component_var_register(c, "context_free_list_max",
+                                           "Minimum number of segment in context free list",
+                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                           OPAL_INFO_LVL_9,
+                                           MCA_BASE_VAR_SCOPE_READONLY,
+                                           &cs->adapt_context_free_list_min);
+                                          
+    cs->adapt_context_free_list_max = 10000;
+    (void) mca_base_component_var_register(c, "context_free_list_min",
+                                           "Maximum number of segment in context free list",
+                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                           OPAL_INFO_LVL_9,
+                                           MCA_BASE_VAR_SCOPE_READONLY,
+                                           &cs->adapt_context_free_list_max);
+                                         
+    cs->adapt_context_free_list_inc = 10;
+    (void) mca_base_component_var_register(c, "context_free_list_inc",
+                                           "Increasement number of segment in context free list",
+                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                           OPAL_INFO_LVL_9,
+                                           MCA_BASE_VAR_SCOPE_READONLY,
+                                           &cs->adapt_context_free_list_inc);
+    mca_coll_adapt_ibcast_init();
     
     return adapt_verify_mca_variables();
 }

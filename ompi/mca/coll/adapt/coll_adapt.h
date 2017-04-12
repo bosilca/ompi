@@ -60,6 +60,15 @@ typedef struct mca_coll_adapt_component_t {
     
     /** MCA parameter: Output verbose level */
     int adapt_output;
+    
+    /** MCA parameter: Maximum number of segment in context free list */
+    int adapt_context_free_list_max;
+        
+    /** MCA parameter: Minimum number of segment in context free list */
+    int adapt_context_free_list_min;
+    
+    /** MCA parameter: Increasment number of segment in context free list */
+    int adapt_context_free_list_inc;
 
     /******* end of MCA params ********/
 

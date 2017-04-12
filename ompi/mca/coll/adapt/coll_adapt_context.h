@@ -19,7 +19,6 @@ struct mca_coll_adapt_constant_bcast_context_s {
     int num_segs;
     ompi_request_t * request;
     opal_mutex_t * mutex;
-    opal_free_list_t * context_list;
     int* recv_array;
     int* send_array;
     int num_recv_segs; //store the length of the fragment array, how many fragments are recevied

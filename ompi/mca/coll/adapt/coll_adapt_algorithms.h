@@ -4,7 +4,8 @@
 #include <math.h>		
 
 /* Bcast */
-int mca_coll_adapt_ibcast_check_forced_init(void);
+int mca_coll_adapt_ibcast_init(void);
+int mca_coll_adapt_ibcast_fini(void);
 
 int mca_coll_adapt_bcast(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
