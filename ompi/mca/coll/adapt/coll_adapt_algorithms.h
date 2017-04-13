@@ -1,7 +1,12 @@
 #include "ompi/mca/coll/coll.h"
 #include "ompi/mca/coll/base/coll_base_topo.h"  //ompi_coll_tree_t
 #include "ompi/mca/coll/base/coll_base_functions.h" //COLL_BASE_COMPUTE_BLOCKCOUNT
-#include <math.h>		
+#include <math.h>	
+
+typedef struct mca_coll_adapt_algorithm_index_s {
+    int algorithm_index;
+    uintptr_t algorithm_fn_ptr;
+}mca_coll_adapt_algorithm_index_t;	
 
 /* Bcast */
 int mca_coll_adapt_ibcast_init(void);

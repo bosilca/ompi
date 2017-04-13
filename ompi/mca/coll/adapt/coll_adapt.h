@@ -131,11 +131,6 @@ struct mca_coll_adapt_module_t {
 };
 OBJ_CLASS_DECLARATION(mca_coll_adapt_module_t);
 
-typedef struct mca_coll_adapt_algorithm_index_s {
-    int algorithm_index;
-    void *algorithm_func;
-}mca_coll_adapt_algorithm_index_t;
-
 /**
  * Global component instance
  */

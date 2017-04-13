@@ -38,15 +38,15 @@ typedef int (*mca_coll_adapt_ireduce_fn_t)(
 );
 
 static mca_coll_adapt_algorithm_index_t mca_coll_adapt_ireduce_algorithm_index[] = {
-    {0, (void *)mca_coll_adapt_ireduce_tuned},
-    {1, (void *)mca_coll_adapt_ireduce_binomial},
-    {2, (void *)mca_coll_adapt_ireduce_in_order_binomial},
-    {3, (void *)mca_coll_adapt_ireduce_binary},
-    {4, (void *)mca_coll_adapt_ireduce_pipeline},
-    {5, (void *)mca_coll_adapt_ireduce_chain},
-    {6, (void *)mca_coll_adapt_ireduce_linear},
-    {7, (void *)mca_coll_adapt_ireduce_topoaware_linear},
-    {8, (void *)mca_coll_adapt_ireduce_topoaware_chain}
+    {0, (uintptr_t)mca_coll_adapt_ireduce_tuned},
+    {1, (uintptr_t)mca_coll_adapt_ireduce_binomial},
+    {2, (uintptr_t)mca_coll_adapt_ireduce_in_order_binomial},
+    {3, (uintptr_t)mca_coll_adapt_ireduce_binary},
+    {4, (uintptr_t)mca_coll_adapt_ireduce_pipeline},
+    {5, (uintptr_t)mca_coll_adapt_ireduce_chain},
+    {6, (uintptr_t)mca_coll_adapt_ireduce_linear},
+    {7, (uintptr_t)mca_coll_adapt_ireduce_topoaware_linear},
+    {8, (uintptr_t)mca_coll_adapt_ireduce_topoaware_chain}
 };
 
 int mca_coll_adapt_ireduce_init(void)
@@ -91,7 +91,7 @@ int mca_coll_adapt_ireduce_fini(void)
         coll_adapt_ireduce_context_free_list_enabled = 0;
         OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "reduce fini\n"));
     }
-    
+    return MPI_SUCCESS;
 }
 
 //Can only work on commutative op
@@ -421,7 +421,7 @@ int mca_coll_adapt_ireduce(const void *sbuf, void *rbuf, int count, struct ompi_
         //get ireduce tag
         int ireduce_tag = opal_atomic_add_32(&(comm->c_ireduce_tag), 1);
         ireduce_tag = (ireduce_tag % 4096) + 4096;
-        mca_coll_adapt_ireduce_fn_t reduce_func = (mca_coll_adapt_ireduce_fn_t)mca_coll_adapt_ireduce_algorithm_index[coll_adapt_ireduce_algorithm].algorithm_func;
+        mca_coll_adapt_ireduce_fn_t reduce_func = (mca_coll_adapt_ireduce_fn_t)mca_coll_adapt_ireduce_algorithm_index[coll_adapt_ireduce_algorithm].algorithm_fn_ptr;
         return reduce_func(sbuf, rbuf, count, dtype, op, root, comm, request, module, ireduce_tag);
     }
 }
@@ -559,7 +559,7 @@ int mca_coll_adapt_ireduce_topoaware_chain(const void *sbuf, void *rbuf, int cou
     size_t seg_size = coll_adapt_ireduce_segment_size;
     int err =  mca_coll_adapt_ireduce_generic(sbuf, rbuf, count, dtype, op, root, comm, request, module, tree, seg_size, ireduce_tag);
     //ompi_coll_base_topo_destroy_tree(&tree);
-    return tree;
+    return err;
 }
 
 

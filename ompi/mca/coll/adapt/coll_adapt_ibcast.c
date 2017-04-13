@@ -36,15 +36,15 @@ typedef int (*mca_coll_adapt_ibcast_fn_t)(
 );
     
 static mca_coll_adapt_algorithm_index_t mca_coll_adapt_ibcast_algorithm_index[] = {
-    {0, (void *)mca_coll_adapt_ibcast_tuned},
-    {1, (void *)mca_coll_adapt_ibcast_binomial},
-    {2, (void *)mca_coll_adapt_ibcast_in_order_binomial},
-    {3, (void *)mca_coll_adapt_ibcast_binary},
-    {4, (void *)mca_coll_adapt_ibcast_pipeline},
-    {5, (void *)mca_coll_adapt_ibcast_chain},
-    {6, (void *)mca_coll_adapt_ibcast_linear},
-    {7, (void *)mca_coll_adapt_ibcast_topoaware_linear},
-    {8, (void *)mca_coll_adapt_ibcast_topoaware_chain}
+    {0, (uintptr_t)mca_coll_adapt_ibcast_tuned},
+    {1, (uintptr_t)mca_coll_adapt_ibcast_binomial},
+    {2, (uintptr_t)mca_coll_adapt_ibcast_in_order_binomial},
+    {3, (uintptr_t)mca_coll_adapt_ibcast_binary},
+    {4, (uintptr_t)mca_coll_adapt_ibcast_pipeline},
+    {5, (uintptr_t)mca_coll_adapt_ibcast_chain},
+    {6, (uintptr_t)mca_coll_adapt_ibcast_linear},
+    {7, (uintptr_t)mca_coll_adapt_ibcast_topoaware_linear},
+    {8, (uintptr_t)mca_coll_adapt_ibcast_topoaware_chain}
 };
 
 int mca_coll_adapt_ibcast_init(void)
@@ -89,6 +89,7 @@ int mca_coll_adapt_ibcast_fini(void)
         coll_adapt_ibcast_context_free_list_enabled = 0;
         OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "bcast fini\n"));
     }
+    return MPI_SUCCESS;
 }
 
 //send call back
@@ -287,7 +288,7 @@ int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatyp
         }
         int ibcast_tag = opal_atomic_add_32(&(comm->c_ibcast_tag), 1);
         ibcast_tag = ibcast_tag % 4096;
-        mca_coll_adapt_ibcast_fn_t bcast_func = (mca_coll_adapt_ibcast_fn_t)mca_coll_adapt_ibcast_algorithm_index[coll_adapt_ibcast_algorithm].algorithm_func;
+        mca_coll_adapt_ibcast_fn_t bcast_func = (mca_coll_adapt_ibcast_fn_t)mca_coll_adapt_ibcast_algorithm_index[coll_adapt_ibcast_algorithm].algorithm_fn_ptr;
         return bcast_func(buff, count, datatype, root, comm, request, module, ibcast_tag);
         //return mca_coll_adapt_ibcast_binomial(buff, count, datatype, root, comm, request, module, ibcast_tag);
     }
