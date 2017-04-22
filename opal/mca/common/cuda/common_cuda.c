@@ -97,6 +97,7 @@ struct cudaFunctionTable {
     int (*cuCtxGetDevice)(CUdevice *);
     int (*cuDeviceCanAccessPeer)(int *, CUdevice, CUdevice);
     int (*cuDeviceGet)(CUdevice *, int);
+    int (*cuDeviceGetCount)(int*);
 #if OPAL_CUDA_GDR_SUPPORT
     int (*cuPointerSetAttribute)(const void *, CUpointer_attribute, CUdeviceptr);
 #endif /* OPAL_CUDA_GDR_SUPPORT */
@@ -467,6 +468,7 @@ int mca_common_cuda_stage_one_init(void)
     OPAL_CUDA_DLSYM(libcuda_handle, cuCtxGetDevice);
     OPAL_CUDA_DLSYM(libcuda_handle, cuDeviceCanAccessPeer);
     OPAL_CUDA_DLSYM(libcuda_handle, cuDeviceGet);
+    OPAL_CUDA_DLSYM(libcuda_handle, cuDeviceGetCount);
 #if OPAL_CUDA_GDR_SUPPORT
     OPAL_CUDA_DLSYM(libcuda_handle, cuPointerSetAttribute);
 #endif /* OPAL_CUDA_GDR_SUPPORT */
@@ -1973,6 +1975,21 @@ int mca_common_cuda_get_device(int *devicenum)
     return 0;
 }
 
+int mca_common_cuda_get_device_count(int *nb_devices)
+{
+    int nbdev;
+    int res;
+
+    res = cuFunc.cuDeviceGetCount(&nbdev);
+    if (OPAL_UNLIKELY(res != CUDA_SUCCESS)) {
+        opal_output(0, "CUDA: cuDeviceGetCount failed: res=%d",
+                    res);
+        return res;
+    }
+    *nb_devices = nbdev;
+    return 0;
+}
+
 int mca_common_cuda_device_can_access_peer(int *access, int dev1, int dev2)
 {
     int res;
@@ -1999,6 +2016,15 @@ int mca_common_cuda_get_address_range(void *pbase, size_t *psize, void *base)
                             base, *(char **)pbase, *psize);
     }
     return 0;
+}
+
+int mca_common_cuda_is_stage_three_init(void)
+{
+    if (true == stage_three_init_complete) {
+        return 1;
+    } else {
+        return 0;
+    }
 }
 
 #if OPAL_CUDA_GDR_SUPPORT

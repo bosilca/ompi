@@ -17,6 +17,9 @@
 #include "coll_adapt.h"
 #include "coll_adapt_algorithms.h"
 
+#if OPAL_CUDA_SUPPORT
+#include "coll_adapt_cuda.h"
+#endif
 
 /*
  * Public string showing the coll ompi_adapt component version number
@@ -113,6 +116,13 @@ static int adapt_close(void)
 {
     mca_coll_adapt_ibcast_fini();
     mca_coll_adapt_ireduce_fini();
+    
+#if OPAL_CUDA_SUPPORT
+    mca_coll_adapt_component_t *cs = &mca_coll_adapt_component;
+    if (cs->coll_adapt_cuda_enabled) {    
+        coll_adapt_cuda_fini();
+    }
+#endif
     return OMPI_SUCCESS;
 }
 
@@ -277,6 +287,12 @@ static int adapt_register(void)
                                            &cs->adapt_context_free_list_inc);
     mca_coll_adapt_ibcast_init();
     mca_coll_adapt_ireduce_init();
+
+    cs->coll_adapt_cuda_enabled = 0;
+
+#if OPAL_CUDA_SUPPORT    
+    coll_adapt_cuda_init();
+#endif
     
     return adapt_verify_mca_variables();
 }

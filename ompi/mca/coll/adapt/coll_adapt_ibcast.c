@@ -12,6 +12,11 @@
 #include "opal/sys/atomic.h"                //atomic
 #include "ompi/mca/pml/ob1/pml_ob1.h"       //dump
 
+#if OPAL_CUDA_SUPPORT
+#include "coll_adapt_cuda.h"
+#include "opal/mca/common/cuda/common_cuda.h"
+#endif
+
 #define TEST printfno
 
 static size_t last_size; //for test
@@ -46,6 +51,7 @@ static mca_coll_adapt_algorithm_index_t mca_coll_adapt_ibcast_algorithm_index[] 
     {7, (uintptr_t)mca_coll_adapt_ibcast_topoaware_linear},
     {8, (uintptr_t)mca_coll_adapt_ibcast_topoaware_chain}
 };
+
 
 int mca_coll_adapt_ibcast_init(void)
 {
@@ -288,9 +294,38 @@ int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatyp
         }
         int ibcast_tag = opal_atomic_add_32(&(comm->c_ibcast_tag), 1);
         ibcast_tag = ibcast_tag % 4096;
+        if (1 == mca_coll_adapt_component.coll_adapt_cuda_enabled && coll_adapt_cuda_is_gpu_buffer(buff)) {
+            return mca_coll_adapt_ibcast_cuda(buff, count, datatype, root, comm, request, module, ibcast_tag);
+        }
         mca_coll_adapt_ibcast_fn_t bcast_func = (mca_coll_adapt_ibcast_fn_t)mca_coll_adapt_ibcast_algorithm_index[coll_adapt_ibcast_algorithm].algorithm_fn_ptr;
         return bcast_func(buff, count, datatype, root, comm, request, module, ibcast_tag);
         //return mca_coll_adapt_ibcast_binomial(buff, count, datatype, root, comm, request, module, ibcast_tag);
+    }
+}
+
+int mca_coll_adapt_ibcast_cuda(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag) {
+    coll_adapt_ibcast_segment_size = 524288;
+    if (0 == mca_common_cuda_is_stage_three_init() || 0 == mca_coll_adapt_component.coll_adapt_cuda_enabled) {
+        return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
+    } else {
+     //   return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
+        mca_coll_base_comm_t *coll_comm = module->base_data;
+        if( !( (coll_comm->cached_topochain) && (coll_comm->cached_topochain_root == root) ) ) {
+            if( coll_comm->cached_topochain ) { /* destroy previous binomial if defined */
+                ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topochain) );
+            }
+            ompi_coll_topo_gpu_t *gpu_topo = (ompi_coll_topo_gpu_t *)malloc(sizeof(ompi_coll_topo_gpu_t));
+            coll_adapt_cuda_get_gpu_topo(gpu_topo);
+            //coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 4, 1, (void*)gpu_topo);
+            coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
+            coll_comm->cached_topochain_root = root;
+            coll_adapt_cuda_free_gpu_topo(gpu_topo);
+            free(gpu_topo);
+        }
+        else {
+        }
+        //print_tree(coll_comm->cached_topochain, ompi_comm_rank(comm));
+        return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topochain, coll_adapt_ibcast_segment_size, ibcast_tag);
     }
 }
 
@@ -367,7 +402,7 @@ int mca_coll_adapt_ibcast_binomial(void *buff, int count, struct ompi_datatype_t
         coll_comm->cached_bmtree_root = root;
     }
     //print_tree(coll_comm->cached_bmtree, ompi_comm_rank(comm));
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bmtree, coll_adapt_ibcast_segment_size, ibcast_tag);
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bmtree, seg_size, ibcast_tag);
 
 }
 
@@ -448,7 +483,7 @@ int mca_coll_adapt_ibcast_binary(void *buff, int count, struct ompi_datatype_t *
         coll_comm->cached_bintree = ompi_coll_base_topo_build_tree(2, comm, root);
         coll_comm->cached_bintree_root = root;
     }
-    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bintree, coll_adapt_ibcast_segment_size, ibcast_tag);
+    return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_bintree, seg_size, ibcast_tag);
 }
 
 //int mca_coll_adapt_ibcast_pipeline(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
@@ -603,7 +638,7 @@ int mca_coll_adapt_ibcast_topoaware_linear(void *buff, int count, struct ompi_da
         if( coll_comm->cached_topolinear ) { /* destroy previous binomial if defined */
             ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topolinear) );
         }
-        coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module);
+        coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module, 3);
         coll_comm->cached_topolinear_root = root;
     }
     return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topolinear, coll_adapt_ibcast_segment_size, ibcast_tag);
@@ -615,7 +650,7 @@ int mca_coll_adapt_ibcast_topoaware_linear(void *buff, int count, struct ompi_da
 //        if( coll_comm->cached_topochain ) { /* destroy previous binomial if defined */
 //            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topochain) );
 //        }
-//        coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module);
+//        coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
 //        coll_comm->cached_topochain_root = root;
 //    }
 //    else {
@@ -625,10 +660,21 @@ int mca_coll_adapt_ibcast_topoaware_linear(void *buff, int count, struct ompi_da
 //}
 
 int mca_coll_adapt_ibcast_topoaware_chain(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
-    ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_chain(comm, root, module);
+    ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
     int err =  mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree, coll_adapt_ibcast_segment_size, ibcast_tag);
     //ompi_coll_base_topo_destroy_tree(&tree);
     return err;
+}
+
+static int print_topo_level(int rank, ompi_coll_tree_t* tree)
+{
+    printf("rank %d, pid %d, topo_level %d, parent [%d topo %d], nb child %d, ", rank, getpid(), tree->topo_flags, tree->tree_prev, tree->tree_prev_topo_flags, tree->tree_nextsize);
+    int i;
+    for (i=0; i<tree->tree_nextsize; i++) {
+        printf("child [%d, topo %d], ", tree->tree_next[i], tree->tree_next_topo_flags[i]);
+    }
+    printf("\n");
+    return 0;
 }
 
 
@@ -725,6 +771,8 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     TEST("[%d, %" PRIx64 "]: con->mutex = %p, num_children = %d, num_segs = %d, real_seg_size = %d, seg_count = %d, tree_adreess = %p\n", rank, gettid(), (void *)con->mutex, tree->tree_nextsize, num_segs, (int)real_seg_size, seg_count, (void *)con->tree);
     
     OPAL_THREAD_LOCK(mutex);
+    
+    print_topo_level(rank, tree);
     
     //if root, send segment to every children.
     if (rank == root){

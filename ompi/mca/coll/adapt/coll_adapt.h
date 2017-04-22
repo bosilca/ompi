@@ -77,6 +77,9 @@ typedef struct mca_coll_adapt_component_t {
         the division once and then just use the value without
         having to re-calculate. */
     int adapt_segs_per_inuse_flag;
+    
+    /** cuda support */
+    int coll_adapt_cuda_enabled;
 } mca_coll_adapt_component_t;
 
 /**

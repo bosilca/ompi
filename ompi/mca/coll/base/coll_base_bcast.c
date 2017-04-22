@@ -241,7 +241,7 @@ ompi_coll_base_bcast_intra_topoaware_chain ( void* buffer,
         if( data->cached_topochain ) { /* destroy previous binomial if defined */
             ompi_coll_base_topo_destroy_tree( &(data->cached_topochain) );
         }
-        data->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module);
+        data->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
         data->cached_topochain_root = root;
     }
     

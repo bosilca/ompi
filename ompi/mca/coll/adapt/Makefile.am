@@ -11,6 +11,8 @@
 
 dist_ompidata_DATA = help-mpi-coll-adapt.txt
 
+DIST_SUBDIRS = cuda
+
 sources = \
 	coll_adapt_component.c \
 	coll_adapt_module.c \
@@ -36,6 +38,13 @@ sources = \
 # Make the output library in this directory, and name it either
 # mca_<type>_<name>.la (for DSO builds) or libmca_<type>_<name>.la
 # (for static builds).
+
+# If we have cuda support, modify file list and flags
+if OPAL_cuda_support
+sources += coll_adapt_cuda.c
+sources += coll_adapt_cuda.h
+SUBDIRS      = . cuda
+endif
 
 component_noinst =
 component_install =

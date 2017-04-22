@@ -535,7 +535,7 @@ int mca_coll_adapt_ireduce_topoaware_linear(const void *sbuf, void *rbuf, int co
         if( coll_comm->cached_topolinear ) { /* destroy previous binomial if defined */
             ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topolinear) );
         }
-        coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module);
+        coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module, 3);
         coll_comm->cached_topolinear_root = root;
     }
     size_t seg_size = coll_adapt_ireduce_segment_size;
@@ -548,14 +548,14 @@ int mca_coll_adapt_ireduce_topoaware_linear(const void *sbuf, void *rbuf, int co
 //        if( coll_comm->cached_topochain ) { /* destroy previous binomial if defined */
 //            ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topochain) );
 //        }
-//        coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module);
+//        coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 0, NULL);
 //        coll_comm->cached_topochain_root = root;
 //    }
 //    return mca_coll_adapt_ireduce_generic(sbuf, rbuf, count, dtype, op, root, comm, request, module, coll_comm->cached_topochain, ireduce_tag);
 //}
 
 int mca_coll_adapt_ireduce_topoaware_chain(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ireduce_tag){
-    ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_chain(comm, root, module);
+    ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
     size_t seg_size = coll_adapt_ireduce_segment_size;
     int err =  mca_coll_adapt_ireduce_generic(sbuf, rbuf, count, dtype, op, root, comm, request, module, tree, seg_size, ireduce_tag);
     //ompi_coll_base_topo_destroy_tree(&tree);
