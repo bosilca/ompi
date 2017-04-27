@@ -7,6 +7,14 @@
 #include "ompi/mca/coll/base/coll_base_topo.h"  //ompi_coll_tree_t
 #include "coll_adapt_inbuf.h"
 
+#if OPAL_CUDA_SUPPORT  
+#define CPU_BUFFER_MEMCPY_DONE  1
+#define CPU_BUFFER_MEMCPY_NOT_DONE  0
+
+#define COLL_ADAPT_CUDA_CONTEXT_FLAGS_BCAST     0x2
+#define COLL_ADAPT_CUDA_CONTEXT_FLAGS_REDUCE     0x4
+#endif
+
 /* bcast constant context in bcast context */
 struct mca_coll_adapt_constant_bcast_context_s {
     opal_object_t  super;
@@ -26,6 +34,12 @@ struct mca_coll_adapt_constant_bcast_context_s {
     int num_sent_segs;  //number of sent segments
     ompi_coll_tree_t * tree;
     int ibcast_tag;
+    int gpu_use_cpu_buff;
+#if OPAL_CUDA_SUPPORT    
+    char **cpu_buff_list;
+    int *cpu_buff_memcpy_flags;
+    int *cpu_buff_list_ref_count;
+#endif
 };
 
 typedef struct mca_coll_adapt_constant_bcast_context_s mca_coll_adapt_constant_bcast_context_t;

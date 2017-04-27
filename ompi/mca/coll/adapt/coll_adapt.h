@@ -19,6 +19,9 @@
 #include "opal/mca/mca.h"
 #include "opal/datatype/opal_convertor.h"
 #include "ompi/mca/coll/coll.h"
+#if OPAL_CUDA_SUPPORT
+#include "opal/mca/mpool/mpool.h"
+#endif
 
 BEGIN_C_DECLS
 
@@ -80,6 +83,11 @@ typedef struct mca_coll_adapt_component_t {
     
     /** cuda support */
     int coll_adapt_cuda_enabled;
+
+#if OPAL_CUDA_SUPPORT    
+    /** pinned cpu memory for GPU use */
+    mca_mpool_base_module_t *pined_cpu_mpool;
+#endif
 } mca_coll_adapt_component_t;
 
 /**

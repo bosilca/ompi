@@ -1,5 +1,6 @@
 #include "coll_adapt.h"
 #include "coll_adapt_cuda.h"
+#include "coll_adapt_cuda_mpool.h"
 #include "opal/mca/common/cuda/common_cuda.h"
 #include "opal/mca/installdirs/installdirs.h"
 #include <dlfcn.h>
@@ -16,7 +17,7 @@ static char *coll_adapt_cuda_kernel_lib = NULL;
         if(NULL != (_error = dlerror()) )  {                                        \
             opal_output(0, "Finding %s error: %s\n", # fname, _error);              \
             coll_adapt_cuda_table.fname ## _p = NULL;                                   \
-            return OPAL_ERROR;                                                      \
+            return OMPI_ERROR;                                                      \
         }                                                                           \
     } while (0)
 
@@ -31,7 +32,7 @@ int coll_adapt_cuda_init(void)
         if (!coll_adapt_cuda_kernel_handle) {
             opal_output( 0, "Failed to load %s library: error %s\n", coll_adapt_cuda_kernel_lib, dlerror());
             coll_adapt_cuda_kernel_handle = NULL;
-            return OPAL_ERROR;
+            return OMPI_ERROR;
         }
     
         COLL_ADAPT_CUDA_FIND_NCCL_FUNCTION_OR_RETURN( coll_adapt_cuda_kernel_handle, coll_adapt_cuda_init );
@@ -40,10 +41,14 @@ int coll_adapt_cuda_init(void)
     
         coll_adapt_cuda_table.coll_adapt_cuda_init_p();
         mca_coll_adapt_component.coll_adapt_cuda_enabled = 1;
+        
+        mca_coll_adapt_component_t *cs = &mca_coll_adapt_component;
+        cs->pined_cpu_mpool = coll_adapt_cuda_mpool_create();
+        
         opal_output( 0, "coll_adapt_cuda_init done\n");
     }
     
-    return 1;
+    return OMPI_SUCCESS;
 }
 
 int coll_adapt_cuda_fini(void)
@@ -65,7 +70,7 @@ int coll_adapt_cuda_fini(void)
         opal_output( 0, "coll_adapt_cuda_fini done\n");
     }
     
-    return 1;
+    return OMPI_SUCCESS;
 }
 
 int coll_adapt_cuda_is_gpu_buffer(const void *ptr)
@@ -97,9 +102,12 @@ int coll_adapt_cuda_get_gpu_topo(ompi_coll_topo_gpu_t *gpu_topo)
     }
     gpu_topo->nb_gpus = nb_gpus;
     gpu_topo->gpu_numa = gpu_numa;
+    
+    return OMPI_SUCCESS;
 }
 
 int coll_adapt_cuda_free_gpu_topo(ompi_coll_topo_gpu_t *gpu_topo)
 {
     free(gpu_topo->gpu_numa);
+    return OMPI_SUCCESS;
 }
