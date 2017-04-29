@@ -103,7 +103,21 @@ mca_coll_adapt_component_t mca_coll_adapt_component = {
     
     /* (default) verbose level */
     0,
-
+    
+    /* (default) maximum number of segment in context free list */
+    10,
+    
+    /* (default) minimum number of segment in context free list */
+    10000,
+    
+    /* (default) increasement number of segment in context free list */
+    10,
+    
+    /* (default) cuda enabled */
+    0,
+    
+    /* (default) cpu memory pool */
+    NULL,
     /* default values for non-MCA parameters */
     /* Not specifying values here gives us all 0's */
 };

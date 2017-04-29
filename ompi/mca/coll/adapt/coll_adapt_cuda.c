@@ -42,8 +42,7 @@ int coll_adapt_cuda_init(void)
         coll_adapt_cuda_table.coll_adapt_cuda_init_p();
         mca_coll_adapt_component.coll_adapt_cuda_enabled = 1;
         
-        mca_coll_adapt_component_t *cs = &mca_coll_adapt_component;
-        cs->pined_cpu_mpool = coll_adapt_cuda_mpool_create();
+        mca_coll_adapt_component.pined_cpu_mpool = NULL;
         
         opal_output( 0, "coll_adapt_cuda_init done\n");
     }
@@ -67,6 +66,7 @@ int coll_adapt_cuda_fini(void)
         }
         coll_adapt_cuda_kernel_lib = NULL;
         mca_coll_adapt_component.coll_adapt_cuda_enabled = 0;
+        mca_coll_adapt_component.pined_cpu_mpool = NULL;
         opal_output( 0, "coll_adapt_cuda_fini done\n");
     }
     

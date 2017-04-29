@@ -14,6 +14,7 @@
 
 #if OPAL_CUDA_SUPPORT
 #include "coll_adapt_cuda.h"
+#include "coll_adapt_cuda_mpool.h"
 #include "opal/mca/common/cuda/common_cuda.h"
 #endif
 
@@ -811,6 +812,19 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
                                 NULL, 0, NULL, NULL, NULL);
         }
     }
+    
+    /* set up cpu mpool */
+#if OPAL_CUDA_SUPPORT
+    mca_mpool_base_module_t *mpool = NULL;
+    if (gpu_use_cpu_buff) {
+        if (mca_coll_adapt_component.pined_cpu_mpool == NULL) {
+            mca_coll_adapt_component.pined_cpu_mpool = coll_adapt_cuda_mpool_create();
+        }
+        mpool = mca_coll_adapt_component.pined_cpu_mpool;
+        assert(mpool != NULL);
+    }
+#endif
+    
     //set up request
     temp_request = OBJ_NEW(ompi_request_t);
     OMPI_REQUEST_INIT(temp_request, false);
@@ -870,8 +884,6 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     con->cpu_buff_list = NULL;
     con->cpu_buff_memcpy_flags = NULL;
     con->cpu_buff_list_ref_count = NULL;
-    
-    mca_mpool_base_module_t *mpool = mca_coll_adapt_component.pined_cpu_mpool;
     con->gpu_use_cpu_buff = gpu_use_cpu_buff;
 #endif
     

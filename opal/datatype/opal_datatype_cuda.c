@@ -132,6 +132,11 @@ void *opal_cuda_memcpy_sync(void *dest, const void *src, size_t size)
     }
 }
 
+void *opal_cuda_memcpy_async(void *dest, const void *src, size_t size)
+{
+    return NULL;
+}
+
 /*
  * In some cases, need an implementation of memmove.  This is not fast, but
  * it is not often needed.
