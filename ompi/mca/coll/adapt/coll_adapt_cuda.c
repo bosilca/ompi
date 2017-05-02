@@ -1,6 +1,7 @@
 #include "coll_adapt.h"
 #include "coll_adapt_cuda.h"
 #include "coll_adapt_cuda_mpool.h"
+#include "coll_adapt_context.h"
 #include "opal/mca/common/cuda/common_cuda.h"
 #include "opal/mca/installdirs/installdirs.h"
 #include <dlfcn.h>
@@ -109,5 +110,33 @@ int coll_adapt_cuda_get_gpu_topo(ompi_coll_topo_gpu_t *gpu_topo)
 int coll_adapt_cuda_free_gpu_topo(ompi_coll_topo_gpu_t *gpu_topo)
 {
     free(gpu_topo->gpu_numa);
+    return OMPI_SUCCESS;
+}
+
+int coll_adapt_cuda_progress(void)
+{
+    char *context;
+/*    while (1 == progress_one_cuda_op_event((void **)&context)) {
+        if (context != NULL) {
+            int *flag = (int *)(context + sizeof(opal_free_list_item_t));
+            if (*flag == COLL_ADAPT_CUDA_CONTEXT_FLAGS_REDUCE) {
+              //  opal_output(0, "reduce call back\n");
+                mca_coll_adapt_cuda_reduce_context_t *reduce_context = (mca_coll_adapt_cuda_reduce_context_t *)context;
+                assert(reduce_context->cuda_callback != NULL);
+                reduce_context->cuda_callback(reduce_context);
+            }
+        }
+    }*/
+    while (1 == progress_one_cuda_memcpy_event((void **)&context)) {
+        if (context != NULL) {
+            int *flag = (int *)(context + sizeof(opal_free_list_item_t));
+            if (*flag == COLL_ADAPT_CONTEXT_FLAGS_CUDA_BCAST) {
+        //        opal_output(0, "bcast call back\n");
+                mca_coll_adapt_bcast_context_t *bcast_context = (mca_coll_adapt_bcast_context_t *)context;
+                assert(bcast_context->cuda_callback != NULL);
+                bcast_context->cuda_callback(bcast_context);
+            }
+        }
+    }
     return OMPI_SUCCESS;
 }

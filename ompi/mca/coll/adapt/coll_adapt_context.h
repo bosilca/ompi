@@ -11,8 +11,8 @@
 #define CPU_BUFFER_MEMCPY_DONE  1
 #define CPU_BUFFER_MEMCPY_NOT_DONE  0
 
-#define COLL_ADAPT_CUDA_CONTEXT_FLAGS_BCAST     0x2
-#define COLL_ADAPT_CUDA_CONTEXT_FLAGS_REDUCE     0x4
+#define COLL_ADAPT_CONTEXT_FLAGS_CUDA_BCAST     0x2
+#define COLL_ADAPT_CONTEXT_FLAGS_CUDA_REDUCE     0x4
 #endif
 
 /* bcast constant context in bcast context */
@@ -47,17 +47,26 @@ typedef struct mca_coll_adapt_constant_bcast_context_s mca_coll_adapt_constant_b
 OBJ_CLASS_DECLARATION(mca_coll_adapt_constant_bcast_context_t);
 
 
-//bcast context
+/* bcast context of each segment*/
+typedef struct mca_coll_adapt_bcast_context_s mca_coll_adapt_bcast_context_t;
+
+typedef int (*mca_coll_adapt_bcast_cuda_callback_fn_t)(mca_coll_adapt_bcast_context_t *context);
+
 struct mca_coll_adapt_bcast_context_s {
     opal_free_list_item_t super;
+#if OPAL_CUDA_SUPPORT
+    int flags;
+#endif
     char *buff;
     int frag_id;
     int child_id;
     int peer;
     mca_coll_adapt_constant_bcast_context_t * con;
+#if OPAL_CUDA_SUPPORT 
+    size_t send_count;
+    mca_coll_adapt_bcast_cuda_callback_fn_t cuda_callback; 
+#endif
 };
-
-typedef struct mca_coll_adapt_bcast_context_s mca_coll_adapt_bcast_context_t;
 
 OBJ_CLASS_DECLARATION(mca_coll_adapt_bcast_context_t);
 

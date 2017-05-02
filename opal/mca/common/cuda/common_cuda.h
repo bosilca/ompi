@@ -61,13 +61,17 @@ OPAL_DECLSPEC int mca_common_cuda_record_dtoh_event(char *msg,
                                                     struct mca_btl_base_descriptor_t *frag);
 OPAL_DECLSPEC int mca_common_cuda_record_htod_event(char *msg,
                                                     struct mca_btl_base_descriptor_t *frag);
+OPAL_DECLSPEC int mca_common_cuda_record_memcpy_event(char *msg, void *frag);
 
 OPAL_DECLSPEC void *mca_common_cuda_get_dtoh_stream(void);
 OPAL_DECLSPEC void *mca_common_cuda_get_htod_stream(void);
 
+OPAL_DECLSPEC int mca_common_cuda_sync_memcpy_stream(void);
+
 OPAL_DECLSPEC int progress_one_cuda_ipc_event(struct mca_btl_base_descriptor_t **);
 OPAL_DECLSPEC int progress_one_cuda_dtoh_event(struct mca_btl_base_descriptor_t **);
 OPAL_DECLSPEC int progress_one_cuda_htod_event(struct mca_btl_base_descriptor_t **);
+OPAL_DECLSPEC int progress_one_cuda_memcpy_event(void **callback_frag);
 
 OPAL_DECLSPEC int mca_common_cuda_memhandle_matches(mca_rcache_common_cuda_reg_t *new_reg,
                                                     mca_rcache_common_cuda_reg_t *old_reg);

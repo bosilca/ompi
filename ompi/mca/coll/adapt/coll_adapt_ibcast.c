@@ -53,6 +53,11 @@ static mca_coll_adapt_algorithm_index_t mca_coll_adapt_ibcast_algorithm_index[] 
     {8, (uintptr_t)mca_coll_adapt_ibcast_topoaware_chain}
 };
 
+#if OPAL_CUDA_SUPPORT
+static int bcast_init_cpu_buff(mca_coll_adapt_constant_bcast_context_t *con);
+static int bcast_send_context_async_memcpy_callback(mca_coll_adapt_bcast_context_t *send_context);
+static int update_ref_count(mca_coll_adapt_bcast_context_t *context);
+#endif
 
 int mca_coll_adapt_ibcast_init(void)
 {
@@ -113,6 +118,7 @@ static inline int bcast_request_fini(mca_coll_adapt_bcast_context_t *context)
     int free_count = 0;
     int k;
     mca_mpool_base_module_t *mpool = mca_coll_adapt_component.pined_cpu_mpool;
+    mca_common_cuda_sync_memcpy_stream();
     if (con->cpu_buff_list != NULL) {
         for (k = 0; k < con->num_segs; k++) {
             if (con->cpu_buff_list[k] != NULL) {
@@ -136,23 +142,9 @@ static inline int bcast_request_fini(mca_coll_adapt_bcast_context_t *context)
     OBJ_RELEASE(context->con);
     opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
     ompi_request_complete(temp_req, 1);
+    
+    return OMPI_SUCCESS;
 }
-
-#if OPAL_CUDA_SUPPORT
-static inline int bcast_init_cpu_buff(mca_coll_adapt_constant_bcast_context_t *con)
-{
-    int k;
-    con->cpu_buff_list = malloc(sizeof(char*) * con->num_segs);
-    assert(con->cpu_buff_list != NULL);
-    con->cpu_buff_memcpy_flags = (int *)malloc(sizeof(int) * con->num_segs);
-    con->cpu_buff_list_ref_count = (int *)malloc(sizeof(int) * con->num_segs);
-    for (k = 0; k < con->num_segs; k++) {
-        con->cpu_buff_memcpy_flags[k] = CPU_BUFFER_MEMCPY_NOT_DONE;
-        con->cpu_buff_list[k] = NULL;
-        con->cpu_buff_list_ref_count[k] = 0;
-    }
-}
-#endif
 
 //send call back
 static int send_cb(ompi_request_t *req)
@@ -173,6 +165,10 @@ static int send_cb(ompi_request_t *req)
     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d, %" PRIx64 "]: Send(cb): segment %d to %d at buff %p root %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->con->root));
 
     OPAL_THREAD_LOCK(context->con->mutex);
+#if OPAL_CUDA_SUPPORT    
+    /*  check if cpu_buff_list can be released */
+    update_ref_count(context);
+#endif
     int sent_id = context->con->send_array[context->child_id];
     //has fragments in recv_array can be sent
     if (sent_id < context->con->num_recv_segs) {
@@ -296,7 +292,10 @@ static int recv_cb(ompi_request_t *req){
             if (context->frag_id == (context->con->num_segs - 1)) {
                 copy_count = context->con->count - context->frag_id * context->con->seg_count;
             }
+            context->con->datatype->super.flags |= OPAL_DATATYPE_FLAG_GPU_MEMCPY_ASYNC;
             ompi_datatype_copy_content_same_ddt(context->con->datatype, copy_count, context->buff, context->con->cpu_buff_list[context->frag_id]);
+            context->con->datatype->super.flags &= ~OPAL_DATATYPE_FLAG_GPU_MEMCPY_ASYNC;
+          //  mca_common_cuda_sync_memcpy_stream();
             context->con->cpu_buff_memcpy_flags[context->frag_id] = CPU_BUFFER_MEMCPY_DONE;
         }
     }
@@ -324,13 +323,27 @@ static int recv_cb(ompi_request_t *req){
 #if OPAL_CUDA_SUPPORT
             if (send_context->con->gpu_use_cpu_buff) {
                 if (tree->topo_flags == 1) {  /* socket leader, move data from cpu buff into send_buff */
+                    //send_context->buff = context->buff;
+                    //send_buff = send_context->buff;
+                    send_context->send_count = send_count;
                     send_context->buff = context->buff;
-                    send_buff = send_context->buff;
+                    send_context->flags = COLL_ADAPT_CONTEXT_FLAGS_CUDA_BCAST;
+                    send_context->cuda_callback = bcast_send_context_async_memcpy_callback;
+                    mca_common_cuda_record_memcpy_event("memcpy in coll_adapt_cuda_bcast", (void *)send_context);
+                    continue; /* do not send now, send in call back */
+                    
                 } else if (tree->topo_flags == 0) {  /* node leader */
                     assert(context->con->cpu_buff_list[context->frag_id] != NULL);
                     if (tree->tree_next_topo_flags[i] == 2) { /* send to process in his group */
+                        //send_context->buff = context->buff;
+                        //send_buff = send_context->buff;
+                        send_context->send_count = send_count;
                         send_context->buff = context->buff;
-                        send_buff = send_context->buff;
+                        send_context->flags = COLL_ADAPT_CONTEXT_FLAGS_CUDA_BCAST;
+                        send_context->cuda_callback = bcast_send_context_async_memcpy_callback;
+                        mca_common_cuda_record_memcpy_event("memcpy in coll_adapt_cuda_bcast", (void *)send_context);
+                        continue; /* do not send now, send in call back */
+                        
                     } else { /* send to node/socket leader, use cpu buff */
                         send_buff = context->con->cpu_buff_list[context->frag_id];
                     }
@@ -1602,6 +1615,51 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
     
     return MPI_SUCCESS;
 }
+
+#if OPAL_CUDA_SUPPORT
+static int bcast_init_cpu_buff(mca_coll_adapt_constant_bcast_context_t *con)
+{
+    int k;
+    con->cpu_buff_list = malloc(sizeof(char*) * con->num_segs);
+    assert(con->cpu_buff_list != NULL);
+    con->cpu_buff_memcpy_flags = (int *)malloc(sizeof(int) * con->num_segs);
+    con->cpu_buff_list_ref_count = (int *)malloc(sizeof(int) * con->num_segs);
+    for (k = 0; k < con->num_segs; k++) {
+        con->cpu_buff_memcpy_flags[k] = CPU_BUFFER_MEMCPY_NOT_DONE;
+        con->cpu_buff_list[k] = NULL;
+        con->cpu_buff_list_ref_count[k] = 0;
+    }
+    return OMPI_SUCCESS;
+}
+
+static int bcast_send_context_async_memcpy_callback(mca_coll_adapt_bcast_context_t *send_context)
+{
+    ompi_request_t *send_req;
+  //  printf("progress bcast context %p\n", send_context);
+    send_context->con->cpu_buff_memcpy_flags[send_context->frag_id] = CPU_BUFFER_MEMCPY_DONE;
+    int err = MCA_PML_CALL(isend(send_context->buff, send_context->send_count, send_context->con->datatype, send_context->peer, (send_context->con->ibcast_tag << 16) + send_context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, send_context->con->comm, &send_req));
+    ompi_request_set_callback(send_req, send_cb, send_context);
+    return OMPI_SUCCESS;
+}
+
+static int update_ref_count(mca_coll_adapt_bcast_context_t *context)
+{
+    ompi_coll_tree_t *tree = context->con->tree;
+    
+    mca_mpool_base_module_t *mpool = mca_coll_adapt_component.pined_cpu_mpool;
+    
+    if (context->con->cpu_buff_list != NULL) {
+        context->con->cpu_buff_list_ref_count[context->frag_id] ++;
+        if (tree->tree_nextsize == context->con->cpu_buff_list_ref_count[context->frag_id]) {
+            if (context->con->cpu_buff_list[context->frag_id] != NULL) {
+                mpool->mpool_free(mpool, context->con->cpu_buff_list[context->frag_id]);
+                context->con->cpu_buff_list[context->frag_id] = NULL;
+            }
+        } 
+    }
+    return OMPI_SUCCESS;
+}
+#endif
 
 
 
