@@ -7,7 +7,7 @@
  * Copyright (c) 2010-2012 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2013      Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2015-2016 Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016      FUJITSU LIMITED.  All rights reserved.
  * $COPYRIGHT$
@@ -432,6 +432,8 @@ extern const ompi_datatype_t* ompi_datatype_basicDatatypes[OMPI_DATATYPE_MPI_MAX
     OMPI_DATATYPE_INIT_PREDEFINED_BASIC_TYPE( NAME, NAME, FLAGS )
 #define OMPI_DATATYPE_INIT_UNAVAILABLE( NAME, FLAGS )                                \
     OMPI_DATATYPE_INIT_PREDEFINED_BASIC_TYPE( UNAVAILABLE, NAME, FLAGS )
+#define OMPI_DATATYPE_INIT_UNAVAILABLE_BASIC_TYPE(TYPE, NAME, FLAGS)                 \
+    OMPI_DATATYPE_INIT_PREDEFINED_BASIC_TYPE( UNAVAILABLE, NAME, FLAGS )
 
 /*
  * Initilization for these types is deferred until runtime.
@@ -465,7 +467,7 @@ extern const ompi_datatype_t* ompi_datatype_basicDatatypes[OMPI_DATATYPE_MPI_MAX
         .name = OPAL_DATATYPE_INIT_NAME(TYPE ## SIZE),                               \
         .desc = OPAL_DATATYPE_INIT_DESC_PREDEFINED(TYPE ## SIZE),                    \
         .opt_desc = OPAL_DATATYPE_INIT_DESC_PREDEFINED(TYPE ## SIZE),                \
-	.btypes = OPAL_DATATYPE_INIT_BTYPES_ARRAY(TYPE ## SIZE)                      \
+        .ptypes = OPAL_DATATYPE_INIT_PTYPES_ARRAY(TYPE ## SIZE)                      \
     }
 
 #define OMPI_DATATYPE_INIT_PREDEFINED_BASIC_TYPE_FORTRAN( TYPE, NAME, SIZE, ALIGN, FLAGS ) \
