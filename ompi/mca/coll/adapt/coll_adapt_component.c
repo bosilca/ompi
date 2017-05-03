@@ -30,6 +30,7 @@ const char *mca_coll_adapt_component_version_string =
 /*
  * Local functions
  */
+static int adapt_open(void);
 static int adapt_close(void);
 static int adapt_register(void);
 
@@ -58,7 +59,7 @@ mca_coll_adapt_component_t mca_coll_adapt_component = {
             OMPI_RELEASE_VERSION,
 
             /* Component functions */
-            NULL, /* open */
+            adapt_open, /* open */
             adapt_close,
             NULL, /* query */
             adapt_register
@@ -103,10 +104,32 @@ mca_coll_adapt_component_t mca_coll_adapt_component = {
     
     /* (default) verbose level */
     0,
-
+    
+    /* (default) maximum number of segment in context free list */
+    10,
+    
+    /* (default) minimum number of segment in context free list */
+    10000,
+    
+    /* (default) increasement number of segment in context free list */
+    10,
+    
     /* default values for non-MCA parameters */
     /* Not specifying values here gives us all 0's */
 };
+
+/* open the component */
+static int adapt_open(void)
+{
+    int rc;
+    rc = opal_progress_register(coll_adapt_cuda_progress);
+    if (OMPI_SUCCESS != rc ) {
+        fprintf(stderr," failed to register the cuda progress function \n");
+        fflush(stderr);
+        return rc;
+    }
+    return OMPI_SUCCESS;
+}
 
 
 /*

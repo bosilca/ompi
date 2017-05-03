@@ -43,6 +43,8 @@ sources = \
 if OPAL_cuda_support
 sources += coll_adapt_cuda.c
 sources += coll_adapt_cuda.h
+sources += coll_adapt_cuda_mpool.c
+sources += coll_adapt_cuda_mpool.h
 SUBDIRS      = . cuda
 endif
 

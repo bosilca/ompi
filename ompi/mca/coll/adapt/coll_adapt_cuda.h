@@ -24,6 +24,8 @@ int coll_adapt_cuda_get_gpu_topo(ompi_coll_topo_gpu_t *gpu_topo);
 
 int coll_adapt_cuda_free_gpu_topo(ompi_coll_topo_gpu_t *gpu_topo);
 
+int coll_adapt_cuda_progress(void);
+
 #endif
 
 #endif

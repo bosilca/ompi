@@ -7,6 +7,14 @@
 #include "ompi/mca/coll/base/coll_base_topo.h"  //ompi_coll_tree_t
 #include "coll_adapt_inbuf.h"
 
+#if OPAL_CUDA_SUPPORT  
+#define CPU_BUFFER_MEMCPY_DONE  1
+#define CPU_BUFFER_MEMCPY_NOT_DONE  0
+
+#define COLL_ADAPT_CONTEXT_FLAGS_CUDA_BCAST     0x2
+#define COLL_ADAPT_CONTEXT_FLAGS_CUDA_REDUCE     0x4
+#endif
+
 /* bcast constant context in bcast context */
 struct mca_coll_adapt_constant_bcast_context_s {
     opal_object_t  super;
@@ -26,6 +34,12 @@ struct mca_coll_adapt_constant_bcast_context_s {
     int num_sent_segs;  //number of sent segments
     ompi_coll_tree_t * tree;
     int ibcast_tag;
+    int gpu_use_cpu_buff;
+#if OPAL_CUDA_SUPPORT    
+    char **cpu_buff_list;
+    int *cpu_buff_memcpy_flags;
+    int *cpu_buff_list_ref_count;
+#endif
 };
 
 typedef struct mca_coll_adapt_constant_bcast_context_s mca_coll_adapt_constant_bcast_context_t;
@@ -33,17 +47,26 @@ typedef struct mca_coll_adapt_constant_bcast_context_s mca_coll_adapt_constant_b
 OBJ_CLASS_DECLARATION(mca_coll_adapt_constant_bcast_context_t);
 
 
-//bcast context
+/* bcast context of each segment*/
+typedef struct mca_coll_adapt_bcast_context_s mca_coll_adapt_bcast_context_t;
+
+typedef int (*mca_coll_adapt_bcast_cuda_callback_fn_t)(mca_coll_adapt_bcast_context_t *context);
+
 struct mca_coll_adapt_bcast_context_s {
     opal_free_list_item_t super;
+#if OPAL_CUDA_SUPPORT
+    int flags;
+#endif
     char *buff;
     int frag_id;
     int child_id;
     int peer;
     mca_coll_adapt_constant_bcast_context_t * con;
+#if OPAL_CUDA_SUPPORT 
+    size_t send_count;
+    mca_coll_adapt_bcast_cuda_callback_fn_t cuda_callback; 
+#endif
 };
-
-typedef struct mca_coll_adapt_bcast_context_s mca_coll_adapt_bcast_context_t;
 
 OBJ_CLASS_DECLARATION(mca_coll_adapt_bcast_context_t);
 
