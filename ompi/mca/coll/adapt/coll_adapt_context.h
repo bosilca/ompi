@@ -110,7 +110,6 @@ struct mca_coll_adapt_constant_bcast_two_trees_context_s {
     int real_seg_size;
     int* num_segs;
     ompi_request_t * request;
-    opal_free_list_t ** context_lists;
     int** recv_arrays;
     int** send_arrays;
     int *num_recv_segs; //store the length of the fragment array, how many fragments are recevied
@@ -118,6 +117,7 @@ struct mca_coll_adapt_constant_bcast_two_trees_context_s {
     opal_mutex_t * mutex;
     ompi_coll_tree_t ** trees;
     int complete;
+    int ibcast_tag;
 };
 
 typedef struct mca_coll_adapt_constant_bcast_two_trees_context_s mca_coll_adapt_constant_bcast_two_trees_context_t;
