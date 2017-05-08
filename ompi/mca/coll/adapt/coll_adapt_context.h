@@ -10,6 +10,7 @@
 #if OPAL_CUDA_SUPPORT  
 #define CPU_BUFFER_MEMCPY_DONE  1
 #define CPU_BUFFER_MEMCPY_NOT_DONE  0
+#define CPU_BUFFER_MEMCPY_PENDING  2
 
 #define COLL_ADAPT_CONTEXT_FLAGS_CUDA_BCAST     0x2
 #define COLL_ADAPT_CONTEXT_FLAGS_CUDA_REDUCE     0x4
@@ -62,7 +63,8 @@ struct mca_coll_adapt_bcast_context_s {
     int child_id;
     int peer;
     mca_coll_adapt_constant_bcast_context_t * con;
-#if OPAL_CUDA_SUPPORT 
+#if OPAL_CUDA_SUPPORT
+    int debug_flag; 
     size_t send_count;
     mca_coll_adapt_bcast_cuda_callback_fn_t cuda_callback; 
 #endif
@@ -77,6 +79,7 @@ struct mca_coll_adapt_constant_reduce_context_s {
     size_t seg_count;
     ompi_datatype_t * datatype;
     ompi_communicator_t * comm;
+    size_t real_seg_size;
     int segment_increment;      //increment of each segment
     int num_segs;
     ompi_request_t * request;
@@ -92,6 +95,7 @@ struct mca_coll_adapt_constant_reduce_context_s {
     ompi_op_t * op;  //reduce operation
     ompi_coll_tree_t * tree;
     char ** accumbuf;   //accumulate buff, used in reduce
+    char ** accumbuf_to_inbuf;  /* inbuf list address of accumbuf */
     opal_free_list_t *inbuf_list;
     opal_list_t *recv_list;    //a list to store the segments which are received and not yet be sent
     ptrdiff_t lower_bound;
@@ -101,6 +105,7 @@ struct mca_coll_adapt_constant_reduce_context_s {
     int root;
     int distance;   //address of inbuf->buff to address of inbuf
     int ireduce_tag;
+    int buff_type; /* memory type, CPU or GPU */
 };
 
 typedef struct mca_coll_adapt_constant_reduce_context_s mca_coll_adapt_constant_reduce_context_t;

@@ -2038,6 +2038,7 @@ static int mca_common_cuda_cu_memcpy_async(void *dest, const void *src, size_t s
 static int mca_common_cuda_cu_memcpy(void *dest, const void *src, size_t size)
 {
     CUresult result;
+    printf("cuda memcpy src %p, dst %p, size %d\n", dest, src, size);
 #if OPAL_ENABLE_DEBUG
     CUmemorytype memTypeSrc, memTypeDst;
     if (OPAL_UNLIKELY(mca_common_cuda_cumemcpy_timing)) {
@@ -2195,6 +2196,17 @@ int mca_common_cuda_is_stage_three_init(void)
     } else {
         return 0;
     }
+}
+
+int mca_common_cuda_alloc(void **ptr, size_t size)
+{
+    CUresult result;
+    result = cuFunc.cuMemAlloc((CUdeviceptr*)ptr, size); 
+    if (OPAL_UNLIKELY(CUDA_SUCCESS != result)) {
+        opal_output(0, "CUDA: cuMemAlloc failed: res=%d", result); 
+        return OPAL_ERROR;
+    } 
+    return 0;
 }
 
 #if OPAL_CUDA_GDR_SUPPORT

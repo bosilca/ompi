@@ -23,6 +23,11 @@
 #include "opal/mca/mpool/mpool.h"
 #endif
 
+#if OPAL_CUDA_SUPPORT  
+#define CPU_BUFFER  0
+#define GPU_BUFFER  1
+#endif
+
 BEGIN_C_DECLS
 
 typedef struct mca_coll_adapt_module_t mca_coll_adapt_module_t;
@@ -87,6 +92,9 @@ typedef struct mca_coll_adapt_component_t {
 #if OPAL_CUDA_SUPPORT    
     /** pinned cpu memory for GPU use */
     mca_mpool_base_module_t *pined_cpu_mpool;
+    
+    /** pinned gpu memory for GPU use */
+    mca_mpool_base_module_t *pined_gpu_mpool;
 #endif
 } mca_coll_adapt_component_t;
 

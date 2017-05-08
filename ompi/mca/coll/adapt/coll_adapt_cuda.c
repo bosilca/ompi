@@ -44,6 +44,7 @@ int coll_adapt_cuda_init(void)
         mca_coll_adapt_component.coll_adapt_cuda_enabled = 1;
         
         mca_coll_adapt_component.pined_cpu_mpool = NULL;
+        mca_coll_adapt_component.pined_gpu_mpool = NULL;
         
         opal_output( 0, "coll_adapt_cuda_init done\n");
     }
@@ -68,6 +69,7 @@ int coll_adapt_cuda_fini(void)
         coll_adapt_cuda_kernel_lib = NULL;
         mca_coll_adapt_component.coll_adapt_cuda_enabled = 0;
         mca_coll_adapt_component.pined_cpu_mpool = NULL;
+        mca_coll_adapt_component.pined_gpu_mpool = NULL;
         opal_output( 0, "coll_adapt_cuda_fini done\n");
     }
     

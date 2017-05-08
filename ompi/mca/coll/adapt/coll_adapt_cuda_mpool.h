@@ -8,6 +8,9 @@
 #include "opal/mca/event/event.h"
 #include "opal/mca/mpool/mpool.h"
 
+#define MPOOL_CPU 0x1
+#define MPOOL_GPU 0x2
+
 BEGIN_C_DECLS
     
 typedef struct coll_adapt_cuda_mpool_buffer {
@@ -34,7 +37,7 @@ typedef struct coll_adapt_cuda_mpool_module {
     size_t buffer_total_size;
 } coll_adapt_cuda_mpool_module_t;
 
-mca_mpool_base_module_t *coll_adapt_cuda_mpool_create (void);
+mca_mpool_base_module_t *coll_adapt_cuda_mpool_create (int mpool_type);
 
 END_C_DECLS
 
