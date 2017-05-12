@@ -422,9 +422,11 @@ int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatyp
         }
         int ibcast_tag = opal_atomic_add_32(&(comm->c_ibcast_tag), 1);
         ibcast_tag = ibcast_tag % 4096;
-//        if (1 == mca_coll_adapt_component.coll_adapt_cuda_enabled && coll_adapt_cuda_is_gpu_buffer(buff)) {
-//            return mca_coll_adapt_ibcast_cuda(buff, count, datatype, root, comm, request, module, ibcast_tag);
-//        }
+#if OPAL_CUDA_SUPPORT
+        if (1 == mca_common_is_cuda_buffer(buff)) {
+            return mca_coll_adapt_ibcast_cuda(buff, count, datatype, root, comm, request, module, ibcast_tag);
+        }
+#endif
         mca_coll_adapt_ibcast_fn_t bcast_func = (mca_coll_adapt_ibcast_fn_t)mca_coll_adapt_ibcast_algorithm_index[coll_adapt_ibcast_algorithm].algorithm_fn_ptr;
         return bcast_func(buff, count, datatype, root, comm, request, module, ibcast_tag);
         //return mca_coll_adapt_ibcast_binomial(buff, count, datatype, root, comm, request, module, ibcast_tag);
@@ -434,7 +436,10 @@ int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatyp
 #if OPAL_CUDA_SUPPORT
 int mca_coll_adapt_ibcast_cuda(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag) {
     coll_adapt_ibcast_segment_size = 524288;
-    if (0 == mca_common_cuda_is_stage_three_init() || 0 == mca_coll_adapt_component.coll_adapt_cuda_enabled) {
+    if (0 == mca_coll_adapt_component.coll_adapt_cuda_enabled) {
+        coll_adapt_cuda_init();
+    }
+    if (0 == mca_common_cuda_is_stage_three_init()) {
         return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
     } else {
      //   return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);

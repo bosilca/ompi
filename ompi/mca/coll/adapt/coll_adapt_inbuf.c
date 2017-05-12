@@ -20,6 +20,7 @@ mca_coll_adapt_inbuf_t* coll_adapt_alloc_inbuf(opal_free_list_t *inbuf_list, siz
         inbuf->buff = mpool->mpool_alloc(mpool, sizeof(char)*size, 0, 0);
     }
 #endif
+    //printf("inbuf %p, buff %p\n", inbuf, inbuf->buff);
     return inbuf;
 }
 

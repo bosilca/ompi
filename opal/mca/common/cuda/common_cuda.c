@@ -126,6 +126,7 @@ static CUstream ipcStream = NULL;
 static CUstream dtohStream = NULL;
 static CUstream htodStream = NULL;
 static CUstream memcpyStream = NULL;
+static CUstream *opStreams = NULL;
 static int mca_common_cuda_gpu_mem_check_workaround = (CUDA_VERSION > 7000) ? 0 : 1;
 static opal_mutex_t common_cuda_init_lock;
 static opal_mutex_t common_cuda_htod_lock;
@@ -162,6 +163,22 @@ static int mca_common_cuda_cumemcpy_async;
 static int mca_common_cuda_cumemcpy_timing;
 #endif /* OPAL_ENABLE_DEBUG */
 
+/* Number of cuda streams used for OP */
+int mca_common_cuda_nb_op_nstreams = 4;
+
+/* Structure of to hold cuda event for OP */
+struct common_cuda_op_event_s {
+    opal_list_item_t super;
+    CUevent cuda_event;
+};
+typedef struct common_cuda_op_event_s common_cuda_op_event_t;
+OBJ_CLASS_DECLARATION(common_cuda_op_event_t);
+OBJ_CLASS_INSTANCE(common_cuda_op_event_t,
+                   opal_list_item_t,
+                   NULL,
+                   NULL);
+static opal_list_t common_cuda_op_event_list;
+
 /* Array of CUDA events to be queried for IPC stream, sending side and
  * receiving side. */
 CUevent *cuda_event_ipc_array = NULL;
@@ -170,6 +187,9 @@ CUevent *cuda_event_htod_array = NULL;
 
 /* Array of CUDA evernts to be queries for memcpy stream, used in bcast moving data from cpu to gpu memory */
 CUevent *cuda_event_memcpy_array = NULL;
+
+/* Array of CUDA evernts to be queries for op stream, used in reduce for op */
+common_cuda_op_event_t **cuda_event_op_array = NULL;
 
 /* Array of fragments currently being moved by cuda async non-blocking
  * operations */
@@ -182,15 +202,15 @@ void **cuda_event_op_callback_frag_array = NULL;
 
 /* First free/available location in cuda_event_status_array */
 static int cuda_event_ipc_first_avail, cuda_event_dtoh_first_avail, cuda_event_htod_first_avail;
-static int cuda_event_memcpy_first_avail;
+static int cuda_event_memcpy_first_avail, cuda_event_op_first_avail;
 
 /* First currently-being used location in the cuda_event_status_array */
 static int cuda_event_ipc_first_used, cuda_event_dtoh_first_used, cuda_event_htod_first_used;
-static int cuda_event_memcpy_first_used;
+static int cuda_event_memcpy_first_used, cuda_event_op_first_used;
 
 /* Number of status items currently in use */
 static int cuda_event_ipc_num_used, cuda_event_dtoh_num_used, cuda_event_htod_num_used;
-static int cuda_event_memcpy_num_used;
+static int cuda_event_memcpy_num_used, cuda_event_op_num_used;
 
 /* Size of array holding events */
 int cuda_event_max = 400;
@@ -2207,6 +2227,11 @@ int mca_common_cuda_alloc(void **ptr, size_t size)
         return OPAL_ERROR;
     } 
     return 0;
+}
+
+int mca_common_is_cuda_buffer(const void *pUserBuf)
+{
+    return mca_common_cuda_is_gpu_buffer(pUserBuf, NULL);
 }
 
 #if OPAL_CUDA_GDR_SUPPORT

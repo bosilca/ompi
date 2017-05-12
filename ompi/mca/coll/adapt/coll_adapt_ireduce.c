@@ -17,6 +17,8 @@
 #include "opal/mca/common/cuda/common_cuda.h"
 #endif
 
+#include "coll_adapt_op.h"
+
 #define FREE_LIST_NUM_INBUF_LIST 10    //The start size of the context free list
 #define FREE_LIST_MAX_INBUF_LIST 10000  //The max size of the context free list
 #define FREE_LIST_INC_INBUF_LIST 10    //The incresment of the context free list
@@ -308,14 +310,14 @@ static int recv_cb(ompi_request_t *req){
             }
         }
         //op sbuf and accmbuf to accumbuf
-        ompi_op_reduce(context->con->op, context->con->sbuf + (ptrdiff_t)context->frag_id * (ptrdiff_t)context->con->segment_increment, context->con->accumbuf[context->frag_id], op_count, context->con->datatype);
+        coll_adapt_op_reduce(context->con->op, context->con->sbuf + (ptrdiff_t)context->frag_id * (ptrdiff_t)context->con->segment_increment, context->con->accumbuf[context->frag_id], op_count, context->con->datatype, context->con->buff_type);
         
     }
     else {
         if (context->inbuf == NULL) {
             //op rbuf and accumbuf to rbuf
             OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: op rbuf and accumbuf to rbuf\n", context->con->rank));
-            ompi_op_reduce(context->con->op, context->con->accumbuf[context->frag_id], context->buff, op_count, context->con->datatype);
+            coll_adapt_op_reduce(context->con->op, context->con->accumbuf[context->frag_id], context->buff, op_count, context->con->datatype, context->con->buff_type);
             //free old accumbuf
             //opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)to_inbuf(context->con->accumbuf[context->frag_id], context->con->distance));
             if (CPU_BUFFER == context->con->buff_type) {
@@ -330,7 +332,7 @@ static int recv_cb(ompi_request_t *req){
         else {
             //op inbuf and accmbuf to accumbuf
             OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: op inbuf and accmbuf to accumbuf\n", context->con->rank));
-            ompi_op_reduce(context->con->op, context->inbuf->buff - context->con->lower_bound, context->con->accumbuf[context->frag_id], op_count, context->con->datatype);
+            coll_adapt_op_reduce(context->con->op, context->inbuf->buff - context->con->lower_bound, context->con->accumbuf[context->frag_id], op_count, context->con->datatype, context->con->buff_type);
         }
     }
     
@@ -451,9 +453,11 @@ int mca_coll_adapt_ireduce(const void *sbuf, void *rbuf, int count, struct ompi_
         //get ireduce tag
         int ireduce_tag = opal_atomic_add_32(&(comm->c_ireduce_tag), 1);
         ireduce_tag = (ireduce_tag % 4096) + 4096;
-        if (1 == mca_coll_adapt_component.coll_adapt_cuda_enabled && coll_adapt_cuda_is_gpu_buffer(rbuf) && coll_adapt_cuda_is_gpu_buffer(sbuf)) {
+#if OPAL_CUDA_SUPPORT
+        if (mca_common_is_cuda_buffer(rbuf) && mca_common_is_cuda_buffer(sbuf)) {
             return mca_coll_adapt_ireduce_cuda(sbuf, rbuf, count, dtype, op, root, comm, request, module, ireduce_tag);
         }
+#endif
         mca_coll_adapt_ireduce_fn_t reduce_func = (mca_coll_adapt_ireduce_fn_t)mca_coll_adapt_ireduce_algorithm_index[coll_adapt_ireduce_algorithm].algorithm_fn_ptr;
         return reduce_func(sbuf, rbuf, count, dtype, op, root, comm, request, module, ireduce_tag);
     }
@@ -655,11 +659,11 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
     if (tree->tree_nextsize > 0) {
         inbuf_list = OBJ_NEW(opal_free_list_t);
         size_t inbuf_extend_size = 0;
-        if (GPU_BUFFER == buff_type) { /* not GPU buff, inbuf = inbuf_t + seg_size */
+        if (CPU_BUFFER == buff_type) { /* not GPU buff, inbuf = inbuf_t + seg_size */
             inbuf_extend_size = real_seg_size;
         }
         opal_free_list_init(inbuf_list,
-                            sizeof(mca_coll_adapt_inbuf_t) + real_seg_size,
+                            sizeof(mca_coll_adapt_inbuf_t) + inbuf_extend_size,
                             opal_cache_line_size,
                             OBJ_CLASS(mca_coll_adapt_inbuf_t),
                             0,opal_cache_line_size,
@@ -757,7 +761,7 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
 
         /* set inbuf coresponding to accumbuf */
         if (GPU_BUFFER == buff_type) {
-            con->accumbuf_to_inbuf = (char **) malloc (sizeof(char*) * num_segs);
+            con->accumbuf_to_inbuf = (mca_coll_adapt_inbuf_t **) malloc (sizeof(mca_coll_adapt_inbuf_t*) * num_segs);
             for (i=0; i<num_segs; i++) {
                 con->accumbuf_to_inbuf[i] = NULL;
             }
@@ -885,6 +889,9 @@ int mca_coll_adapt_ireduce_cuda(const void *sbuf, void *rbuf, int count, struct 
 {
     coll_adapt_ireduce_segment_size = 524288;
     mca_coll_base_comm_t *coll_comm = module->base_data;
+    if (0 == mca_coll_adapt_component.coll_adapt_cuda_enabled) {
+        coll_adapt_cuda_init();
+    }
     if( !( (coll_comm->cached_topochain) && (coll_comm->cached_topochain_root == root) ) ) {
         if( coll_comm->cached_topochain ) { /* destroy previous binomial if defined */
             ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topochain) );
