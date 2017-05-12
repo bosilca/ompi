@@ -88,7 +88,7 @@ int mca_coll_adapt_ireduce_init(void)
                                     OPAL_INFO_LVL_5,
                                     MCA_BASE_VAR_SCOPE_READONLY,
                                     &coll_adapt_ireduce_max_recv_requests);
-    return MPI_SUCCESS;
+    return OMPI_SUCCESS;
 }
 
 int mca_coll_adapt_ireduce_fini(void)
@@ -99,7 +99,7 @@ int mca_coll_adapt_ireduce_fini(void)
         coll_adapt_ireduce_context_free_list_enabled = 0;
         OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "reduce fini\n"));
     }
-    return MPI_SUCCESS;
+    return OMPI_SUCCESS;
 }
 
 //Can only work on commutative op
@@ -146,6 +146,45 @@ static int add_to_list(opal_list_t* list, int id){
 
 static mca_coll_adapt_inbuf_t * to_inbuf(char * buf, int distance){
     return (mca_coll_adapt_inbuf_t *)(buf - distance);
+}
+
+static int ireduce_request_fini(mca_coll_adapt_reduce_context_t *context)
+{
+    int i;
+    OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm)));
+    ompi_request_t *temp_req = context->con->request;
+    if (context->con->accumbuf != NULL) {
+        if (context->con->rank != context->con->root) {
+            for (i=0; i<context->con->num_segs; i++) {
+                //wei opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)to_inbuf(context->con->accumbuf[i], context->con->distance));
+                if (CPU_BUFFER == context->con->buff_type) {
+                    coll_adapt_free_inbuf(context->con->inbuf_list, to_inbuf(context->con->accumbuf[i], context->con->distance), context->con->buff_type);
+                } else {
+                    coll_adapt_free_inbuf(context->con->inbuf_list, context->con->accumbuf_to_inbuf[i], context->con->buff_type);
+                    context->con->accumbuf_to_inbuf[i] = NULL;
+                }
+            }
+        }
+        free(context->con->accumbuf);
+    }
+    OBJ_RELEASE(context->con->recv_list);
+    for (i=0; i<context->con->num_segs; i++) {
+        OBJ_RELEASE(context->con->mutex_op_list[i]);
+    }
+    free(context->con->mutex_op_list);
+    OBJ_RELEASE(context->con->mutex_num_recv_segs);
+    OBJ_RELEASE(context->con->mutex_recv_list);
+    OBJ_RELEASE(context->con->mutex_num_sent);
+    if (context->con->tree->tree_nextsize > 0) {
+        OBJ_RELEASE(context->con->inbuf_list);
+        free(context->con->next_recv_segs);
+    }
+    OBJ_RELEASE(context->con);
+    OBJ_RELEASE(context->con);
+    OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "return context_list\n"));
+    opal_free_list_return(coll_adapt_ireduce_context_free_list, (opal_free_list_item_t*)context);
+    ompi_request_complete(temp_req, 1);
+    return OMPI_SUCCESS;
 }
 
 static int send_cb(ompi_request_t *req){
@@ -201,40 +240,7 @@ static int send_cb(ompi_request_t *req){
     //check whether signal the condition, non root and sent all the segments
     if (context->con->tree->tree_root != context->con->rank && num_sent == context->con->num_segs) {
         OPAL_THREAD_UNLOCK(context->con->mutex_num_sent);
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in send\n", ompi_comm_rank(context->con->comm)));
-        int i;
-        ompi_request_t *temp_req = context->con->request;
-        if (context->con->accumbuf != NULL) {
-            if (context->con->rank != context->con->root ) {
-                for (i=0; i<context->con->num_segs; i++) {
-                    //wei opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)to_inbuf(context->con->accumbuf[i], context->con->distance));
-                    if (CPU_BUFFER == context->con->buff_type) {
-                        coll_adapt_free_inbuf(context->con->inbuf_list, to_inbuf(context->con->accumbuf[i], context->con->distance), context->con->buff_type);
-                    } else {
-                        coll_adapt_free_inbuf(context->con->inbuf_list, context->con->accumbuf_to_inbuf[i], context->con->buff_type);
-                        context->con->accumbuf_to_inbuf[i] = NULL;
-                    }
-                }
-            }
-            free(context->con->accumbuf);
-        }
-        OBJ_RELEASE(context->con->recv_list);
-        for (i=0; i<context->con->num_segs; i++) {
-            OBJ_RELEASE(context->con->mutex_op_list[i]);
-        }
-        free(context->con->mutex_op_list);
-        OBJ_RELEASE(context->con->mutex_num_recv_segs);
-        OBJ_RELEASE(context->con->mutex_recv_list);
-        OBJ_RELEASE(context->con->mutex_num_sent);
-        if (context->con->tree->tree_nextsize > 0) {
-            OBJ_RELEASE(context->con->inbuf_list);
-            free(context->con->next_recv_segs);
-        }
-        OBJ_RELEASE(context->con);
-        OBJ_RELEASE(context->con);
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "return context_list\n"));
-        opal_free_list_return(coll_adapt_ireduce_context_free_list, (opal_free_list_item_t*)context);
-        ompi_request_complete(temp_req, 1);
+        ireduce_request_fini(context);
     }
     else{
         OPAL_THREAD_UNLOCK(context->con->mutex_num_sent);
@@ -385,44 +391,11 @@ static int recv_cb(ompi_request_t *req){
     //if this is root and has received all the segments
     if (context->con->tree->tree_root == context->con->rank && num_recv_segs_t == context->con->num_segs * context->con->tree->tree_nextsize) {
         OPAL_THREAD_UNLOCK (context->con->mutex_num_recv_segs);
-        int i;
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm)));
-        ompi_request_t *temp_req = context->con->request;
         if (!keep_inbuf && context->inbuf != NULL) {
             // wei opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
             coll_adapt_free_inbuf(context->con->inbuf_list, context->inbuf, context->con->buff_type);
         }
-        if (context->con->accumbuf != NULL) {
-            if (context->con->rank != context->con->root) {
-                for (i=0; i<context->con->num_segs; i++) {
-                    //wei opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)to_inbuf(context->con->accumbuf[i], context->con->distance));
-                    if (CPU_BUFFER == context->con->buff_type) {
-                        coll_adapt_free_inbuf(context->con->inbuf_list, to_inbuf(context->con->accumbuf[i], context->con->distance), context->con->buff_type);
-                    } else {
-                        coll_adapt_free_inbuf(context->con->inbuf_list, context->con->accumbuf_to_inbuf[i], context->con->buff_type);
-                        context->con->accumbuf_to_inbuf[i] = NULL;
-                    }
-                }
-            }
-            free(context->con->accumbuf);
-        }
-        OBJ_RELEASE(context->con->recv_list);
-        for (i=0; i<context->con->num_segs; i++) {
-            OBJ_RELEASE(context->con->mutex_op_list[i]);
-        }
-        free(context->con->mutex_op_list);
-        OBJ_RELEASE(context->con->mutex_num_recv_segs);
-        OBJ_RELEASE(context->con->mutex_recv_list);
-        OBJ_RELEASE(context->con->mutex_num_sent);
-        if (context->con->tree->tree_nextsize > 0) {
-            OBJ_RELEASE(context->con->inbuf_list);
-            free(context->con->next_recv_segs);
-        }
-        OBJ_RELEASE(context->con);
-        OBJ_RELEASE(context->con);
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "return context_list\n"));
-        opal_free_list_return(coll_adapt_ireduce_context_free_list, (opal_free_list_item_t*)context);
-        ompi_request_complete(temp_req, 1);
+        ireduce_request_fini(context);
     }
     else{
         OPAL_THREAD_UNLOCK (context->con->mutex_num_recv_segs);

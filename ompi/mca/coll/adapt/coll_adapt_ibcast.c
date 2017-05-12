@@ -91,7 +91,7 @@ int mca_coll_adapt_ibcast_init(void)
                                     OPAL_INFO_LVL_5,
                                     MCA_BASE_VAR_SCOPE_READONLY,
                                     &coll_adapt_ibcast_max_recv_requests);
-    return MPI_SUCCESS;
+    return OMPI_SUCCESS;
 }
 
 int mca_coll_adapt_ibcast_fini(void)
@@ -102,10 +102,10 @@ int mca_coll_adapt_ibcast_fini(void)
         coll_adapt_ibcast_context_free_list_enabled = 0;
         OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "bcast fini\n"));
     }
-    return MPI_SUCCESS;
+    return OMPI_SUCCESS;
 }
 
-static inline int bcast_request_fini(mca_coll_adapt_bcast_context_t *context)
+static int ibcast_request_fini(mca_coll_adapt_bcast_context_t *context)
 {
     ompi_request_t *temp_req = context->con->request;
     mca_coll_adapt_constant_bcast_context_t *con = context->con;
@@ -235,7 +235,7 @@ SEND_CB_SKIP_SEND: ;
         (context->con->tree->tree_nextsize == 0 && num_recv_fini_t == context->con->num_segs)) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in send\n", ompi_comm_rank(context->con->comm)));
         OPAL_THREAD_UNLOCK(mutex_temp);
-        bcast_request_fini(context);
+        ibcast_request_fini(context);
     }
     else {
         OBJ_RELEASE(context->con);
@@ -386,7 +386,7 @@ static int recv_cb(ompi_request_t *req){
         (context->con->tree->tree_nextsize == 0 && num_recv_fini_t == context->con->num_segs)) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm)));
         OPAL_THREAD_UNLOCK(mutex_temp);
-        bcast_request_fini(context);
+        ibcast_request_fini(context);
     }
     else{
         OBJ_RELEASE(context->con);
