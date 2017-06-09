@@ -112,19 +112,27 @@ typedef struct mca_coll_adapt_constant_reduce_context_s mca_coll_adapt_constant_
 
 OBJ_CLASS_DECLARATION(mca_coll_adapt_constant_reduce_context_t);
 
+/* reduce context of each segment */
+typedef struct mca_coll_adapt_reduce_context_s mca_coll_adapt_reduce_context_t;
 
-//reduce context
+typedef int (*mca_coll_adapt_reduce_cuda_callback_fn_t)(mca_coll_adapt_reduce_context_t *context);
+
 struct mca_coll_adapt_reduce_context_s {
     opal_free_list_item_t super;
+#if OPAL_CUDA_SUPPORT
+    int flags;
+#endif
     char *buff;
     int frag_id;
     int child_id;
     int peer;
     mca_coll_adapt_constant_reduce_context_t * con;
     mca_coll_adapt_inbuf_t *inbuf;  //only used in reduce, store the incoming segment
+#if OPAL_CUDA_SUPPORT
+    void *buff_to_free_item;
+    mca_coll_adapt_reduce_cuda_callback_fn_t cuda_callback; 
+#endif
 };
-
-typedef struct mca_coll_adapt_reduce_context_s mca_coll_adapt_reduce_context_t;
 
 OBJ_CLASS_DECLARATION(mca_coll_adapt_reduce_context_t);
 

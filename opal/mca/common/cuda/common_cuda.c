@@ -1689,6 +1689,57 @@ int mca_common_cuda_record_memcpy_event(char *msg, void *callback_frag)
     return OPAL_SUCCESS;
 }
 
+int mca_common_cuda_save_op_event(char *msg, void *op_event_item, void *callback_frag)
+{
+    CUresult result;
+    
+    /* First make sure there is room to store the event.  If not, then
+     * return an error.  The error message will tell the user to try and
+     * run again, but with a larger array for storing events. */
+    if (cuda_event_op_num_used == cuda_event_max) {
+        opal_show_help("help-mpi-common-cuda.txt", "Out of cuEvent handles",
+                       true, cuda_event_max, cuda_event_max+100, cuda_event_max+100);
+        return OPAL_ERR_OUT_OF_RESOURCE;
+    }
+
+    if (cuda_event_op_num_used > cuda_event_op_most) {
+        cuda_event_op_most = cuda_event_op_num_used;
+        /* Just print multiples of 10 */
+        if (0 == (cuda_event_op_most % 10)) {
+            opal_output_verbose(20, mca_common_cuda_output,
+                                "Maximum pack events used is now %d", cuda_event_op_most);
+        }
+    }
+
+    cuda_event_op_array[cuda_event_op_first_avail] = (common_cuda_op_event_t *)op_event_item;
+    cuda_event_op_callback_frag_array[cuda_event_op_first_avail] = callback_frag;
+
+    /* Bump up the first available slot and number used by 1 */
+    cuda_event_op_first_avail++;
+    if (cuda_event_op_first_avail >= cuda_event_max) {
+        cuda_event_op_first_avail = 0;
+    }
+    cuda_event_op_num_used++;
+
+    return OPAL_SUCCESS;
+}
+
+int mca_common_cuda_record_op_event_item(void *op_event_item, void *cuda_stream)
+{
+    CUresult result;
+    common_cuda_op_event_t * op_event = (common_cuda_op_event_t *)op_event_item;
+    CUstream stream = (CUstream)cuda_stream;
+
+    result = cuFunc.cuEventRecord(op_event->cuda_event, stream);
+    if (OPAL_UNLIKELY(CUDA_SUCCESS != result)) {
+        opal_show_help("help-mpi-common-cuda.txt", "cuEventRecord failed",
+                       true, OPAL_PROC_MY_HOSTNAME, result);
+        return OPAL_ERROR;
+    }
+
+    return OPAL_SUCCESS;
+}
+
 /**
  * Used to get the dtoh stream for initiating asynchronous copies.
  */
@@ -1755,6 +1806,18 @@ int mca_common_cuda_sync_memcpy_stream(void)
 {
     int result;
     result = cuFunc.cuStreamSynchronize(memcpyStream);
+    if (OPAL_UNLIKELY(CUDA_SUCCESS != result)) {
+        opal_show_help("help-mpi-common-cuda.txt", "cuStreamSynchronize failed",
+                       true, OPAL_PROC_MY_HOSTNAME, result);
+        return OPAL_ERROR;
+    }   
+    return 0;
+}
+
+int mca_common_cuda_sync_op_stream(int i)
+{
+    int result;
+    result = cuFunc.cuStreamSynchronize(opStreams[i]);
     if (OPAL_UNLIKELY(CUDA_SUCCESS != result)) {
         opal_show_help("help-mpi-common-cuda.txt", "cuStreamSynchronize failed",
                        true, OPAL_PROC_MY_HOSTNAME, result);
