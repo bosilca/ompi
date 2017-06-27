@@ -41,34 +41,27 @@ struct mca_monitoring_coll_data_t {
 /* Collectives operation monitoring */
 static opal_hash_table_t *comm_data = NULL;
 
-/* Check whether the communicator's name have been changed. Update the
- * data->comm_name field if so.
- */
-static inline void mca_common_monitoring_coll_check_name(mca_monitoring_coll_data_t*data)
+int mca_common_monitoring_coll_cache_name(ompi_communicator_t*comm)
 {
-    if( data->comm_name && data->p_comm && (data->p_comm->c_flags & OMPI_COMM_NAMEISSET)
-        && 0 <  strlen(data->p_comm->c_name)
-        && 0 != strncmp(data->p_comm->c_name, data->comm_name, OPAL_MAX_OBJECT_NAME - 1) )
-    {
-        free(data->comm_name);
-        data->comm_name = strdup(data->p_comm->c_name);
+    mca_monitoring_coll_data_t*data;
+    int ret = opal_hash_table_get_value_uint64(comm_data, *((uint64_t*)&comm), (void*)&data);
+    if( OPAL_SUCCESS == ret ) {
+        data->comm_name = strdup(comm->c_name);
+        data->p_comm = NULL;
     }
+    return ret;
 }
 
 static inline void mca_common_monitoring_coll_cache(mca_monitoring_coll_data_t*data)
 {
     int world_rank;
-    if( NULL == data->comm_name && 0 < strlen(data->p_comm->c_name) ) {
-        data->comm_name = strdup(data->p_comm->c_name);
-    } else {
-        mca_common_monitoring_coll_check_name(data);
-    }
     if( -1 == data->world_rank ) {
         /* Get current process world_rank */
         mca_common_monitoring_get_world_rank(ompi_comm_rank(data->p_comm), data->p_comm,
                                              &data->world_rank);
     }
-    /* Only list procs if the hashtable is already initialized, ie if the previous call worked */
+    /* Only list procs if the hashtable is already initialized,
+       i.e. if the previous call worked */
     if( (-1 != data->world_rank) && (NULL == data->procs || 0 == strlen(data->procs)) ) {
         int i, pos = 0, size, world_size = -1, max_length;
         char*tmp_procs;
@@ -170,16 +163,14 @@ void mca_common_monitoring_coll_finalize( void )
 
 void mca_common_monitoring_coll_flush(FILE *pf, mca_monitoring_coll_data_t*data)
 {
-    /* Check for any change in the communicator's name */
-    mca_common_monitoring_coll_check_name(data);
-
     /* Flush data */
     fprintf(pf,
             "D\t%s\tprocs: %s\n"
             "O2A\t%" PRId32 "\t%zu bytes\t%zu msgs sent\n"
             "A2O\t%" PRId32 "\t%zu bytes\t%zu msgs sent\n"
             "A2A\t%" PRId32 "\t%zu bytes\t%zu msgs sent\n",
-            data->comm_name ? data->comm_name : "(no-name)", data->procs,
+            data->comm_name ? data->comm_name : data->p_comm ?
+            data->p_comm->c_name : "(no-name)", data->procs,
             data->world_rank, data->o2a_size, data->o2a_count,
             data->world_rank, data->a2o_size, data->a2o_count,
             data->world_rank, data->a2a_size, data->a2a_count);
