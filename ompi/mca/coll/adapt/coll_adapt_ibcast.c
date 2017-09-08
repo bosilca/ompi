@@ -96,7 +96,7 @@ int mca_coll_adapt_ibcast_init(void)
                                     OPAL_INFO_LVL_5,
                                     MCA_BASE_VAR_SCOPE_READONLY,
                                     &coll_adapt_ibcast_max_recv_requests);
-    return MPI_SUCCESS;
+    return OMPI_SUCCESS;
 }
 
 int mca_coll_adapt_ibcast_fini(void)
@@ -107,10 +107,10 @@ int mca_coll_adapt_ibcast_fini(void)
         coll_adapt_ibcast_context_free_list_enabled = 0;
         OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "bcast fini\n"));
     }
-    return MPI_SUCCESS;
+    return OMPI_SUCCESS;
 }
 
-static inline int bcast_request_fini(mca_coll_adapt_bcast_context_t *context)
+static int ibcast_request_fini(mca_coll_adapt_bcast_context_t *context)
 {
     ompi_request_t *temp_req = context->con->request;
     if (context->con->tree->tree_nextsize != 0) {
@@ -199,10 +199,23 @@ static int send_cb(ompi_request_t *req)
                 assert(context->con->cpu_buff_list != NULL);
                 if (context->con->cpu_buff_memcpy_flags[new_id] == CPU_BUFFER_MEMCPY_NOT_DONE) {
                     context->con->cpu_buff_list[new_id] = mpool->mpool_alloc(mpool, sizeof(char)* context->con->real_seg_size, 0, 0);
+              //      context->con->datatype->super.flags |= OPAL_DATATYPE_FLAG_GPU_MEMCPY_ASYNC;
+                    printf("send_cb memcpy src %p, dst %p, size %d\n", send_context->buff, context->con->cpu_buff_list[new_id], send_count);
                     ompi_datatype_copy_content_same_ddt(context->con->datatype, send_count, context->con->cpu_buff_list[new_id], (char*)send_context->buff);
+                //    context->con->datatype->super.flags &= ~OPAL_DATATYPE_FLAG_GPU_MEMCPY_ASYNC;
+                  //  context->con->cpu_buff_memcpy_flags[new_id] = CPU_BUFFER_MEMCPY_PENDING;
                     context->con->cpu_buff_memcpy_flags[new_id] = CPU_BUFFER_MEMCPY_DONE;
                 }
                 send_buff = context->con->cpu_buff_list[new_id];
+                if (context->con->cpu_buff_memcpy_flags[new_id] != CPU_BUFFER_MEMCPY_DONE) {
+                    send_context->send_count = send_count;
+                    send_context->buff = send_buff;
+                    send_context->flags = COLL_ADAPT_CONTEXT_FLAGS_CUDA_BCAST;
+                    send_context->cuda_callback = bcast_send_context_async_memcpy_callback;
+                    send_context->debug_flag = 999;
+                    mca_common_cuda_record_memcpy_event("memcpy in coll_adapt_cuda_bcast", (void *)send_context);
+                    goto SEND_CB_SKIP_SEND;
+                }
             } 
         }
 #endif
@@ -214,7 +227,8 @@ static int send_cb(ompi_request_t *req)
         ompi_request_set_callback(send_req, send_cb, send_context);
         OPAL_THREAD_LOCK(context->con->mutex);
     }
-    
+
+SEND_CB_SKIP_SEND: ;   
     int num_sent = ++(context->con->num_sent_segs);
     int num_recv_fini_t = context->con->num_recv_fini;
     int rank = ompi_comm_rank(context->con->comm);
@@ -225,7 +239,7 @@ static int send_cb(ompi_request_t *req)
         (context->con->tree->tree_nextsize == 0 && num_recv_fini_t == context->con->num_segs)) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in send\n", ompi_comm_rank(context->con->comm)));
         OPAL_THREAD_UNLOCK(mutex_temp);
-        bcast_request_fini(context);
+        ibcast_request_fini(context);
     }
     else {
         OBJ_RELEASE(context->con);
@@ -302,7 +316,7 @@ static int recv_cb(ompi_request_t *req){
             ompi_datatype_copy_content_same_ddt(context->con->datatype, copy_count, context->buff, context->con->cpu_buff_list[context->frag_id]);
             context->con->datatype->super.flags &= ~OPAL_DATATYPE_FLAG_GPU_MEMCPY_ASYNC;
           //  mca_common_cuda_sync_memcpy_stream();
-            context->con->cpu_buff_memcpy_flags[context->frag_id] = CPU_BUFFER_MEMCPY_DONE;
+            context->con->cpu_buff_memcpy_flags[context->frag_id] = CPU_BUFFER_MEMCPY_PENDING;
         }
     }
 #endif 
@@ -376,7 +390,7 @@ static int recv_cb(ompi_request_t *req){
         (context->con->tree->tree_nextsize == 0 && num_recv_fini_t == context->con->num_segs)) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm)));
         OPAL_THREAD_UNLOCK(mutex_temp);
-        bcast_request_fini(context);
+        ibcast_request_fini(context);
     }
     else{
         OBJ_RELEASE(context->con);
@@ -412,40 +426,47 @@ int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatyp
         }
         int ibcast_tag = opal_atomic_add_32(&(comm->c_ibcast_tag), 1);
         ibcast_tag = ibcast_tag % 4096;
-//        if (1 == mca_coll_adapt_component.coll_adapt_cuda_enabled && coll_adapt_cuda_is_gpu_buffer(buff)) {
-//            return mca_coll_adapt_ibcast_cuda(buff, count, datatype, root, comm, request, module, ibcast_tag);
-//        }
+#if OPAL_CUDA_SUPPORT
+        if (1 == mca_common_is_cuda_buffer(buff)) {
+            return mca_coll_adapt_ibcast_cuda(buff, count, datatype, root, comm, request, module, ibcast_tag);
+        }
+#endif
         mca_coll_adapt_ibcast_fn_t bcast_func = (mca_coll_adapt_ibcast_fn_t)mca_coll_adapt_ibcast_algorithm_index[coll_adapt_ibcast_algorithm].algorithm_fn_ptr;
         return bcast_func(buff, count, datatype, root, comm, request, module, ibcast_tag);
         //return mca_coll_adapt_ibcast_binomial(buff, count, datatype, root, comm, request, module, ibcast_tag);
     }
 }
 
+#if OPAL_CUDA_SUPPORT
 int mca_coll_adapt_ibcast_cuda(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag) {
-//    coll_adapt_ibcast_segment_size = 524288;
-//    if (0 == mca_common_cuda_is_stage_three_init() || 0 == mca_coll_adapt_component.coll_adapt_cuda_enabled) {
-//        return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
-//    } else {
-//     //   return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
-//        mca_coll_base_comm_t *coll_comm = module->base_data;
-//        if( !( (coll_comm->cached_topochain) && (coll_comm->cached_topochain_root == root) ) ) {
-//            if( coll_comm->cached_topochain ) { /* destroy previous binomial if defined */
-//                ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topochain) );
-//            }
-//            ompi_coll_topo_gpu_t *gpu_topo = (ompi_coll_topo_gpu_t *)malloc(sizeof(ompi_coll_topo_gpu_t));
-//            coll_adapt_cuda_get_gpu_topo(gpu_topo);
-//            coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 4, 1, (void*)gpu_topo);
-//            //coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
-//            coll_comm->cached_topochain_root = root;
-//            coll_adapt_cuda_free_gpu_topo(gpu_topo);
-//            free(gpu_topo);
-//        }
-//        else {
-//        }
-//        //print_tree(coll_comm->cached_topochain, ompi_comm_rank(comm));
-//        return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topochain, coll_adapt_ibcast_segment_size, ibcast_tag, 1);
-//    }
+    coll_adapt_ibcast_segment_size = 524288;
+    if (0 == mca_coll_adapt_component.coll_adapt_cuda_enabled) {
+        coll_adapt_cuda_init();
+    }
+    if (0 == mca_common_cuda_is_stage_three_init()) {
+        return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
+    } else {
+     //   return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
+        mca_coll_base_comm_t *coll_comm = module->base_data;
+        if( !( (coll_comm->cached_topochain) && (coll_comm->cached_topochain_root == root) ) ) {
+            if( coll_comm->cached_topochain ) { /* destroy previous binomial if defined */
+                ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topochain) );
+            }
+            ompi_coll_topo_gpu_t *gpu_topo = (ompi_coll_topo_gpu_t *)malloc(sizeof(ompi_coll_topo_gpu_t));
+            coll_adapt_cuda_get_gpu_topo(gpu_topo);
+            coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 4, 1, (void*)gpu_topo);
+            //coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
+            coll_comm->cached_topochain_root = root;
+            coll_adapt_cuda_free_gpu_topo(gpu_topo);
+            free(gpu_topo);
+        }
+        else {
+        }
+        //print_tree(coll_comm->cached_topochain, ompi_comm_rank(comm));
+        return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topochain, coll_adapt_ibcast_segment_size, ibcast_tag, 1);
+    }
 }
+#endif
 
 int mca_coll_adapt_ibcast_tuned(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
     OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "tuned\n"));
@@ -833,7 +854,7 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
     mca_mpool_base_module_t *mpool = NULL;
     if (gpu_use_cpu_buff) {
         if (mca_coll_adapt_component.pined_cpu_mpool == NULL) {
-            mca_coll_adapt_component.pined_cpu_mpool = coll_adapt_cuda_mpool_create();
+            mca_coll_adapt_component.pined_cpu_mpool = coll_adapt_cuda_mpool_create(MPOOL_CPU);
         }
         mpool = mca_coll_adapt_component.pined_cpu_mpool;
         assert(mpool != NULL);
@@ -957,10 +978,22 @@ int mca_coll_adapt_ibcast_generic(void *buff, int count, struct ompi_datatype_t 
                         }
                         if (con->cpu_buff_memcpy_flags[i] == CPU_BUFFER_MEMCPY_NOT_DONE) {
                             con->cpu_buff_list[i] = mpool->mpool_alloc(mpool, sizeof(char)* real_seg_size, 0, 0);
+                        //    context->con->datatype->super.flags |= OPAL_DATATYPE_FLAG_GPU_MEMCPY_ASYNC;
                             ompi_datatype_copy_content_same_ddt(datatype, send_count, con->cpu_buff_list[i], (char*)context->buff);
-                            con->cpu_buff_memcpy_flags[i] = CPU_BUFFER_MEMCPY_DONE;
+                           // context->con->datatype->super.flags &= ~OPAL_DATATYPE_FLAG_GPU_MEMCPY_ASYNC;
+                         //   con->cpu_buff_memcpy_flags[i] = CPU_BUFFER_MEMCPY_PENDING;
+                          con->cpu_buff_memcpy_flags[i] = CPU_BUFFER_MEMCPY_DONE;
                         }
                         send_buff = con->cpu_buff_list[i];
+                        if (con->cpu_buff_memcpy_flags[i] != CPU_BUFFER_MEMCPY_DONE) {
+                            context->send_count = send_count;
+                            context->buff = send_buff;
+                            context->flags = COLL_ADAPT_CONTEXT_FLAGS_CUDA_BCAST;
+                            context->cuda_callback = bcast_send_context_async_memcpy_callback;
+                            context->debug_flag = 999;
+                            mca_common_cuda_record_memcpy_event("memcpy in coll_adapt_cuda_bcast", (void *)context);
+                            continue;
+                        }
                     } 
                 }
 #endif
@@ -1635,7 +1668,9 @@ static int bcast_init_cpu_buff(mca_coll_adapt_constant_bcast_context_t *con)
 static int bcast_send_context_async_memcpy_callback(mca_coll_adapt_bcast_context_t *send_context)
 {
     ompi_request_t *send_req;
-  //  printf("progress bcast context %p\n", send_context);
+    if (send_context->debug_flag == 999) {
+        printf("progress bcast context %p, frag id %d\n", send_context, send_context->frag_id);
+    }
     send_context->con->cpu_buff_memcpy_flags[send_context->frag_id] = CPU_BUFFER_MEMCPY_DONE;
     int err = MCA_PML_CALL(isend(send_context->buff, send_context->send_count, send_context->con->datatype, send_context->peer, (send_context->con->ibcast_tag << 16) + send_context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, send_context->con->comm, &send_req));
     ompi_request_set_callback(send_req, send_cb, send_context);

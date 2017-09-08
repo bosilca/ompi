@@ -11,7 +11,7 @@ static coll_adapt_cuda_function_table_t coll_adapt_cuda_table;
 static void *coll_adapt_cuda_kernel_handle = NULL;
 static char *coll_adapt_cuda_kernel_lib = NULL;
 
-#define COLL_ADAPT_CUDA_FIND_NCCL_FUNCTION_OR_RETURN(handle, fname)            \
+#define COLL_ADAPT_CUDA_FIND_CUDA_FUNCTION_OR_RETURN(handle, fname)            \
     do {                                                                            \
         char* _error;                                                               \
         *(void **)(&(coll_adapt_cuda_table.fname ## _p)) = dlsym((handle), # fname);    \
@@ -36,14 +36,17 @@ int coll_adapt_cuda_init(void)
             return OMPI_ERROR;
         }
     
-        COLL_ADAPT_CUDA_FIND_NCCL_FUNCTION_OR_RETURN( coll_adapt_cuda_kernel_handle, coll_adapt_cuda_init );
-        COLL_ADAPT_CUDA_FIND_NCCL_FUNCTION_OR_RETURN( coll_adapt_cuda_kernel_handle, coll_adapt_cuda_fini );
-        COLL_ADAPT_CUDA_FIND_NCCL_FUNCTION_OR_RETURN( coll_adapt_cuda_kernel_handle, coll_adapt_cuda_is_gpu_buffer );
+        COLL_ADAPT_CUDA_FIND_CUDA_FUNCTION_OR_RETURN( coll_adapt_cuda_kernel_handle, coll_adapt_cuda_init );
+        COLL_ADAPT_CUDA_FIND_CUDA_FUNCTION_OR_RETURN( coll_adapt_cuda_kernel_handle, coll_adapt_cuda_fini );
+        COLL_ADAPT_CUDA_FIND_CUDA_FUNCTION_OR_RETURN( coll_adapt_cuda_kernel_handle, coll_adapt_cuda_is_gpu_buffer );
+        COLL_ADAPT_CUDA_FIND_CUDA_FUNCTION_OR_RETURN( coll_adapt_cuda_kernel_handle, coll_adapt_cuda_malloc);
+        COLL_ADAPT_CUDA_FIND_CUDA_FUNCTION_OR_RETURN( coll_adapt_cuda_kernel_handle, coll_adapt_cuda_op_sum_float );
     
         coll_adapt_cuda_table.coll_adapt_cuda_init_p();
         mca_coll_adapt_component.coll_adapt_cuda_enabled = 1;
         
         mca_coll_adapt_component.pined_cpu_mpool = NULL;
+        mca_coll_adapt_component.pined_gpu_mpool = NULL;
         
         opal_output( 0, "coll_adapt_cuda_init done\n");
     }
@@ -68,6 +71,7 @@ int coll_adapt_cuda_fini(void)
         coll_adapt_cuda_kernel_lib = NULL;
         mca_coll_adapt_component.coll_adapt_cuda_enabled = 0;
         mca_coll_adapt_component.pined_cpu_mpool = NULL;
+        mca_coll_adapt_component.pined_gpu_mpool = NULL;
         opal_output( 0, "coll_adapt_cuda_fini done\n");
     }
     
@@ -77,6 +81,19 @@ int coll_adapt_cuda_fini(void)
 int coll_adapt_cuda_is_gpu_buffer(const void *ptr)
 {
     return coll_adapt_cuda_table.coll_adapt_cuda_is_gpu_buffer_p(ptr);
+}
+
+void* coll_adapt_cuda_malloc(size_t size)
+{
+    return coll_adapt_cuda_table.coll_adapt_cuda_malloc_p(size);
+}
+
+int coll_adapt_cuda_op_reduce(ompi_op_t * op, void *source, void *target, int count, ompi_datatype_t * dtype)
+{
+    void *op_cuda_stream = NULL;
+    op_cuda_stream = mca_common_cuda_get_op_stream(0);
+    coll_adapt_cuda_table.coll_adapt_cuda_op_sum_float_p(source, target, count, op_cuda_stream);
+    return OMPI_SUCCESS;
 }
 
 int coll_adapt_cuda_get_gpu_topo(ompi_coll_topo_gpu_t *gpu_topo)
@@ -116,17 +133,17 @@ int coll_adapt_cuda_free_gpu_topo(ompi_coll_topo_gpu_t *gpu_topo)
 int coll_adapt_cuda_progress(void)
 {
     char *context;
-/*    while (1 == progress_one_cuda_op_event((void **)&context)) {
+    while (1 == progress_one_cuda_op_event((void **)&context)) {
         if (context != NULL) {
             int *flag = (int *)(context + sizeof(opal_free_list_item_t));
-            if (*flag == COLL_ADAPT_CUDA_CONTEXT_FLAGS_REDUCE) {
+            if (*flag == COLL_ADAPT_CONTEXT_FLAGS_CUDA_REDUCE) {
               //  opal_output(0, "reduce call back\n");
-                mca_coll_adapt_cuda_reduce_context_t *reduce_context = (mca_coll_adapt_cuda_reduce_context_t *)context;
+                mca_coll_adapt_reduce_context_t *reduce_context = (mca_coll_adapt_reduce_context_t *)context;
                 assert(reduce_context->cuda_callback != NULL);
                 reduce_context->cuda_callback(reduce_context);
             }
         }
-    }*/
+    }
     while (1 == progress_one_cuda_memcpy_event((void **)&context)) {
         if (context != NULL) {
             int *flag = (int *)(context + sizeof(opal_free_list_item_t));

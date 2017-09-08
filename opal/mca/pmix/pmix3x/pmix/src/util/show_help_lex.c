@@ -1860,4 +1860,3 @@ int pmix_show_help_init_buffer(FILE *file)
 
     return 0;
 }
-

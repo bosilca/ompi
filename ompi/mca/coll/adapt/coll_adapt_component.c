@@ -316,7 +316,7 @@ static int adapt_register(void)
     cs->coll_adapt_cuda_enabled = 0;
 
 #if OPAL_CUDA_SUPPORT    
-    coll_adapt_cuda_init();
+    //coll_adapt_cuda_init();
 #endif
     
     return adapt_verify_mca_variables();

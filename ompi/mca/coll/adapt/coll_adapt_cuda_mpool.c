@@ -1,4 +1,6 @@
 #include "ompi_config.h"
+#include "ompi/mca/coll/coll.h"
+#include "coll_adapt_cuda.h"
 #include "coll_adapt_cuda_mpool.h"
 #include "opal/mca/common/cuda/common_cuda.h"
 
@@ -265,11 +267,9 @@ static void coll_adapt_cuda_mpool_module_init(coll_adapt_cuda_mpool_module_t * m
     mpool->buffer_total_size = size;
     
     mpool->base_ptr = ptr;
-    
-    mca_common_cuda_register(ptr, size, "adapt_cuda");
 }
 
-mca_mpool_base_module_t *coll_adapt_cuda_mpool_create (void)
+mca_mpool_base_module_t *coll_adapt_cuda_mpool_create (int mpool_type)
 {
     coll_adapt_cuda_mpool_module_t *mpool_module = NULL;
     unsigned char *mpool_ptr = NULL;
@@ -277,7 +277,17 @@ mca_mpool_base_module_t *coll_adapt_cuda_mpool_create (void)
     
     mpool_module = (coll_adapt_cuda_mpool_module_t *)malloc(sizeof(coll_adapt_cuda_mpool_module_t));
    // mpool_ptr = (unsigned char *)malloc(sizeof(char) * mpool_size);
-    posix_memalign((void **)&mpool_ptr, MPOOL_ALIGNMENT, mpool_size);
+    if (mpool_type == MPOOL_CPU) {
+        posix_memalign((void **)&mpool_ptr, MPOOL_ALIGNMENT, mpool_size);
+        mca_common_cuda_register(mpool_ptr, mpool_size, "adapt_cuda");
+    } else if (mpool_type == MPOOL_GPU) {
+        mca_common_cuda_alloc((void **)&mpool_ptr, mpool_size);
+       // mpool_ptr = (unsigned char *)coll_adapt_cuda_malloc(mpool_size);
+        printf("GPU MEMPOOL %p]\n", mpool_ptr);
+    } else {
+        opal_output(0, "Unsupported memory pool type %d\n", mpool_type);
+    }
+    
     coll_adapt_cuda_mpool_module_init(mpool_module, mpool_ptr, mpool_size);
     
     return (mca_mpool_base_module_t *)mpool_module;
