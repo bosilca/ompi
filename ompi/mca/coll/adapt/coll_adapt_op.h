@@ -1,6 +1,7 @@
 #ifndef COLL_ADAPT_OP_H
 #define COLL_ADAPT_OP_H
 
+#include "coll_adapt.h"
 static inline int coll_adapt_op_reduce(ompi_op_t * op, void *source, void *target, int count, ompi_datatype_t * dtype, int buff_type) 
 {
     if (buff_type == CPU_BUFFER) {

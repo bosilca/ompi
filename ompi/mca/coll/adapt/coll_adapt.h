@@ -26,6 +26,9 @@
 #if OPAL_CUDA_SUPPORT  
 #define CPU_BUFFER  0
 #define GPU_BUFFER  1
+#else
+#define CPU_BUFFER  1
+#define GPU_BUFFER  0
 #endif
 
 BEGIN_C_DECLS
