@@ -282,3 +282,4 @@ mca_mpool_base_module_t *coll_adapt_cuda_mpool_create (void)
     
     return (mca_mpool_base_module_t *)mpool_module;
 }
+

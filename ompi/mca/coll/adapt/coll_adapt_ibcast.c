@@ -18,6 +18,8 @@
 #include "opal/mca/common/cuda/common_cuda.h"
 #endif
 
+#define TEST printf
+
 static size_t last_size; //for test
 
 /* Bcast algorithm variables */
@@ -27,6 +29,9 @@ static int coll_adapt_ibcast_max_send_requests = 2;
 static int coll_adapt_ibcast_max_recv_requests = 3;
 static opal_free_list_t *coll_adapt_ibcast_context_free_list = NULL;
 static int32_t coll_adapt_ibcast_context_free_list_enabled = 0;
+static opal_free_list_t *coll_adapt_ibcast_two_trees_context_free_list = NULL;
+static int32_t coll_adapt_ibcast_two_trees_context_free_list_enabled = 0;
+
 
 typedef int (*mca_coll_adapt_ibcast_fn_t)(
     void *buff, 
@@ -108,7 +113,6 @@ int mca_coll_adapt_ibcast_fini(void)
 static inline int bcast_request_fini(mca_coll_adapt_bcast_context_t *context)
 {
     ompi_request_t *temp_req = context->con->request;
-    mca_coll_adapt_constant_bcast_context_t *con = context->con;
     if (context->con->tree->tree_nextsize != 0) {
         free(context->con->send_array);
     }
@@ -418,29 +422,29 @@ int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatyp
 }
 
 int mca_coll_adapt_ibcast_cuda(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag) {
-    coll_adapt_ibcast_segment_size = 524288;
-    if (0 == mca_common_cuda_is_stage_three_init() || 0 == mca_coll_adapt_component.coll_adapt_cuda_enabled) {
-        return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
-    } else {
-     //   return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
-        mca_coll_base_comm_t *coll_comm = module->base_data;
-        if( !( (coll_comm->cached_topochain) && (coll_comm->cached_topochain_root == root) ) ) {
-            if( coll_comm->cached_topochain ) { /* destroy previous binomial if defined */
-                ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topochain) );
-            }
-            ompi_coll_topo_gpu_t *gpu_topo = (ompi_coll_topo_gpu_t *)malloc(sizeof(ompi_coll_topo_gpu_t));
-            coll_adapt_cuda_get_gpu_topo(gpu_topo);
-            coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 4, 1, (void*)gpu_topo);
-            //coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
-            coll_comm->cached_topochain_root = root;
-            coll_adapt_cuda_free_gpu_topo(gpu_topo);
-            free(gpu_topo);
-        }
-        else {
-        }
-        //print_tree(coll_comm->cached_topochain, ompi_comm_rank(comm));
-        return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topochain, coll_adapt_ibcast_segment_size, ibcast_tag, 1);
-    }
+//    coll_adapt_ibcast_segment_size = 524288;
+//    if (0 == mca_common_cuda_is_stage_three_init() || 0 == mca_coll_adapt_component.coll_adapt_cuda_enabled) {
+//        return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
+//    } else {
+//     //   return mca_coll_adapt_ibcast_pipeline(buff, count, datatype, root, comm, request, module, ibcast_tag);
+//        mca_coll_base_comm_t *coll_comm = module->base_data;
+//        if( !( (coll_comm->cached_topochain) && (coll_comm->cached_topochain_root == root) ) ) {
+//            if( coll_comm->cached_topochain ) { /* destroy previous binomial if defined */
+//                ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topochain) );
+//            }
+//            ompi_coll_topo_gpu_t *gpu_topo = (ompi_coll_topo_gpu_t *)malloc(sizeof(ompi_coll_topo_gpu_t));
+//            coll_adapt_cuda_get_gpu_topo(gpu_topo);
+//            coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 4, 1, (void*)gpu_topo);
+//            //coll_comm->cached_topochain = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
+//            coll_comm->cached_topochain_root = root;
+//            coll_adapt_cuda_free_gpu_topo(gpu_topo);
+//            free(gpu_topo);
+//        }
+//        else {
+//        }
+//        //print_tree(coll_comm->cached_topochain, ompi_comm_rank(comm));
+//        return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topochain, coll_adapt_ibcast_segment_size, ibcast_tag, 1);
+//    }
 }
 
 int mca_coll_adapt_ibcast_tuned(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
@@ -1057,8 +1061,8 @@ int mca_coll_adapt_ibcast_two_trees_binary(void *buff, int count, struct ompi_da
             }
             coll_comm->cached_two_trees_binary = ompi_coll_base_topo_build_two_trees_binary(comm, root);
             coll_comm->cached_two_trees_binary_root = root;
-            //print_tree(two_trees[0], ompi_comm_rank(comm));
-            //print_tree(two_trees[1], ompi_comm_rank(comm));
+            print_tree(coll_comm->cached_two_trees_binary[0], ompi_comm_rank(comm));
+            print_tree(coll_comm->cached_two_trees_binary[1], ompi_comm_rank(comm));
         }
         return mca_coll_adapt_ibcast_two_trees_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_two_trees_binary, ibcast_tag);
     }
@@ -1129,6 +1133,7 @@ static int two_trees_send_cb(ompi_request_t *req)
     int err;
     
     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d, %" PRIx64 "]: Send(cb): segment %d to %d at buff %p tree %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->tree));
+    TEST("[%d, %" PRIx64 "]: Send(cb): segment %d to %d at buff %p tree %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->tree);
     
     OPAL_THREAD_LOCK(context->con->mutex);
     int sent_id = context->con->send_arrays[context->tree][context->child_id];  //How many sends has been issued
@@ -1141,7 +1146,7 @@ static int two_trees_send_cb(ompi_request_t *req)
         if (new_id == (context->con->num_segs[0] + context->con->num_segs[1]- 1)) {
             send_count = context->con->count - new_id * context->con->seg_count;
         }
-        mca_coll_adapt_bcast_two_trees_context_t * send_context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(coll_adapt_ibcast_context_free_list);
+        mca_coll_adapt_bcast_two_trees_context_t * send_context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(coll_adapt_ibcast_two_trees_context_free_list);
         send_context->buff = context->buff + (new_id - context->frag_id) * context->con->real_seg_size;
         send_context->frag_id = new_id;
         send_context->child_id = context->child_id;
@@ -1151,24 +1156,25 @@ static int two_trees_send_cb(ompi_request_t *req)
         OBJ_RETAIN(context->con);
         ++(send_context->con->send_arrays[context->tree][send_context->child_id]);
         OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Send(start in send cb): segment %d to %d at buff %p send_count %d dataype %p tree %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (void *)send_context->con->datatype, context->tree, (send_context->con->ibcast_tag << 16) + send_context->frag_id));
+        TEST("[%d]: Send(start in send cb): segment %d to %d at buff %p send_count %d dataype %p tree %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (void *)send_context->con->datatype, context->tree, (send_context->con->ibcast_tag << 16) + send_context->frag_id);
         err = MCA_PML_CALL(isend(send_context->buff, send_count, send_context->con->datatype, send_context->peer, (send_context->con->ibcast_tag << 16) + send_context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, send_context->con->comm, &send_req));
         //invoke send call back
-        if(!ompi_request_set_callback(send_req, two_trees_send_cb, send_context)) {
-            OPAL_THREAD_UNLOCK(context->con->mutex);
-            int finished = two_trees_send_cb(send_req);
-            if (finished) {
-                return 1;
-            }
-            OPAL_THREAD_LOCK(context->con->mutex);
+        OPAL_THREAD_UNLOCK(context->con->mutex);
+        int finished = ompi_request_set_callback(send_req, two_trees_send_cb, send_context);
+        if (finished == 2) {
+            return 2;
         }
+        OPAL_THREAD_LOCK(context->con->mutex);
     }
-    OPAL_THREAD_UNLOCK(context->con->mutex);
     
     //check whether signal the condition, need to signal after return the context
     if (num_sent == context->con->trees[context->tree]->tree_nextsize * context->con->num_segs[context->tree]) {
         int complete = ++(context->con->complete);       //TODO:change to atomic add
+        TEST("[%d]: Send Finish, tree %d, complete %d\n", ompi_comm_rank(context->con->comm), context->tree, complete);
+        OPAL_THREAD_UNLOCK(context->con->mutex);
         if (complete >= 2) {
             OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Singal in send, tree %d\n", ompi_comm_rank(context->con->comm), context->tree));
+            TEST("[%d]: Singal in send, tree %d\n", ompi_comm_rank(context->con->comm), context->tree);
             ompi_request_t *temp_req = context->con->request;
             if (context->con->num_segs[0]!=0) {
                 free(context->con->recv_arrays[0]);
@@ -1191,20 +1197,25 @@ static int two_trees_send_cb(ompi_request_t *req)
             OBJ_RELEASE(context->con->mutex);
             OBJ_RELEASE(context->con);
             OBJ_RELEASE(context->con);
-            opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
+            opal_free_list_return(coll_adapt_ibcast_two_trees_context_free_list, (opal_free_list_item_t*)context);
             ompi_request_complete(temp_req, 1);
+            OPAL_THREAD_UNLOCK (req->req_lock);
+            req->req_free(&req);
+            return 2;
         }
         else {
             OBJ_RELEASE(context->con);
-            opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
+            opal_free_list_return(coll_adapt_ibcast_two_trees_context_free_list, (opal_free_list_item_t*)context);
         }
-        return 1;
     }
     else{
+        OPAL_THREAD_UNLOCK(context->con->mutex);
         OBJ_RELEASE(context->con);
-        opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
+        opal_free_list_return(coll_adapt_ibcast_two_trees_context_free_list, (opal_free_list_item_t*)context);
     }
-    return 0;
+    OPAL_THREAD_UNLOCK(req->req_lock);
+    req->req_free(&req);
+    return 1;
 }
 
 //receive call back
@@ -1215,7 +1226,8 @@ static int two_trees_recv_cb(ompi_request_t *req){
     int err, i;
     
     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d, %" PRIx64 "]: Recv(cb): segment %d from %d at buff %p tree %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->tree));
-    
+    TEST("[%d, %" PRIx64 "]: Recv(cb): segment %d from %d at buff %p tree %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->tree);
+
     //store the frag_id to seg array
     OPAL_THREAD_LOCK(context->con->mutex);
     int num_recv_segs_t = ++(context->con->num_recv_segs[context->tree]);
@@ -1237,7 +1249,7 @@ static int two_trees_recv_cb(ompi_request_t *req){
             recv_count = context->con->count - new_id * context->con->seg_count;
         }
         //get new context item from free list
-        mca_coll_adapt_bcast_two_trees_context_t * recv_context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(coll_adapt_ibcast_context_free_list);
+        mca_coll_adapt_bcast_two_trees_context_t * recv_context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(coll_adapt_ibcast_two_trees_context_free_list);
         recv_context->buff = context->buff + (new_id - context->frag_id) * context->con->real_seg_size;
         recv_context->frag_id = new_id;
         recv_context->child_id = context->child_id;
@@ -1246,16 +1258,15 @@ static int two_trees_recv_cb(ompi_request_t *req){
         recv_context->con = context->con;
         OBJ_RETAIN(context->con);
         OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Recv(start in recv cb): segment %d from %d at buff %p recv_count %d datatype %p tree %d tag %d\n", ompi_comm_rank(recv_context->con->comm), recv_context->frag_id, recv_context->peer, (void *)recv_context->buff, recv_count, (void *)recv_context->con->datatype, context->tree, (recv_context->con->ibcast_tag << 16) + recv_context->frag_id));
+        TEST("[%d]: Recv(start in recv cb): segment %d from %d at buff %p recv_count %d datatype %p tree %d tag %d\n", ompi_comm_rank(recv_context->con->comm), recv_context->frag_id, recv_context->peer, (void *)recv_context->buff, recv_count, (void *)recv_context->con->datatype, context->tree, (recv_context->con->ibcast_tag << 16) + recv_context->frag_id);
         MCA_PML_CALL(irecv(recv_context->buff, recv_count, recv_context->con->datatype, recv_context->peer, (recv_context->con->ibcast_tag << 16) + recv_context->frag_id, recv_context->con->comm, &recv_req));
         //invoke recvive call back
-        if(!ompi_request_set_callback(recv_req, two_trees_recv_cb, recv_context)) {
-            OPAL_THREAD_UNLOCK(context->con->mutex);
-            int finished = two_trees_recv_cb(recv_req);
-            if (finished) {
-                return 1;
-            }
-            OPAL_THREAD_LOCK(context->con->mutex);
+        OPAL_THREAD_UNLOCK(context->con->mutex);
+        int finished = ompi_request_set_callback(recv_req, two_trees_recv_cb, recv_context);
+        if (finished) {
+            return 1;
         }
+        OPAL_THREAD_LOCK(context->con->mutex);
     }
     
     //send segment to its children
@@ -1267,7 +1278,7 @@ static int two_trees_recv_cb(ompi_request_t *req){
             if (context->frag_id == (context->con->num_segs[0] + context->con->num_segs[1] - 1)) {
                 send_count = context->con->count - context->frag_id * context->con->seg_count;
             }
-            mca_coll_adapt_bcast_two_trees_context_t * send_context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(coll_adapt_ibcast_context_free_list);
+            mca_coll_adapt_bcast_two_trees_context_t * send_context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(coll_adapt_ibcast_two_trees_context_free_list);
             send_context->buff = context->buff;
             send_context->frag_id = context->frag_id;
             send_context->child_id = i;
@@ -1277,6 +1288,7 @@ static int two_trees_recv_cb(ompi_request_t *req){
             OBJ_RETAIN(context->con);
             ++(send_context->con->send_arrays[context->tree][i]);
             OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Send(start in recv cb): segment %d to %d at buff %p send_count %d datatype %p comm %p tree %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (void *) send_context->con->datatype, (void *) send_context->con->comm, context->tree, (send_context->con->ibcast_tag << 16) + send_context->frag_id));
+            TEST("[%d]: Send(start in recv cb): segment %d to %d at buff %p send_count %d datatype %p comm %p tree %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (void *) send_context->con->datatype, (void *) send_context->con->comm, context->tree, (send_context->con->ibcast_tag << 16) + send_context->frag_id);
             err = MCA_PML_CALL(isend(send_context->buff, send_count, send_context->con->datatype, send_context->peer, (send_context->con->ibcast_tag << 16) + send_context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, send_context->con->comm, &send_req));
             
             //invoke send call back
@@ -1297,8 +1309,10 @@ static int two_trees_recv_cb(ompi_request_t *req){
     //if this is leaf and has received all the segments
     if (context->con->trees[context->tree]->tree_nextsize == 0 && num_recv_segs_t == context->con->num_segs[context->tree]) {
         int complete = ++(context->con->complete);       //TODO:change to atomic add
+        TEST("[%d]: Recv Finish, tree %d, complete %d\n", ompi_comm_rank(context->con->comm), context->tree, complete);
         if (complete >= 2) {
             OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Singal in recv, tree %d\n", ompi_comm_rank(context->con->comm), context->tree));
+            TEST("[%d]: Singal in recv, tree %d\n", ompi_comm_rank(context->con->comm), context->tree);
             ompi_request_t *temp_req = context->con->request;
             if (context->con->num_segs[0]!=0) {
                 free(context->con->recv_arrays[0]);
@@ -1321,20 +1335,22 @@ static int two_trees_recv_cb(ompi_request_t *req){
             OBJ_RELEASE(context->con->mutex);
             OBJ_RELEASE(context->con);
             OBJ_RELEASE(context->con);
-            opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
+            opal_free_list_return(coll_adapt_ibcast_two_trees_context_free_list, (opal_free_list_item_t*)context);
             ompi_request_complete(temp_req, 1);
         }
         else {
             OBJ_RELEASE(context->con);
-            opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
+            opal_free_list_return(coll_adapt_ibcast_two_trees_context_free_list, (opal_free_list_item_t*)context);
         }
         return 1;
     }
     else{
         OBJ_RELEASE(context->con);
-        opal_free_list_return(coll_adapt_ibcast_context_free_list, (opal_free_list_item_t*)context);
+        opal_free_list_return(coll_adapt_ibcast_two_trees_context_free_list, (opal_free_list_item_t*)context);
         
     }
+    OPAL_THREAD_UNLOCK(req->req_lock);
+    req->req_free(&req);
     return 0;
 }
 
@@ -1361,14 +1377,14 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
     int **send_arrays = NULL;   //record how many isend has been issued for every child for two trees
     
     //set up free list
-    if (0 == coll_adapt_ibcast_context_free_list_enabled) {
-        int32_t context_free_list_enabled = opal_atomic_add_32(&(coll_adapt_ibcast_context_free_list_enabled), 1);
+    if (0 == coll_adapt_ibcast_two_trees_context_free_list_enabled) {
+        int32_t context_free_list_enabled = opal_atomic_add_32(&(coll_adapt_ibcast_two_trees_context_free_list_enabled), 1);
         if (1 == context_free_list_enabled) {
-            coll_adapt_ibcast_context_free_list = OBJ_NEW(opal_free_list_t);
-            opal_free_list_init(coll_adapt_ibcast_context_free_list,
-                                sizeof(mca_coll_adapt_bcast_context_t),
+            coll_adapt_ibcast_two_trees_context_free_list = OBJ_NEW(opal_free_list_t);
+            opal_free_list_init(coll_adapt_ibcast_two_trees_context_free_list,
+                                sizeof(mca_coll_adapt_bcast_two_trees_context_t),
                                 opal_cache_line_size,
-                                OBJ_CLASS(mca_coll_adapt_bcast_context_t),
+                                OBJ_CLASS(mca_coll_adapt_bcast_two_trees_context_t),
                                 0,opal_cache_line_size,
                                 mca_coll_adapt_component.adapt_context_free_list_min,
                                 mca_coll_adapt_component.adapt_context_free_list_max,
@@ -1381,6 +1397,7 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
     //set up request
     temp_request = OBJ_NEW(ompi_request_t);
     OMPI_REQUEST_INIT(temp_request, false);
+    temp_request->req_state = OMPI_REQUEST_ACTIVE;
     temp_request->req_type = 0;
     temp_request->req_free = adapt_request_free;
     temp_request->req_status.MPI_SOURCE = 0;
@@ -1451,6 +1468,9 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
     OPAL_THREAD_LOCK(mutex);
     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d, %" PRIx64 "]: IBcast, root %d, ibcast_tag %d\n", rank, gettid(), root, ibcast_tag));
     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d, %" PRIx64 "]: con->mutex = %p\n", rank, gettid(), (void *)con->mutex));
+    TEST("[%d, %" PRIx64 "]: IBcast, root %d, ibcast_tag %d\n", rank, gettid(), root, ibcast_tag);
+    TEST("[%d, %" PRIx64 "]: con->mutex = %p\n", rank, gettid(), (void *)con->mutex);
+
     //if root, send segment to the roots of two trees.
     if (rank == root){
         //handle the situation when num_segs < SEND_NUM
@@ -1495,7 +1515,7 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
                     send_count = count - (num_segs[0]+i) * seg_count;
                 }
                 for (j=0; j<trees[t]->tree_nextsize; j++) {
-                    mca_coll_adapt_bcast_two_trees_context_t * context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(coll_adapt_ibcast_context_free_list);
+                    mca_coll_adapt_bcast_two_trees_context_t * context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(coll_adapt_ibcast_two_trees_context_free_list);
                     context->buff = (char *)buff + recv_arrays[t][i] * real_seg_size;
                     context->frag_id = recv_arrays[t][i];
                     context->child_id = j;              //the id of peer in in tree->tree_next
@@ -1504,18 +1524,17 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
                     context->con = con;
                     OBJ_RETAIN(con);
                     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d, %" PRIx64 "]: Send(start in main): segment %d to %d at buff %p send_count %d datatype %p tree %d, tag %d\n", rank, gettid(), context->frag_id, context->peer, (void *)context->buff, send_count, (void *)datatype, t, (ibcast_tag << 16) + context->frag_id));
+                    TEST("[%d, %" PRIx64 "]: Send(start in main): segment %d to %d at buff %p send_count %d datatype %p tree %d, tag %d\n", rank, gettid(), context->frag_id, context->peer, (void *)context->buff, send_count, (void *)datatype, t, (ibcast_tag << 16) + context->frag_id);
+
                     err = MCA_PML_CALL(isend(context->buff, send_count, datatype, context->peer, (ibcast_tag << 16) + context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, comm, &send_req));
                     
                     if (MPI_SUCCESS != err) {
                         return err;
                     }
                     //invoke send call back
-                    if(!ompi_request_set_callback(send_req, two_trees_send_cb, context)) {
-                        OPAL_THREAD_UNLOCK(mutex);
-                        two_trees_send_cb(send_req);
-                        OPAL_THREAD_LOCK(mutex);
-                    }
-                    
+                    OPAL_THREAD_UNLOCK(mutex);
+                    ompi_request_set_callback(send_req, two_trees_send_cb, context);
+                    OPAL_THREAD_LOCK(mutex);
                 }
             }
         }
@@ -1565,7 +1584,7 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
                 if (t == 1 && i == (num_segs[1] - 1)) {
                     recv_count = count - (num_segs[0]+i) * seg_count;
                 }
-                mca_coll_adapt_bcast_two_trees_context_t * context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(coll_adapt_ibcast_context_free_list);
+                mca_coll_adapt_bcast_two_trees_context_t * context = (mca_coll_adapt_bcast_two_trees_context_t *) opal_free_list_wait(coll_adapt_ibcast_two_trees_context_free_list);
                 context->buff = (char *)buff + (t*num_segs[0]+i) * real_seg_size;
                 context->frag_id = t*num_segs[0]+i;
                 context->peer = trees[t]->tree_prev;
@@ -1573,17 +1592,16 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
                 context->tree = t;
                 OBJ_RETAIN(con);
                 OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d, %" PRIx64 "]: Recv(start in main): segment %d from %d at buff %p recv_count %d datatype %p comm %p tree %d tag %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, recv_count, (void *)datatype, (void *)comm, t, (ibcast_tag << 16) + context->frag_id));
+                TEST("[%d, %" PRIx64 "]: Recv(start in main): segment %d from %d at buff %p recv_count %d datatype %p comm %p tree %d tag %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, recv_count, (void *)datatype, (void *)comm, t, (ibcast_tag << 16) + context->frag_id);
                 err = MCA_PML_CALL(irecv(context->buff, recv_count, datatype, context->peer, (ibcast_tag << 16) + context->frag_id, comm, &recv_req));
                 if (MPI_SUCCESS != err) {
                     return err;
                 }
                 //invoke receive call back
-                if(!ompi_request_set_callback(recv_req, two_trees_recv_cb, context)) {
-                    OPAL_THREAD_UNLOCK(mutex);
-                    two_trees_recv_cb(recv_req);
-                    OPAL_THREAD_LOCK(mutex);
-                    
-                }
+                OPAL_THREAD_UNLOCK(mutex);
+                ompi_request_set_callback(recv_req, two_trees_recv_cb, context);
+                OPAL_THREAD_LOCK(mutex);
+
             }
         }
         

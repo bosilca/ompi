@@ -16,7 +16,7 @@ DIST_SUBDIRS = cuda
 sources = \
 	coll_adapt_component.c \
 	coll_adapt_module.c \
-    coll_adapt_bcast.c \
+    	coll_adapt_bcast.c \
 	coll_adapt_ibcast.c \
 	coll_adapt_reduce.c \
 	coll_adapt_ireduce.c \
@@ -26,14 +26,14 @@ sources = \
 	coll_adapt_ialltoall.c \
 	coll_adapt_alltoallv.c \
 	coll_adapt_ialltoallv.c \
-    coll_adapt.h \
+    	coll_adapt.h \
 	coll_adapt_algorithms.h \
 	coll_adapt_context.h \
 	coll_adapt_context.c \
 	coll_adapt_inbuf.c \
 	coll_adapt_inbuf.h \
 	coll_adapt_item.c \
-	coll_adapt_item.h
+	coll_adapt_item.h 
 
 # Make the output library in this directory, and name it either
 # mca_<type>_<name>.la (for DSO builds) or libmca_<type>_<name>.la

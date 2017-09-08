@@ -439,8 +439,8 @@ static inline int ompi_request_complete(ompi_request_t* request, bool with_signa
         ompi_request_complete_fn_t temp = request->req_complete_cb;
         request->req_complete_cb = NULL;
         rc = temp( request );
-        if (rc == 1) {
-            return OMPI_SUCCESS;
+        if (rc >= 1) {
+            return rc;
         }
     }
     
@@ -482,8 +482,8 @@ static inline int ompi_request_set_callback(ompi_request_t* request,
         ompi_request_complete_fn_t temp = request->req_complete_cb;
         request->req_complete_cb = NULL;
         rc = temp( request );
-        if (rc == 1) {
-            return OMPI_SUCCESS;
+        if (rc >= 1) {
+            return rc;
         }
     }
     OPAL_THREAD_UNLOCK (request->req_lock);

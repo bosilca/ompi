@@ -140,3 +140,4 @@ int coll_adapt_cuda_progress(void)
     }
     return OMPI_SUCCESS;
 }
+

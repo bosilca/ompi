@@ -813,6 +813,7 @@ static int send_ring_allgather_cb(ompi_request_t *req){
     int complete = ++context->con->complete;
     if (complete == context->con->num_phases*size) {
         //signal
+        OPAL_THREAD_UNLOCK(context->con->mutex_complete);
         TEST("[%d]: send_ring_allgather_cb signal, complete %d\n", rank, context->con->complete);
         ompi_request_t *temp_req = context->con->request;
         if (context->inbuf != NULL) {
@@ -885,6 +886,7 @@ static int recv_ring_allgather_cb(ompi_request_t *req){
         int complete = ++context->con->complete;
         if (complete == context->con->num_phases*size) {
             //signal
+            OPAL_THREAD_UNLOCK(context->con->mutex_complete);
             TEST("[%d]: send_ring_allgather_cb signal, complete %d\n", rank, context->con->complete);
             ompi_request_t *temp_req = context->con->request;
             if (context->inbuf != NULL) {

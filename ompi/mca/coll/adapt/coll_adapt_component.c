@@ -121,6 +121,7 @@ mca_coll_adapt_component_t mca_coll_adapt_component = {
 /* open the component */
 static int adapt_open(void)
 {
+    #if OPAL_CUDA_SUPPORT
     int rc;
     rc = opal_progress_register(coll_adapt_cuda_progress);
     if (OMPI_SUCCESS != rc ) {
@@ -128,6 +129,7 @@ static int adapt_open(void)
         fflush(stderr);
         return rc;
     }
+    #endif
     return OMPI_SUCCESS;
 }
 
