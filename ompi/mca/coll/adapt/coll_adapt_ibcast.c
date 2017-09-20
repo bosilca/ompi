@@ -18,8 +18,6 @@
 #include "opal/mca/common/cuda/common_cuda.h"
 #endif
 
-#define TEST printf
-
 static size_t last_size; //for test
 
 /* Bcast algorithm variables */
@@ -1166,7 +1164,6 @@ static int two_trees_send_cb(ompi_request_t *req)
     int err;
     
     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d, %" PRIx64 "]: Send(cb): segment %d to %d at buff %p tree %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->tree));
-    TEST("[%d, %" PRIx64 "]: Send(cb): segment %d to %d at buff %p tree %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->tree);
     
     OPAL_THREAD_LOCK(context->con->mutex);
     int sent_id = context->con->send_arrays[context->tree][context->child_id];  //How many sends has been issued
@@ -1189,7 +1186,6 @@ static int two_trees_send_cb(ompi_request_t *req)
         OBJ_RETAIN(context->con);
         ++(send_context->con->send_arrays[context->tree][send_context->child_id]);
         OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Send(start in send cb): segment %d to %d at buff %p send_count %d dataype %p tree %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (void *)send_context->con->datatype, context->tree, (send_context->con->ibcast_tag << 16) + send_context->frag_id));
-        TEST("[%d]: Send(start in send cb): segment %d to %d at buff %p send_count %d dataype %p tree %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (void *)send_context->con->datatype, context->tree, (send_context->con->ibcast_tag << 16) + send_context->frag_id);
         err = MCA_PML_CALL(isend(send_context->buff, send_count, send_context->con->datatype, send_context->peer, (send_context->con->ibcast_tag << 16) + send_context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, send_context->con->comm, &send_req));
         //invoke send call back
         OPAL_THREAD_UNLOCK(context->con->mutex);
@@ -1203,11 +1199,10 @@ static int two_trees_send_cb(ompi_request_t *req)
     //check whether signal the condition, need to signal after return the context
     if (num_sent == context->con->trees[context->tree]->tree_nextsize * context->con->num_segs[context->tree]) {
         int complete = ++(context->con->complete);       //TODO:change to atomic add
-        TEST("[%d]: Send Finish, tree %d, complete %d\n", ompi_comm_rank(context->con->comm), context->tree, complete);
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Send Finish, tree %d, complete %d\n", ompi_comm_rank(context->con->comm), context->tree, complete));
         OPAL_THREAD_UNLOCK(context->con->mutex);
         if (complete >= 2) {
             OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Singal in send, tree %d\n", ompi_comm_rank(context->con->comm), context->tree));
-            TEST("[%d]: Singal in send, tree %d\n", ompi_comm_rank(context->con->comm), context->tree);
             ompi_request_t *temp_req = context->con->request;
             if (context->con->num_segs[0]!=0) {
                 free(context->con->recv_arrays[0]);
@@ -1259,7 +1254,6 @@ static int two_trees_recv_cb(ompi_request_t *req){
     int err, i;
     
     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d, %" PRIx64 "]: Recv(cb): segment %d from %d at buff %p tree %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->tree));
-    TEST("[%d, %" PRIx64 "]: Recv(cb): segment %d from %d at buff %p tree %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, context->tree);
 
     //store the frag_id to seg array
     OPAL_THREAD_LOCK(context->con->mutex);
@@ -1291,7 +1285,6 @@ static int two_trees_recv_cb(ompi_request_t *req){
         recv_context->con = context->con;
         OBJ_RETAIN(context->con);
         OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Recv(start in recv cb): segment %d from %d at buff %p recv_count %d datatype %p tree %d tag %d\n", ompi_comm_rank(recv_context->con->comm), recv_context->frag_id, recv_context->peer, (void *)recv_context->buff, recv_count, (void *)recv_context->con->datatype, context->tree, (recv_context->con->ibcast_tag << 16) + recv_context->frag_id));
-        TEST("[%d]: Recv(start in recv cb): segment %d from %d at buff %p recv_count %d datatype %p tree %d tag %d\n", ompi_comm_rank(recv_context->con->comm), recv_context->frag_id, recv_context->peer, (void *)recv_context->buff, recv_count, (void *)recv_context->con->datatype, context->tree, (recv_context->con->ibcast_tag << 16) + recv_context->frag_id);
         MCA_PML_CALL(irecv(recv_context->buff, recv_count, recv_context->con->datatype, recv_context->peer, (recv_context->con->ibcast_tag << 16) + recv_context->frag_id, recv_context->con->comm, &recv_req));
         //invoke recvive call back
         OPAL_THREAD_UNLOCK(context->con->mutex);
@@ -1321,7 +1314,6 @@ static int two_trees_recv_cb(ompi_request_t *req){
             OBJ_RETAIN(context->con);
             ++(send_context->con->send_arrays[context->tree][i]);
             OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Send(start in recv cb): segment %d to %d at buff %p send_count %d datatype %p comm %p tree %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (void *) send_context->con->datatype, (void *) send_context->con->comm, context->tree, (send_context->con->ibcast_tag << 16) + send_context->frag_id));
-            TEST("[%d]: Send(start in recv cb): segment %d to %d at buff %p send_count %d datatype %p comm %p tree %d tag %d\n", ompi_comm_rank(send_context->con->comm), send_context->frag_id, send_context->peer, (void *)send_context->buff, send_count, (void *) send_context->con->datatype, (void *) send_context->con->comm, context->tree, (send_context->con->ibcast_tag << 16) + send_context->frag_id);
             err = MCA_PML_CALL(isend(send_context->buff, send_count, send_context->con->datatype, send_context->peer, (send_context->con->ibcast_tag << 16) + send_context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, send_context->con->comm, &send_req));
             
             //invoke send call back
@@ -1342,10 +1334,9 @@ static int two_trees_recv_cb(ompi_request_t *req){
     //if this is leaf and has received all the segments
     if (context->con->trees[context->tree]->tree_nextsize == 0 && num_recv_segs_t == context->con->num_segs[context->tree]) {
         int complete = ++(context->con->complete);       //TODO:change to atomic add
-        TEST("[%d]: Recv Finish, tree %d, complete %d\n", ompi_comm_rank(context->con->comm), context->tree, complete);
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Recv Finish, tree %d, complete %d\n", ompi_comm_rank(context->con->comm), context->tree, complete));
         if (complete >= 2) {
             OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d]: Singal in recv, tree %d\n", ompi_comm_rank(context->con->comm), context->tree));
-            TEST("[%d]: Singal in recv, tree %d\n", ompi_comm_rank(context->con->comm), context->tree);
             ompi_request_t *temp_req = context->con->request;
             if (context->con->num_segs[0]!=0) {
                 free(context->con->recv_arrays[0]);
@@ -1501,8 +1492,6 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
     OPAL_THREAD_LOCK(mutex);
     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d, %" PRIx64 "]: IBcast, root %d, ibcast_tag %d\n", rank, gettid(), root, ibcast_tag));
     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d, %" PRIx64 "]: con->mutex = %p\n", rank, gettid(), (void *)con->mutex));
-    TEST("[%d, %" PRIx64 "]: IBcast, root %d, ibcast_tag %d\n", rank, gettid(), root, ibcast_tag);
-    TEST("[%d, %" PRIx64 "]: con->mutex = %p\n", rank, gettid(), (void *)con->mutex);
 
     //if root, send segment to the roots of two trees.
     if (rank == root){
@@ -1557,7 +1546,6 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
                     context->con = con;
                     OBJ_RETAIN(con);
                     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d, %" PRIx64 "]: Send(start in main): segment %d to %d at buff %p send_count %d datatype %p tree %d, tag %d\n", rank, gettid(), context->frag_id, context->peer, (void *)context->buff, send_count, (void *)datatype, t, (ibcast_tag << 16) + context->frag_id));
-                    TEST("[%d, %" PRIx64 "]: Send(start in main): segment %d to %d at buff %p send_count %d datatype %p tree %d, tag %d\n", rank, gettid(), context->frag_id, context->peer, (void *)context->buff, send_count, (void *)datatype, t, (ibcast_tag << 16) + context->frag_id);
 
                     err = MCA_PML_CALL(isend(context->buff, send_count, datatype, context->peer, (ibcast_tag << 16) + context->frag_id, MCA_PML_BASE_SEND_SYNCHRONOUS, comm, &send_req));
                     
@@ -1625,7 +1613,6 @@ int mca_coll_adapt_ibcast_two_trees_generic(void *buff, int count, struct ompi_d
                 context->tree = t;
                 OBJ_RETAIN(con);
                 OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,"[%d, %" PRIx64 "]: Recv(start in main): segment %d from %d at buff %p recv_count %d datatype %p comm %p tree %d tag %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, recv_count, (void *)datatype, (void *)comm, t, (ibcast_tag << 16) + context->frag_id));
-                TEST("[%d, %" PRIx64 "]: Recv(start in main): segment %d from %d at buff %p recv_count %d datatype %p comm %p tree %d tag %d\n", ompi_comm_rank(context->con->comm), gettid(), context->frag_id, context->peer, (void *)context->buff, recv_count, (void *)datatype, (void *)comm, t, (ibcast_tag << 16) + context->frag_id);
                 err = MCA_PML_CALL(irecv(context->buff, recv_count, datatype, context->peer, (ibcast_tag << 16) + context->frag_id, comm, &recv_req));
                 if (MPI_SUCCESS != err) {
                     return err;

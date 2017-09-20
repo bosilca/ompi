@@ -279,6 +279,15 @@ struct mca_coll_adapt_constant_allreduce_generic_context_s {
     opal_mutex_t * mutex_num_finished;
     int num_finished;
     opal_free_list_t * context_list;
+    int * sequence;
+    int current;
+    int split_rank;
+    int early_segcount;
+    int late_segcount;
+    const void * sbuf;
+    void * rbuf;
+    ptrdiff_t extent;
+    int tag;
 };
 
 typedef struct mca_coll_adapt_constant_allreduce_generic_context_s mca_coll_adapt_constant_allreduce_generic_context_t;

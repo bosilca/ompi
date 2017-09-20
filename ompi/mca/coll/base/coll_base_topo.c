@@ -1625,11 +1625,6 @@ ompi_coll_base_topo_build_topoaware_chain(struct ompi_communicator_t* comm, int 
     int32_t *rank_topo_array = (int32_t *)malloc(sizeof(int32_t) * size);
     set_helper(helper, rank_topo_array, ranks_a, ranks_s, topo, root, size, nb_topo_level);
     //print_helper(helper);
-    printf("\n");
-    for (i = 0; i < size; i++) {
-        printf("%d ,", rank_topo_array[i]);
-    }
-    printf("\n");
     
     int vrank = to_vrank(to_vrank(rank, ranks_a, size), ranks_s, size);
     
@@ -1638,8 +1633,6 @@ ompi_coll_base_topo_build_topoaware_chain(struct ompi_communicator_t* comm, int 
     int new_head = -1;
     int new_tail = -1;
     int rank_loc = -1;
-    
-    printf("rank %d, vrank %d\n", rank, vrank);
     
     tree->topo_flags = rank_topo_array[vrank];
     

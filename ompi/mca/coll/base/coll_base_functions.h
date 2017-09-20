@@ -151,6 +151,7 @@ int ompi_coll_base_gather_intra_linear_sync(GATHER_ARGS, int first_segment_size)
 /* Reduce */
 int ompi_coll_base_reduce_generic(REDUCE_ARGS, ompi_coll_tree_t* tree, int count_by_segment, int max_outstanding_reqs);
 int ompi_coll_base_reduce_intra_basic_linear(REDUCE_ARGS);
+int ompi_coll_base_reduce_intra_topoaware_chain(REDUCE_ARGS, uint32_t segsize, int max_outstanding_reqs );
 int ompi_coll_base_reduce_intra_chain(REDUCE_ARGS, uint32_t segsize, int fanout, int max_outstanding_reqs );
 int ompi_coll_base_reduce_intra_pipeline(REDUCE_ARGS, uint32_t segsize, int max_outstanding_reqs );
 int ompi_coll_base_reduce_intra_binary(REDUCE_ARGS, uint32_t segsize, int max_outstanding_reqs );

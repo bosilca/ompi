@@ -17,8 +17,14 @@
 #define FREE_LIST_MAX_INBUF_LIST 10000  //The max size of the context free list
 #define FREE_LIST_INC_INBUF_LIST 2    //The incresment of the context free list
 
-#define TEST printf
+#define TEST printfno
 #define COUNT_TIME 0
+#define NUM_SEGS 4
+#define MAX_REDUCE 4
+#define REDUCE_METHOD mca_coll_adapt_ireduce_topoaware_chain //mca_coll_adapt_ireduce_topoaware_chain
+#define BCAST_METHOD mca_coll_adapt_ibcast_topoaware_chain //mca_coll_adapt_ibcast_topoaware_chain
+#define CORES_PER_SOCKET 4
+#define CORES_PER_NODE 8
 
 int mca_coll_adapt_allreduce_intra_nonoverlapping(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, struct ompi_communicator_t *comm, mca_coll_base_module_t *module){
     TEST("In adapt allreduce_intra_nonoverlapping\n");
@@ -590,7 +596,6 @@ int mca_coll_adapt_allreduce_intra_recursivedoubling(const void *sbuf, void *rbu
         }
         //invoke send call back
         ompi_request_set_callback(send_req, send_cb, send_context);
-        
     }
     ompi_request_wait(&temp_request, MPI_STATUS_IGNORE);
     
@@ -599,11 +604,14 @@ int mca_coll_adapt_allreduce_intra_recursivedoubling(const void *sbuf, void *rbu
 
 static int ireduce_cb(ompi_request_t *req);
 static int ibcast_cb(ompi_request_t *req);
+static void create_sequence(int *sequence, int num_segs);
+static void create_sequence_saturn(int *sequence, int num_segs);
+static int get_next(int *sequence, int num_segs, int *current, int *block_id);
 
 static int ireduce_cb(ompi_request_t *req){
     mca_coll_adapt_allreduce_generic_context_t *context = (mca_coll_adapt_allreduce_generic_context_t *) req->req_complete_cb_data;
     TEST("[%d]: ireduce_cb, root %d\n", context->con->rank, context->root);
-    
+    //ibcast the segment
     mca_coll_adapt_allreduce_generic_context_t * ibcast_context = (mca_coll_adapt_allreduce_generic_context_t *) opal_free_list_wait(context->con->context_list);
     ibcast_context->sbuf = context->sbuf;
     ibcast_context->rbuf = context->rbuf;
@@ -614,9 +622,10 @@ static int ireduce_cb(ompi_request_t *req){
     OBJ_RETAIN(ibcast_context->con);
     TEST("[%d]: ireduce_cb, create ibcast root %d, tag %d\n", context->con->rank, context->root, context->tag);
     ompi_request_t * ibcast_req = NULL;
-    mca_coll_adapt_ibcast_pipeline(ibcast_context->rbuf, ibcast_context->count, ibcast_context->con->dtype, ibcast_context->root, ibcast_context->con->comm, &ibcast_req, ibcast_context->con->module, ibcast_context->tag);
+    BCAST_METHOD(ibcast_context->rbuf, ibcast_context->count, ibcast_context->con->dtype, ibcast_context->root, ibcast_context->con->comm, &ibcast_req, ibcast_context->con->module, ibcast_context->tag);
     //invoke send call back
     ompi_request_set_callback(ibcast_req, ibcast_cb, ibcast_context);
+    
     
     OPAL_THREAD_UNLOCK (req->req_lock);
     OBJ_RELEASE(context->con);
@@ -626,9 +635,33 @@ static int ireduce_cb(ompi_request_t *req){
 
 static int ibcast_cb(ompi_request_t *req){
     mca_coll_adapt_allreduce_generic_context_t *context = (mca_coll_adapt_allreduce_generic_context_t *) req->req_complete_cb_data;
+    //ireduce another segment
+    int block_id;
+    int next_rank = get_next(context->con->sequence, context->con->num_blocks, &(context->con->current), &block_id);
+    if (next_rank >= 0) {
+        int block_count = ((block_id < context->con->split_rank) ? context->con->early_segcount : context->con->late_segcount);
+        ptrdiff_t block_offset = ((block_id < context->con->split_rank) ?
+                                  ((ptrdiff_t)block_id * (ptrdiff_t)context->con->early_segcount) :
+                                  ((ptrdiff_t)block_id * (ptrdiff_t)context->con->late_segcount + context->con->split_rank));
+        //get new context from free list
+        mca_coll_adapt_allreduce_generic_context_t * ireduce_context = (mca_coll_adapt_allreduce_generic_context_t *) opal_free_list_wait(context->con->context_list);
+        ireduce_context->sbuf = ((char*)context->con->sbuf) + (ptrdiff_t)block_offset * context->con->extent;
+        ireduce_context->rbuf = ((char*)context->con->rbuf) + (ptrdiff_t)block_offset * context->con->extent;
+        ireduce_context->count = block_count;
+        ireduce_context->root = next_rank;
+        ireduce_context->tag = context->con->tag + block_id;
+        ireduce_context->con = context->con;
+        OBJ_RETAIN(ireduce_context->con);
+        ompi_request_t * ireduce_req = NULL;
+        TEST("[%d]: allreduce, create ireduce in ibcast_cb root %d, tag %d, sbuf %p, rbuf %p, count %d\n", ireduce_context->con->rank, ireduce_context->root, ireduce_context->tag, (void *)ireduce_context->sbuf, (void *)ireduce_context->rbuf, ireduce_context->count);
+        REDUCE_METHOD(ireduce_context->sbuf, ireduce_context->rbuf, block_count, ireduce_context->con->dtype, ireduce_context->con->op, ireduce_context->root, ireduce_context->con->comm, &ireduce_req, ireduce_context->con->module, ireduce_context->tag);
+        //invoke send call back
+        ompi_request_set_callback(ireduce_req, ireduce_cb, ireduce_context);
+    }
+    
     OPAL_THREAD_LOCK (context->con->mutex_num_finished);
     context->con->num_finished++;
-    TEST("[%d]: ibcast_cb, root %d number_finished %d num_blocks %d\n", context->con->rank, context->root, context->con->num_blocks);
+    TEST("[%d]: ibcast_cb, root %d number_finished %d num_blocks %d\n", context->con->rank, context->root, context->con->num_finished, context->con->num_blocks);
     if (context->con->num_finished == context->con->num_blocks) {
         OPAL_THREAD_UNLOCK (context->con->mutex_num_finished);
         OBJ_RELEASE(context->con->mutex_num_finished);
@@ -647,6 +680,53 @@ static int ibcast_cb(ompi_request_t *req){
     return 1;
     
 }
+
+static void create_sequence(int *sequence, int num_segs){
+    int i;
+    for (i=0; i<=(num_segs/2); i++) {
+        sequence[i*2] = i;
+        if (num_segs%2 == 1 && i==num_segs/2) {
+            break;
+        }
+        else{
+            sequence[i*2+1] = i + num_segs/2;
+        }
+    }
+}
+
+static void create_sequence_saturn(int *array, int num_segs){
+    int i, j, id;
+    int num_nodes = num_segs / CORES_PER_NODE;
+    id = 0;
+    for (i=0; i<num_nodes; i++) {
+        array[id++] = i*CORES_PER_NODE;
+    }
+    for (i=0; i<num_nodes; i++) {
+        array[id++] = i*CORES_PER_NODE+CORES_PER_SOCKET;
+    }
+    for (i=1; i<CORES_PER_SOCKET; i++) {
+        for (j=0; j<num_nodes; j++) {
+            array[id++] = i+j*CORES_PER_NODE;
+        }
+        for (j=0; j<num_nodes; j++) {
+            array[id++] = i+CORES_PER_SOCKET+j*CORES_PER_NODE;
+        }
+        
+    }
+}
+
+static int get_next(int *sequence, int num_segs, int *current, int *block_id) {
+    int current_t = opal_atomic_add_32(current, 1);
+    if (current_t < num_segs) {
+        *block_id = current_t;
+        return sequence[current_t];
+    }
+    else{
+        *block_id = current_t;
+        return -1;
+    }
+}
+
 
 int mca_coll_adapt_allreduce_intra_generic(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, int iallreduce_tag){
     
@@ -683,11 +763,12 @@ int mca_coll_adapt_allreduce_intra_generic(const void *sbuf, void *rbuf, int cou
     int late_segcount;
     ptrdiff_t max_real_segsize;
     ptrdiff_t lb, extent, true_lb, true_extent;
-    
+    int num_segs = NUM_SEGS;
+
     /* Special case for count less than size * segcount - use recursive doubling */
-    if (count < size) {
-        TEST("Message is too small\n");
-        return mca_coll_adapt_allreduce_intra_recursivedoubling(sbuf, rbuf, count, dtype, op, comm, module);
+    if (count < num_segs) {
+        TEST("======[%d]: Message is too small, count %d\n", rank, count);
+        return mca_coll_adapt_allreduce_intra_nonoverlapping(sbuf, rbuf, count, dtype, op, comm, module);
     }
 
     
@@ -700,8 +781,7 @@ int mca_coll_adapt_allreduce_intra_generic(const void *sbuf, void *rbuf, int cou
      blocks (split_block) .. (size - 1) are "late".
      Early blocks are at most 1 element larger than the late ones.
      */
-    
-    COLL_BASE_COMPUTE_BLOCKCOUNT(count, size, split_rank, early_segcount, late_segcount );
+    COLL_BASE_COMPUTE_BLOCKCOUNT(count, num_segs, split_rank, early_segcount, late_segcount );
     ompi_datatype_get_extent(dtype, &lb, &extent);
     ompi_datatype_get_true_extent(dtype, &true_lb, &true_extent);
     max_real_segsize = true_extent + (early_segcount - 1) * extent;
@@ -721,6 +801,18 @@ int mca_coll_adapt_allreduce_intra_generic(const void *sbuf, void *rbuf, int cou
     //set up mutex
     opal_mutex_t * mutex_num_finished = OBJ_NEW(opal_mutex_t);
     
+    //set up sequence
+    int *sequence = malloc(sizeof(int) * num_segs);
+    //create_sequence_saturn(sequence, num_segs);
+    sequence[0] = 3;
+    sequence[1] = 35;
+    sequence[2] = 67;
+    sequence[3] = 99;
+//    sequence[4] = 19;
+//    sequence[5] = 51;
+//    sequence[6] = 83;
+//    sequence[7] = 115;
+    
     //set up constant context
     mca_coll_adapt_constant_allreduce_generic_context_t *con = OBJ_NEW(mca_coll_adapt_constant_allreduce_generic_context_t);
     con->dtype = dtype;
@@ -729,33 +821,48 @@ int mca_coll_adapt_allreduce_intra_generic(const void *sbuf, void *rbuf, int cou
     con->module = module;
     con->request = temp_request;
     con->rank = rank;
-    con->num_blocks = size;
+    con->num_blocks = num_segs;
     con->mutex_num_finished = mutex_num_finished;
     con->num_finished = 0;
     con->context_list = context_list;
+    con->sequence = sequence;
+    con->current = -1;
+    con->split_rank = split_rank;
+    con->early_segcount = early_segcount;
+    con->late_segcount = late_segcount;
+    con->sbuf = sbuf;
+    con->rbuf = rbuf;
+    con->extent = extent;
+    con->tag = iallreduce_tag;
     
     int block;
     int block_count;
     ptrdiff_t block_offset;
+    
+    int min = MAX_REDUCE;
+    if (min > num_segs) {
+        min = num_segs;
+    }
     //for the first block
-    for (block=0; block<size; block++) {
-        block_count = ((rank < split_rank) ? early_segcount : late_segcount);
-        block_offset = ((rank < split_rank) ?
-                        ((ptrdiff_t)rank * (ptrdiff_t)early_segcount) :
-                        ((ptrdiff_t)rank * (ptrdiff_t)late_segcount + split_rank));
-        
+    for (block=0; block<min; block++) {
+        int block_id;
+        int next_rank = get_next(sequence, num_segs, &(con->current), &block_id);
+        block_count = ((block_id < split_rank) ? early_segcount : late_segcount);
+        block_offset = ((block_id < split_rank) ?
+                        ((ptrdiff_t)block_id * (ptrdiff_t)early_segcount) :
+                        ((ptrdiff_t)block_id * (ptrdiff_t)late_segcount + split_rank));
         //get new context from free list
         mca_coll_adapt_allreduce_generic_context_t * ireduce_context = (mca_coll_adapt_allreduce_generic_context_t *) opal_free_list_wait(context_list);
         ireduce_context->sbuf = ((char*)sbuf) + (ptrdiff_t)block_offset * extent;
         ireduce_context->rbuf = ((char*)rbuf) + (ptrdiff_t)block_offset * extent;
         ireduce_context->count = block_count;
-        ireduce_context->root = block;
-        ireduce_context->tag = iallreduce_tag + block;
+        ireduce_context->root = next_rank;
+        ireduce_context->tag = iallreduce_tag + block_id;
         ireduce_context->con = con;
         OBJ_RETAIN(con);
         ompi_request_t * ireduce_req = NULL;
         TEST("[%d]: allreduce, create ireduce root %d, tag %d, sbuf %p, rbuf %p, count %d\n", ireduce_context->con->rank, ireduce_context->root, ireduce_context->tag, (void *)ireduce_context->sbuf, (void *)ireduce_context->rbuf, ireduce_context->count);
-        mca_coll_adapt_ireduce_pipeline(ireduce_context->sbuf, ireduce_context->rbuf, block_count, dtype, op, ireduce_context->root, comm, &ireduce_req, module, ireduce_context->tag);
+        REDUCE_METHOD(ireduce_context->sbuf, ireduce_context->rbuf, block_count, dtype, op, ireduce_context->root, comm, &ireduce_req, module, ireduce_context->tag);
         //invoke send call back
         ompi_request_set_callback(ireduce_req, ireduce_cb, ireduce_context);
     }
@@ -772,9 +879,10 @@ int mca_coll_adapt_allreduce(const void *sbuf, void *rbuf, int count, struct omp
     if (COUNT_TIME) {
         starttime_1 = MPI_Wtime();
     }
-    //int error =  mca_coll_adapt_allreduce_intra_recursivedoubling(sbuf, rbuf, count, dtype, op, comm, module);
+    //int error =  mca_coll_adapt_allreduce_intra_nonoverlapping(sbuf, rbuf, count, dtype, op, comm, module);
     int size = ompi_comm_size(comm);
-    int iallreduce_tag = opal_atomic_add_32(&(comm->c_iallreduce_tag), size);
+    int num_segs = NUM_SEGS;
+    int iallreduce_tag = opal_atomic_add_32(&(comm->c_iallreduce_tag), num_segs);
     iallreduce_tag = (iallreduce_tag % 4096) + 4097;
     int error =  mca_coll_adapt_allreduce_intra_generic(sbuf, rbuf, count, dtype, op, comm, module, iallreduce_tag);
     if (COUNT_TIME) {

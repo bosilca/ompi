@@ -161,7 +161,9 @@ static mca_coll_adapt_inbuf_t * to_inbuf(char * buf, int distance){
 static int ireduce_request_fini(mca_coll_adapt_reduce_context_t *context)
 {
     int i;
+    #if OPAL_CUDA_SUPPORT
     mca_common_cuda_sync_op_stream(0);
+    #endif
     OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm)));
     ompi_request_t *temp_req = context->con->request;
     if (context->con->accumbuf != NULL) {
