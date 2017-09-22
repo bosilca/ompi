@@ -1447,7 +1447,7 @@ void print_helper(ompi_coll_topo_helper_t *helper, int nb_topo_level){
 
 
 ompi_coll_tree_t*
-ompi_coll_base_topo_build_topoaware_linear(struct ompi_communicator_t* comm, int root, mca_coll_base_module_t *module, int nb_topo_level){
+ompi_coll_base_topo_build_topoaware_linear(struct ompi_communicator_t* comm, int root, mca_coll_base_module_t *module, int nb_topo_level, int device_type, void *topo_info){
     
     int i, j;
     ompi_coll_tree_t *tree = (ompi_coll_tree_t*)malloc(sizeof(ompi_coll_tree_t));

@@ -604,7 +604,7 @@ int mca_coll_adapt_ireduce_topoaware_linear(const void *sbuf, void *rbuf, int co
         if( coll_comm->cached_topolinear ) { /* destroy previous binomial if defined */
             ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topolinear) );
         }
-        coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module, 3);
+        coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module, 3, 0, NULL);
         coll_comm->cached_topolinear_root = root;
     }
     size_t seg_size = coll_adapt_ireduce_segment_size;

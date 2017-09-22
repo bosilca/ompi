@@ -77,7 +77,7 @@ int ompi_coll_base_topo_dump_tree (ompi_coll_tree_t* tree, int rank);
 
 ompi_coll_tree_t*
 ompi_coll_base_topo_build_topoaware_linear(struct ompi_communicator_t* comm,
-                                        int root, mca_coll_base_module_t *module, int nb_topo_level);
+                                        int root, mca_coll_base_module_t *module, int nb_topo_level, int device_type, void *topo_info);
 ompi_coll_tree_t*
 ompi_coll_base_topo_build_topoaware_chain(struct ompi_communicator_t* comm,
                                           int root, mca_coll_base_module_t *module, int nb_topo_level, int device_type, void *topo_info );

@@ -772,7 +772,7 @@ int mca_coll_adapt_ibcast_topoaware_linear(void *buff, int count, struct ompi_da
         if( coll_comm->cached_topolinear ) { /* destroy previous binomial if defined */
             ompi_coll_base_topo_destroy_tree( &(coll_comm->cached_topolinear) );
         }
-        coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module, 3);
+        coll_comm->cached_topolinear = ompi_coll_base_topo_build_topoaware_linear(comm, root, module, 3, 0, NULL);
         coll_comm->cached_topolinear_root = root;
     }
     return mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, coll_comm->cached_topolinear, coll_adapt_ibcast_segment_size, ibcast_tag, 0);
