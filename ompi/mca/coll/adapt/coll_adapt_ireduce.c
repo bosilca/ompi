@@ -625,6 +625,7 @@ int mca_coll_adapt_ireduce_topoaware_linear(const void *sbuf, void *rbuf, int co
 
 int mca_coll_adapt_ireduce_topoaware_chain(const void *sbuf, void *rbuf, int count, struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ireduce_tag){
     ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
+    //print_tree(tree, ompi_comm_rank(comm));
     size_t seg_size = coll_adapt_ireduce_segment_size;
     int err =  mca_coll_adapt_ireduce_generic(sbuf, rbuf, count, dtype, op, root, comm, request, module, tree, seg_size, ireduce_tag, CPU_BUFFER);
     //ompi_coll_base_topo_destroy_tree(&tree);

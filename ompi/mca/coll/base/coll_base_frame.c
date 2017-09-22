@@ -122,6 +122,9 @@ coll_base_comm_destruct(mca_coll_base_comm_t *data)
     if (data->cached_topo) {
         free(data->cached_topo);
     }
+    if (data->cached_ranks_a) {
+        free(data->cached_ranks_a);
+    }
 }
 
 OBJ_CLASS_INSTANCE(mca_coll_base_comm_t, opal_object_t,

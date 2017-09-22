@@ -804,14 +804,18 @@ int mca_coll_adapt_allreduce_intra_generic(const void *sbuf, void *rbuf, int cou
     //set up sequence
     int *sequence = malloc(sizeof(int) * num_segs);
     //create_sequence_saturn(sequence, num_segs);
-    sequence[0] = 3;
-    sequence[1] = 35;
-    sequence[2] = 67;
-    sequence[3] = 99;
+//    sequence[0] = 3;
+//    sequence[1] = 35;
+//    sequence[2] = 67;
+//    sequence[3] = 99;
 //    sequence[4] = 19;
 //    sequence[5] = 51;
 //    sequence[6] = 83;
 //    sequence[7] = 115;
+      sequence[0] = 48;
+      sequence[1] = 52;
+      sequence[2] = 56;
+      sequence[3] = 60;
     
     //set up constant context
     mca_coll_adapt_constant_allreduce_generic_context_t *con = OBJ_NEW(mca_coll_adapt_constant_allreduce_generic_context_t);

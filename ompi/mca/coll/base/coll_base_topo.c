@@ -1330,8 +1330,6 @@ void sort_topo(int *topo, int start, int end, int size, int *ranks_a, int level,
 //get the starting point of each gourp on every level
 void set_helper(ompi_coll_topo_helper_t *helper, int32_t *rank_topo_array, int *ranks_a, int *ranks_s, int *topo, int root, int size, int nb_topo_level){
     int i, j;
-    //sort the topo such that each group is contiguous
-    sort_topo(topo, 0, size-1, size, ranks_a, 0, nb_topo_level);
 //
 //        for (i=0; i<size; i++) {
 //            printf("[%d]: ", i);
@@ -1475,28 +1473,41 @@ ompi_coll_base_topo_build_topoaware_linear(struct ompi_communicator_t* comm, int
     size = ompi_comm_size(comm);
     rank = ompi_comm_rank(comm);
     
+    int *ranks_a;
+    int *ranks_s = (int *)malloc(sizeof(int)*size);   //ranks[0] store which shift rank has virtual rank 0
+    
+    for (i=0; i<size; i++) {
+        ranks_s[i] = i;
+    }
+    
     int *topo;
     mca_coll_base_comm_t *coll_comm = module->base_data;
     if( !( (coll_comm->cached_topo) && (coll_comm->cached_old_comm == comm) ) ) {
         if( coll_comm->cached_topo ) {
             free(coll_comm->cached_topo);
+            free(coll_comm->cached_ranks_a);
         }
         topo = (int *)malloc(sizeof(int)*size*nb_topo_level);
-        get_topo(topo, comm, nb_topo_level);
+        if (device_type == 1) {
+            get_topo_gpu(topo, comm, nb_topo_level, (ompi_coll_topo_gpu_t *)topo_info);
+        } else {
+            get_topo(topo, comm, nb_topo_level);
+        }
+        ranks_a = (int *)malloc(sizeof(int)*size);   //ranks[0] store which actual rank has shift rank 0
+        for (i=0; i<size; i++) {
+            ranks_a[i] = i;
+        }
+        //sort the topo such that each group is contiguous
+        sort_topo(topo, 0, size-1, size, ranks_a, 0, nb_topo_level);
         coll_comm->cached_topo = topo;
         coll_comm->cached_old_comm = comm;
+        coll_comm->cached_ranks_a = ranks_a;
     }
     else{
         topo = coll_comm->cached_topo;
+        ranks_a = coll_comm->cached_ranks_a;
     }
     
-    int *ranks_a = (int *)malloc(sizeof(int)*size);   //ranks[0] store which actual rank has shift rank 0
-    int *ranks_s = (int *)malloc(sizeof(int)*size);   //ranks[0] store which shift rank has virtual rank 0
-
-    for (i=0; i<size; i++) {
-        ranks_a[i] = i;
-        ranks_s[i] = i;
-    }
     ompi_coll_topo_helper_t *helper = (ompi_coll_topo_helper_t *) malloc(sizeof(ompi_coll_topo_helper_t)*nb_topo_level);
     int32_t *rank_topo_array = (int32_t *)malloc(sizeof(int32_t) * size);
     set_helper(helper, rank_topo_array, ranks_a, ranks_s, topo, root, size, 3);
@@ -1562,7 +1573,6 @@ ompi_coll_base_topo_build_topoaware_linear(struct ompi_communicator_t* comm, int
     }
     
     free_helper(helper, 3);
-    free(ranks_a);
     free(ranks_s);
     free(rank_topo_array);
     
@@ -1595,11 +1605,19 @@ ompi_coll_base_topo_build_topoaware_chain(struct ompi_communicator_t* comm, int 
     size = ompi_comm_size(comm);
     rank = ompi_comm_rank(comm);
     
+    int *ranks_a;
+    int *ranks_s = (int *)malloc(sizeof(int)*size);   //ranks[0] store which shift rank has virtual rank 0
+    
+    for (i=0; i<size; i++) {
+        ranks_s[i] = i;
+    }
+
     int *topo;
     mca_coll_base_comm_t *coll_comm = module->base_data;
     if( !( (coll_comm->cached_topo) && (coll_comm->cached_old_comm == comm) ) ) {
         if( coll_comm->cached_topo ) {
             free(coll_comm->cached_topo);
+            free(coll_comm->cached_ranks_a);
         }
         topo = (int *)malloc(sizeof(int)*size*nb_topo_level);
         if (device_type == 1) {
@@ -1607,20 +1625,21 @@ ompi_coll_base_topo_build_topoaware_chain(struct ompi_communicator_t* comm, int 
         } else {
             get_topo(topo, comm, nb_topo_level);
         }
+        ranks_a = (int *)malloc(sizeof(int)*size);   //ranks[0] store which actual rank has shift rank 0
+        for (i=0; i<size; i++) {
+            ranks_a[i] = i;
+        }
+        //sort the topo such that each group is contiguous
+        sort_topo(topo, 0, size-1, size, ranks_a, 0, nb_topo_level);
         coll_comm->cached_topo = topo;
         coll_comm->cached_old_comm = comm;
+        coll_comm->cached_ranks_a = ranks_a;
     }
     else{
         topo = coll_comm->cached_topo;
+        ranks_a = coll_comm->cached_ranks_a;
     }
     
-    int *ranks_a = (int *)malloc(sizeof(int)*size);   //ranks[0] store which actual rank has shift rank 0
-    int *ranks_s = (int *)malloc(sizeof(int)*size);   //ranks[0] store which shift rank has virtual rank 0
-    
-    for (i=0; i<size; i++) {
-        ranks_a[i] = i;
-        ranks_s[i] = i;
-    }
     ompi_coll_topo_helper_t *helper = (ompi_coll_topo_helper_t *) malloc(sizeof(ompi_coll_topo_helper_t)*nb_topo_level);
     int32_t *rank_topo_array = (int32_t *)malloc(sizeof(int32_t) * size);
     set_helper(helper, rank_topo_array, ranks_a, ranks_s, topo, root, size, nb_topo_level);
@@ -1692,7 +1711,6 @@ ompi_coll_base_topo_build_topoaware_chain(struct ompi_communicator_t* comm, int 
     }
     
     free_helper(helper, nb_topo_level);
-    free(ranks_a);
     free(ranks_s);
     free(rank_topo_array);
     
@@ -1783,32 +1801,34 @@ ompi_coll_base_topo_build_topoaware_ring(struct ompi_communicator_t* comm,
     rank = ompi_comm_rank(comm);
     
     int *topo;
+    int *ranks_a;
     mca_coll_base_comm_t *coll_comm = module->base_data;
     if( !( (coll_comm->cached_topo) && (coll_comm->cached_old_comm == comm) ) ) {
         if( coll_comm->cached_topo ) {
             free(coll_comm->cached_topo);
+            free(coll_comm->cached_ranks_a);
         }
         topo = (int *)malloc(sizeof(int)*size*nb_topo_level);
         get_topo(topo, comm, nb_topo_level);
         coll_comm->cached_topo = topo;
         coll_comm->cached_old_comm = comm;
+        ranks_a = (int *)malloc(sizeof(int)*size);   //ranks[0] store which actual rank has shift rank 0
+        for (i=0; i<size; i++) {
+            ranks_a[i] = i;
+        }
+        sort_topo(topo, 0, size-1, size, ranks_a, 0, nb_topo_level);
     }
     else{
         topo = coll_comm->cached_topo;
+        ranks_a = coll_comm->cached_ranks_a;
     }
 
-    int *ranks_a = (int *)malloc(sizeof(int)*size);   //ranks[0] store which actual rank has shift rank 0
-    for (i=0; i<size; i++) {
-        ranks_a[i] = i;
-    }
-    sort_topo(topo, 0, size-1, size, ranks_a, 0, nb_topo_level);
     int vrank = to_vrank(rank, ranks_a, size);
     tree->tree_root = vrank;
     tree->tree_prev = to_rank((vrank-1+size)%size, ranks_a, size);
     tree->tree_nextsize = 1;
     tree->tree_next[0] = to_rank((vrank+1)%size, ranks_a, size);
     
-    free(ranks_a);
     return tree;
 }
 

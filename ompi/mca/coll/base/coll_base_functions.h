@@ -369,6 +369,7 @@ struct mca_coll_base_comm_t {
     /* topo */
     int *cached_topo;
     struct ompi_communicator_t* cached_old_comm;
+    int *cached_ranks_a;
 };
 typedef struct mca_coll_base_comm_t mca_coll_base_comm_t;
 OMPI_DECLSPEC OBJ_CLASS_DECLARATION(mca_coll_base_comm_t);
