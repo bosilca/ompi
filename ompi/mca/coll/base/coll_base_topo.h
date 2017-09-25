@@ -97,8 +97,9 @@ typedef struct ompi_coll_topo_gpu_s {
     int *gpu_numa;
 } ompi_coll_topo_gpu_t;
 
+int pow10_int(int pow_value);
+int hostname_to_number(char* hostname, int size);
 void get_topo(int *topo, struct ompi_communicator_t* comm, int nb_topo_level);
-
 void get_topo_gpu(int *topo, struct ompi_communicator_t* comm, int nb_topo_level, ompi_coll_topo_gpu_t* gpu_topo);
 
 //void probe_topo(struct ompi_communicator_t* comm);

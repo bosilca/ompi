@@ -1031,6 +1031,30 @@ int ompi_coll_base_topo_dump_tree (ompi_coll_tree_t* tree, int rank)
 }
 
 //TODO: Need to change int to bits
+int pow10_int(int pow_value) {
+    int i, result = 1;
+    for (i=0; i<pow_value; i++) {
+        result *= 10;
+    }
+    return result;
+}
+
+int hostname_to_number(char* hostname, int size) {
+    int i=0, j=0;
+    char * number_array = (char *)malloc(sizeof(char)*size);
+    while (hostname[i] != '\0'){
+        if(hostname[i] >= '0' && hostname[i] <= '9'){
+            number_array[j++] = hostname[i];
+        }
+        i++;
+    }
+    int number = 0;
+    for (i=0; i<j; i++){
+        number += (number_array[i]-'0') * pow10_int(j-1-i);
+    }
+    free(number_array);
+    return number;
+}
 
 void get_topo(int *topo, struct ompi_communicator_t* comm, int nb_topo_level){
     int r_rank, i;
@@ -1043,7 +1067,14 @@ void get_topo(int *topo, struct ompi_communicator_t* comm, int nb_topo_level){
     }
     int same_numa_count = 0;
     //set daemon vpid
-    self_topo[0] = OMPI_RTE_MY_NODEID;
+    //self_topo[0] = OMPI_RTE_MY_NODEID;
+    char hostname[1024];
+    printf("[%d]: %s\n", ompi_comm_rank(comm), hostname);
+    int test = 1;
+    while (test == 1) {
+    }
+    gethostname(hostname, 1024);
+    self_topo[0] = hostname_to_number(hostname, 1024);
     //set numa id
     for (r_rank=0; r_rank < size; r_rank++) {
         proc = ompi_group_peer_lookup(comm->c_local_group, r_rank);
