@@ -190,9 +190,7 @@ static int send_rd_cb(ompi_request_t *req){
             OBJ_RELEASE(context->con);
             opal_free_list_return(temp, (opal_free_list_item_t*)context);
             OBJ_RELEASE(temp);
-            OPAL_THREAD_LOCK(&ompi_request_lock);
             ompi_request_complete(temp_req, 1);
-            OPAL_THREAD_UNLOCK(&ompi_request_lock);
             if (COUNT_TIME) {
                 endtime_0 = MPI_Wtime();
                 totaltime += (endtime_0 - starttime_0);
@@ -360,9 +358,7 @@ static int recv_rd_cb(ompi_request_t *req){
             OBJ_RELEASE(context->con);
             opal_free_list_return(temp, (opal_free_list_item_t*)context);
             OBJ_RELEASE(temp);
-            OPAL_THREAD_LOCK(&ompi_request_lock);
             ompi_request_complete(temp_req, 1);
-            OPAL_THREAD_UNLOCK(&ompi_request_lock);
             if (COUNT_TIME) {
                 endtime_0 = MPI_Wtime();
                 totaltime += (endtime_0 - starttime_0);
@@ -417,9 +413,7 @@ int mca_coll_adapt_iallreduce_intra_recursivedoubling(const void *sbuf, void *rb
         if (MPI_IN_PLACE != sbuf) {
             ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
         }
-        OPAL_THREAD_LOCK(&ompi_request_lock);
         ompi_request_complete(temp_request, 1);
-        OPAL_THREAD_UNLOCK(&ompi_request_lock);
         return MPI_SUCCESS;
     }
     
@@ -826,9 +820,7 @@ static int send_ring_allgather_cb(ompi_request_t *req){
         OBJ_RELEASE(context->con);
         opal_free_list_return(temp, (opal_free_list_item_t*)context);
         OBJ_RELEASE(temp);
-        OPAL_THREAD_LOCK(&ompi_request_lock);
         ompi_request_complete(temp_req, 1);
-        OPAL_THREAD_UNLOCK(&ompi_request_lock);
         
         OPAL_THREAD_UNLOCK (req->req_lock);
         req->req_free(&req);
@@ -899,9 +891,7 @@ static int recv_ring_allgather_cb(ompi_request_t *req){
             OBJ_RELEASE(context->con);
             opal_free_list_return(temp, (opal_free_list_item_t*)context);
             OBJ_RELEASE(temp);
-            OPAL_THREAD_LOCK(&ompi_request_lock);
             ompi_request_complete(temp_req, 1);
-            OPAL_THREAD_UNLOCK(&ompi_request_lock);
             
             OPAL_THREAD_UNLOCK (req->req_lock);
             req->req_free(&req);
@@ -965,9 +955,7 @@ int mca_coll_adapt_iallreduce_intra_ring_segmented(const void *sbuf, void *rbuf,
         if (MPI_IN_PLACE != sbuf) {
             ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
         }
-        OPAL_THREAD_LOCK(&ompi_request_lock);
         ompi_request_complete(temp_request, 1);
-        OPAL_THREAD_UNLOCK(&ompi_request_lock);
         
         return MPI_SUCCESS;
     }

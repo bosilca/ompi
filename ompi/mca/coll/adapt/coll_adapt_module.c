@@ -290,8 +290,8 @@ int ompi_coll_adapt_lazy_enable(mca_coll_base_module_t *module,
 #endif
 
     /* Save previous component's reduce information */
-    adapt_module->previous_reduce = comm->c_coll.coll_reduce;
-    adapt_module->previous_reduce_module = comm->c_coll.coll_reduce_module;
+    adapt_module->previous_reduce = comm->c_coll->coll_reduce;
+    adapt_module->previous_reduce_module = comm->c_coll->coll_reduce_module;
     OBJ_RETAIN(adapt_module->previous_reduce_module);
 
     /* Wait for everyone in this communicator to attach and setup */

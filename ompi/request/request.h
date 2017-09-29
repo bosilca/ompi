@@ -450,7 +450,7 @@ static inline int ompi_request_complete(ompi_request_t* request, bool with_signa
     
 //    printf("[%" PRIx64 "]: In request complete 0: req %p, req_complete_cb no null %d, req_complete %d, rc %d\n", gettid(), (void *)request, NULL != request->req_complete_cb, request->req_complete == REQUEST_COMPLETED, rc);
     //printf("[%" PRIx64 ", request %p]: ompi_request_complete lock \n", gettid(), (void *)request);
-    OPAL_THREAD_LOCK (request->req_lock);
+    OPAL_THREAD_LOCK(request->req_lock);
     if(NULL != request->req_complete_cb) {
         ompi_request_complete_fn_t temp = request->req_complete_cb;
         request->req_complete_cb = NULL;
@@ -470,13 +470,13 @@ static inline int ompi_request_complete(ompi_request_t* request, bool with_signa
                 if( REQUEST_PENDING != tmp_sync )
                     wait_sync_update(tmp_sync, 1, request->req_status.MPI_ERROR);
             }
-        } else
+        } else {
             request->req_complete = REQUEST_COMPLETED;
         }
     }
     
     //printf("[%" PRIx64 ", request %p]: ompi_request_complete unlock \n", gettid(), (void *)request);
-    OPAL_THREAD_UNLOCK (request->req_lock);
+    OPAL_THREAD_UNLOCK(request->req_lock);
     return OMPI_SUCCESS;
 }
 

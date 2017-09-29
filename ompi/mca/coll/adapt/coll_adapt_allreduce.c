@@ -34,18 +34,18 @@ int mca_coll_adapt_allreduce_intra_nonoverlapping(const void *sbuf, void *rbuf, 
     /* Reduce to 0 and broadcast. */
     if (MPI_IN_PLACE == sbuf) {
         if (0 == rank) {
-            err = comm->c_coll.coll_reduce (MPI_IN_PLACE, rbuf, count, dtype, op, 0, comm, comm->c_coll.coll_reduce_module);
+            err = comm->c_coll->coll_reduce (MPI_IN_PLACE, rbuf, count, dtype, op, 0, comm, comm->c_coll->coll_reduce_module);
         } else {
-            err = comm->c_coll.coll_reduce (rbuf, NULL, count, dtype, op, 0, comm, comm->c_coll.coll_reduce_module);
+            err = comm->c_coll->coll_reduce (rbuf, NULL, count, dtype, op, 0, comm, comm->c_coll->coll_reduce_module);
         }
     } else {
-        err = comm->c_coll.coll_reduce (sbuf, rbuf, count, dtype, op, 0, comm, comm->c_coll.coll_reduce_module);
+        err = comm->c_coll->coll_reduce (sbuf, rbuf, count, dtype, op, 0, comm, comm->c_coll->coll_reduce_module);
     }
     if (MPI_SUCCESS != err) {
         return err;
     }
     
-    return comm->c_coll.coll_bcast (rbuf, count, dtype, 0, comm, comm->c_coll.coll_bcast_module);
+    return comm->c_coll->coll_bcast (rbuf, count, dtype, 0, comm, comm->c_coll->coll_bcast_module);
 }
 
 static int send_cb(ompi_request_t *req);
@@ -189,9 +189,7 @@ static int send_cb(ompi_request_t *req){
             OBJ_RELEASE(context->con);
             OBJ_RELEASE(context->con);
             opal_free_list_return(temp, (opal_free_list_item_t*)context);
-            OPAL_THREAD_LOCK(&ompi_request_lock);
             ompi_request_complete(temp_req, 1);
-            OPAL_THREAD_UNLOCK(&ompi_request_lock);
         }
     }
     else{
@@ -348,9 +346,7 @@ static int recv_cb(ompi_request_t *req){
             OBJ_RELEASE(context->con);
             OBJ_RELEASE(context->con);
             opal_free_list_return(temp, (opal_free_list_item_t*)context);
-            OPAL_THREAD_LOCK(&ompi_request_lock);
             ompi_request_complete(temp_req, 1);
-            OPAL_THREAD_UNLOCK(&ompi_request_lock);
         }
     }
     else{
@@ -750,9 +746,7 @@ int mca_coll_adapt_allreduce_intra_generic(const void *sbuf, void *rbuf, int cou
         if (MPI_IN_PLACE != sbuf) {
             ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
         }
-        OPAL_THREAD_LOCK(&ompi_request_lock);
         ompi_request_complete(temp_request, 1);
-        OPAL_THREAD_UNLOCK(&ompi_request_lock);
         
         return MPI_SUCCESS;
     }

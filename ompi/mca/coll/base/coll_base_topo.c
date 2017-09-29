@@ -1094,7 +1094,7 @@ void get_topo(int *topo, struct ompi_communicator_t* comm, int nb_topo_level){
     printf("[topo %d]: %d %d %d\n", ompi_comm_rank(comm), self_topo[0], self_topo[1], self_topo[2]);
     fflush(stdout);
     //do allgather
-    comm->c_coll.coll_allgather(self_topo, nb_topo_level, MPI_INT, topo, nb_topo_level, MPI_INT, comm, comm->c_coll.coll_allgather_module);
+    comm->c_coll->coll_allgather(self_topo, nb_topo_level, MPI_INT, topo, nb_topo_level, MPI_INT, comm, comm->c_coll->coll_allgather_module);
     printf("[topo %d]: after allgather\n", ompi_comm_rank(comm));
     fflush(stdout);
     free(same_numa);
@@ -1215,7 +1215,7 @@ void get_topo_gpu(int *topo, struct ompi_communicator_t* comm, int nb_topo_level
     self_topo[3] = my_rank;
 
     //do allgather
-    comm->c_coll.coll_allgather(self_topo, nb_topo_level, MPI_INT, topo, nb_topo_level, MPI_INT, comm, comm->c_coll.coll_allgather_module);
+    comm->c_coll->coll_allgather(self_topo, nb_topo_level, MPI_INT, topo, nb_topo_level, MPI_INT, comm, comm->c_coll->coll_allgather_module);
     
     for (r_rank=0; r_rank < size; r_rank++) {
         if (rank_on_current_gpu_numa(r_rank, my_rank, topo, size, nb_topo_level)) {
@@ -1234,7 +1234,7 @@ void get_topo_gpu(int *topo, struct ompi_communicator_t* comm, int nb_topo_level
     
 //    printf("[topo %d]: %d %d %d\n", ompi_comm_rank(comm), self_topo[0], self_topo[1], self_topo[2], self_topo[3]);
     
-    comm->c_coll.coll_allgather(self_topo, nb_topo_level, MPI_INT, topo, nb_topo_level, MPI_INT, comm, comm->c_coll.coll_allgather_module);
+    comm->c_coll->coll_allgather(self_topo, nb_topo_level, MPI_INT, topo, nb_topo_level, MPI_INT, comm, comm->c_coll->coll_allgather_module);
     
     int *topo_bak = (int *)malloc(sizeof(int)*size*nb_topo_level);
     memcpy(topo_bak, topo, sizeof(int)*size*nb_topo_level);
