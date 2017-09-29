@@ -795,6 +795,8 @@ int mca_coll_adapt_ibcast_topoaware_linear(void *buff, int count, struct ompi_da
 
 int mca_coll_adapt_ibcast_topoaware_chain(void *buff, int count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm, ompi_request_t ** request, mca_coll_base_module_t *module, int ibcast_tag){
     ompi_coll_tree_t* tree = ompi_coll_base_topo_build_topoaware_chain(comm, root, module, 3, 0, NULL);
+    //print_tree(tree, ompi_comm_rank(comm));
+    //fflush(stdout);
     int err =  mca_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module, tree, coll_adapt_ibcast_segment_size, ibcast_tag, 0);
     //ompi_coll_base_topo_destroy_tree(&tree);
     return err;

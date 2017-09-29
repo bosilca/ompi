@@ -32,7 +32,7 @@
 #include "opal/mca/common/cuda/common_cuda.h"
 #endif
 #include <math.h>
-
+#include <limits.h>
 /*
  * Some static helpers.
  */
@@ -1063,16 +1063,13 @@ void get_topo(int *topo, struct ompi_communicator_t* comm, int nb_topo_level){
     int * self_topo = (int *)malloc(sizeof(int) * nb_topo_level);
     int * same_numa = (int *)malloc(sizeof(int) * size);
     for (i=0; i<size; i++) {
-        same_numa[i] = size;
+        same_numa[i] = INT_MAX;
     }
     int same_numa_count = 0;
     //set daemon vpid
     //self_topo[0] = OMPI_RTE_MY_NODEID;
     char hostname[1024];
-    printf("[%d]: %s\n", ompi_comm_rank(comm), hostname);
-    int test = 1;
-    while (test == 1) {
-    }
+    //printf("[%d]: %s\n", ompi_comm_rank(comm), hostname);
     gethostname(hostname, 1024);
     self_topo[0] = hostname_to_number(hostname, 1024);
     //set numa id
@@ -1095,9 +1092,11 @@ void get_topo(int *topo, struct ompi_communicator_t* comm, int nb_topo_level){
     self_topo[2] = ompi_comm_rank(comm);
     
     printf("[topo %d]: %d %d %d\n", ompi_comm_rank(comm), self_topo[0], self_topo[1], self_topo[2]);
-
+    fflush(stdout);
     //do allgather
     comm->c_coll.coll_allgather(self_topo, nb_topo_level, MPI_INT, topo, nb_topo_level, MPI_INT, comm, comm->c_coll.coll_allgather_module);
+    printf("[topo %d]: after allgather\n", ompi_comm_rank(comm));
+    fflush(stdout);
     free(same_numa);
     free(self_topo);
     
@@ -1306,7 +1305,7 @@ void sort_topo(int *topo, int start, int end, int size, int *ranks_a, int level,
 //        printf("%d ", topo[i*nb_topo_level+level]);
 //    }
 //    printf("\n");
-    int min = size;
+    int min = INT_MAX;
     int min_loc = -1;
     for (i=start; i<=end; i++) {
         //find min
@@ -1329,7 +1328,7 @@ void sort_topo(int *topo, int start, int end, int size, int *ranks_a, int level,
         temp = ranks_a[i];
         ranks_a[i] = ranks_a[min_loc];
         ranks_a[min_loc] = temp;
-        min = size;
+        min = INT_MAX;
         min_loc = -1;
     }
 //    printf("After sort: ");
