@@ -9,13 +9,14 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2007-2011 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2007-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2009-2010 Oracle and/or its affiliates.  All rights reserved.
  * Copyright (c) 2011-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2013-2016 Intel, Inc. All rights reserved
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
  * Copyright (c) 2014-2015 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -31,7 +32,7 @@
 #include <sys/time.h>
 #endif
 
-#include "opal/mca/hwloc/hwloc.h"
+#include "opal/mca/hwloc/hwloc-internal.h"
 #include "opal/mca/pmix/pmix.h"
 #include "opal/util/argv.h"
 #include "opal/util/output.h"
@@ -71,22 +72,28 @@ char *orte_basename = NULL;
 bool orte_coprocessors_detected = false;
 opal_hash_table_t *orte_coprocessors = NULL;
 char *orte_topo_signature = NULL;
+char *orte_mgmt_transport = NULL;
+char *orte_coll_transport = NULL;
+int orte_mgmt_conduit = -1;
+int orte_coll_conduit = -1;
+bool orte_no_vm = false;
+char *orte_data_server_uri = NULL;
 
 /* ORTE OOB port flags */
 bool orte_static_ports = false;
 char *orte_oob_static_ports = NULL;
 bool orte_standalone_operation = false;
+bool orte_fwd_mpirun_port = true;
 
 bool orte_keep_fqdn_hostnames = false;
 bool orte_have_fqdn_allocation = false;
 bool orte_show_resolved_nodenames = false;
 bool orte_retain_aliases = false;
 int orte_use_hostname_alias = -1;
+int orte_hostname_cutoff = 1000;
 
 int orted_debug_failure = -1;
 int orted_debug_failure_delay = -1;
-bool orte_hetero_apps = false;
-bool orte_hetero_nodes = false;
 bool orte_never_launched = false;
 bool orte_devel_level_output = false;
 bool orte_display_topo_with_map = false;
@@ -102,6 +109,8 @@ bool orte_display_allocation = false;
 bool orte_display_devel_allocation = false;
 bool orte_soft_locations = false;
 int orted_pmi_version = 0;
+bool orte_nidmap_communicated = false;
+bool orte_node_info_communicated = false;
 
 /* launch agents */
 char *orte_launch_agent = NULL;
@@ -128,6 +137,8 @@ float orte_max_timeout = -1.0;
 orte_timer_t *orte_mpiexec_timeout = NULL;
 
 opal_buffer_t *orte_tree_launch_cmd = NULL;
+
+int orte_stack_trace_wait_timeout = 30;
 
 /* global arrays for data storage */
 opal_hash_table_t *orte_job_data = NULL;
@@ -179,21 +190,15 @@ int orte_stat_history_size = -1;
 /* envars to forward */
 char **orte_forwarded_envars = NULL;
 
-/* map-reduce mode */
-bool orte_map_reduce = false;
-bool orte_staged_execution = false;
-
 /* map stddiag output to stderr so it isn't forwarded to mpirun */
 bool orte_map_stddiag_to_stderr = false;
+bool orte_map_stddiag_to_stdout = false;
 
 /* maximum size of virtual machine - used to subdivide allocation */
 int orte_max_vm_size = -1;
 
 /* user debugger */
 char *orte_base_user_debugger = NULL;
-
-/* modex cutoff */
-uint32_t orte_direct_modex_cutoff = UINT32_MAX;
 
 int orte_debug_output = -1;
 bool orte_debug_daemons_flag = false;
@@ -648,7 +653,6 @@ static void orte_job_construct(orte_job_t* job)
     job->num_local_procs = 0;
 
     job->flags = 0;
-    ORTE_FLAG_SET(job, ORTE_JOB_FLAG_GANG_LAUNCHED);
     ORTE_FLAG_SET(job, ORTE_JOB_FLAG_FORWARD_OUTPUT);
 
     OBJ_CONSTRUCT(&job->attributes, opal_list_t);
@@ -833,7 +837,7 @@ static void orte_job_map_construct(orte_job_map_t* map)
     map->ranking = 0;
     map->binding = 0;
     map->ppr = NULL;
-    map->cpus_per_rank = 1;
+    map->cpus_per_rank = 0;
     map->display_map = false;
     map->num_new_daemons = 0;
     map->daemon_vpid_start = ORTE_VPID_INVALID;
@@ -903,7 +907,7 @@ static void tcon(orte_topology_t *t)
 static void tdes(orte_topology_t *t)
 {
     if (NULL != t->topo) {
-        hwloc_topology_destroy(t->topo);
+        opal_hwloc_base_free_topology(t->topo);
     }
     if (NULL != t->sig) {
         free(t->sig);

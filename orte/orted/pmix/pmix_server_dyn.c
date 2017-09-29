@@ -11,9 +11,9 @@
  *                         All rights reserved.
  * Copyright (c) 2006-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2009      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2009-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2011      Oak Ridge National Labs.  All rights reserved.
- * Copyright (c) 2013-2016 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2013-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2014      Mellanox Technologies, Inc.
  *                         All rights reserved.
  * Copyright (c) 2014-2016 Research Organization for Information Science
@@ -38,12 +38,14 @@
 #include "opal/util/output.h"
 #include "opal/util/path.h"
 #include "opal/dss/dss.h"
-#include "opal/mca/hwloc/hwloc.h"
+#include "opal/mca/hwloc/hwloc-internal.h"
 
 #include "orte/mca/errmgr/errmgr.h"
 #include "orte/mca/rmaps/base/base.h"
+#include "orte/mca/state/state.h"
 #include "orte/util/name_fns.h"
 #include "orte/util/show_help.h"
+#include "orte/util/threads.h"
 #include "orte/runtime/orte_globals.h"
 #include "orte/mca/rml/rml.h"
 
@@ -58,6 +60,7 @@ void pmix_server_launch_resp(int status, orte_process_name_t* sender,
     int rc, room;
     int32_t ret, cnt;
     orte_jobid_t jobid;
+    orte_job_t *jdata;
 
     /* unpack the status */
     cnt = 1;
@@ -92,6 +95,11 @@ void pmix_server_launch_resp(int status, orte_process_name_t* sender,
     if (NULL != req->spcbfunc) {
         req->spcbfunc(ret, jobid, req->cbdata);
     }
+    /* if we failed to launch, then ensure we cleanup */
+    if (ORTE_SUCCESS != ret) {
+        jdata = orte_get_job_data_object(jobid);
+        ORTE_ACTIVATE_JOB_STATE(jdata, ORTE_JOB_STATE_TERMINATED);
+    }
     /* cleanup */
     OBJ_RELEASE(req);
 }
@@ -103,9 +111,11 @@ static void spawn(int sd, short args, void *cbdata)
     opal_buffer_t *buf;
     orte_plm_cmd_flag_t command;
 
+    ORTE_ACQUIRE_OBJECT(req);
+
     /* add this request to our tracker hotel */
     if (OPAL_SUCCESS != (rc = opal_hotel_checkin(&orte_pmix_server_globals.reqs, req, &req->room_num))) {
-        ORTE_ERROR_LOG(rc);
+        orte_show_help("help-orted.txt", "noroom", true, req->operation, orte_pmix_server_globals.num_rooms);
         goto callback;
     }
 
@@ -133,7 +143,8 @@ static void spawn(int sd, short args, void *cbdata)
     }
 
     /* send it to the HNP for processing - might be myself! */
-    if (ORTE_SUCCESS != (rc = orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, buf,
+    if (ORTE_SUCCESS != (rc = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                                      ORTE_PROC_MY_HNP, buf,
                                                       ORTE_RML_TAG_PLM,
                                                       orte_rml_send_callback, NULL))) {
         ORTE_ERROR_LOG(rc);
@@ -158,9 +169,11 @@ int pmix_server_spawn_fn(opal_process_name_t *requestor,
     orte_job_t *jdata;
     orte_app_context_t *app;
     opal_pmix_app_t *papp;
-    opal_value_t *info;
-    int rc;
+    opal_value_t *info, *next;
+    opal_list_t *cache;
+    int rc, i;
     char cwd[OPAL_PATH_MAX];
+    bool flag;
 
     opal_output_verbose(2, orte_pmix_server_globals.output,
                         "%s spawn called from proc %s",
@@ -171,99 +184,30 @@ int pmix_server_spawn_fn(opal_process_name_t *requestor,
     jdata = OBJ_NEW(orte_job_t);
     jdata->map = OBJ_NEW(orte_job_map_t);
 
-    /* transfer the job info across */
-    OPAL_LIST_FOREACH(info, job_info, opal_value_t) {
-        if (0 == strcmp(info->key, OPAL_PMIX_PERSONALITY)) {
-            jdata->personality = opal_argv_split(info->data.string, ',');
-        } else if (0 == strcmp(info->key, OPAL_PMIX_MAPPER)) {
-            jdata->map->req_mapper = strdup(info->data.string);
-        } else if (0 == strcmp(info->key, OPAL_PMIX_DISPLAY_MAP)) {
-            jdata->map->display_map = true;
-        } else if (0 == strcmp(info->key, OPAL_PMIX_PPR)) {
-            if (ORTE_MAPPING_POLICY_IS_SET(jdata->map->mapping)) {
-                /* not allowed to provide multiple mapping policies */
-                orte_show_help("help-orte-rmaps-base.txt", "redefining-policy",
-                               true, "mapping", info->data.string,
-                               orte_rmaps_base_print_mapping(orte_rmaps_base.mapping));
-                return ORTE_ERR_BAD_PARAM;
-            }
-            ORTE_SET_MAPPING_DIRECTIVE(jdata->map->mapping, ORTE_MAPPING_PPR);
-            jdata->map->ppr = strdup(info->data.string);
-        } else if (0 == strcmp(info->key, OPAL_PMIX_MAPBY)) {
-            if (ORTE_MAPPING_POLICY_IS_SET(jdata->map->mapping)) {
-                /* not allowed to provide multiple mapping policies */
-                orte_show_help("help-orte-rmaps-base.txt", "redefining-policy",
-                               true, "mapping", info->data.string,
-                               orte_rmaps_base_print_mapping(orte_rmaps_base.mapping));
-                return ORTE_ERR_BAD_PARAM;
-            }
-            rc = orte_rmaps_base_set_mapping_policy(&jdata->map->mapping,
-                                                    NULL, info->data.string);
-            if (ORTE_SUCCESS != rc) {
-                return rc;
-            }
-        } else if (0 == strcmp(info->key, OPAL_PMIX_RANKBY)) {
-            if (ORTE_RANKING_POLICY_IS_SET(jdata->map->ranking)) {
-                /* not allowed to provide multiple ranking policies */
-                orte_show_help("help-orte-rmaps-base.txt", "redefining-policy",
-                               true, "ranking", info->data.string,
-                               orte_rmaps_base_print_ranking(orte_rmaps_base.ranking));
-                return ORTE_ERR_BAD_PARAM;
-            }
-            rc = orte_rmaps_base_set_ranking_policy(&jdata->map->ranking,
-                                                    jdata->map->mapping,
-                                                    info->data.string);
-            if (ORTE_SUCCESS != rc) {
-                return rc;
-            }
-        } else if (0 == strcmp(info->key, OPAL_PMIX_BINDTO)) {
-            if (OPAL_BINDING_POLICY_IS_SET(jdata->map->binding)) {
-                /* not allowed to provide multiple mapping policies */
-                orte_show_help("help-opal-hwloc-base.txt", "redefining-policy", true,
-                               info->data.string,
-                               opal_hwloc_base_print_binding(opal_hwloc_binding_policy));
-                return ORTE_ERR_BAD_PARAM;
-            }
-            rc = opal_hwloc_base_set_binding_policy(&jdata->map->binding,
-                                                    info->data.string);
-            if (ORTE_SUCCESS != rc) {
-                return rc;
-            }
-        } else if (0 == strcmp(info->key, OPAL_PMIX_NON_PMI)) {
-            orte_set_attribute(&jdata->attributes, ORTE_JOB_NON_ORTE_JOB,
-                               ORTE_ATTR_GLOBAL, NULL, OPAL_BOOL);
-        } else if (0 == strcmp(info->key, OPAL_PMIX_STDIN_TGT)) {
-            if (0 == strcmp(info->data.string, "all")) {
-                jdata->stdin_target = ORTE_VPID_WILDCARD;
-            } else if (0 == strcmp(info->data.string, "none")) {
-                jdata->stdin_target = ORTE_VPID_INVALID;
-            } else {
-                jdata->stdin_target = strtoul(info->data.string, NULL, 10);
-            }
-        } else if (0 == strcmp(info->key, OPAL_PMIX_NOTIFY_COMPLETION)) {
-            if (OPAL_UNDEF == info->type || info->data.flag) {
-                orte_set_attribute(&jdata->attributes, ORTE_JOB_NOTIFY_COMPLETION,
-                                   ORTE_ATTR_LOCAL, NULL, OPAL_BOOL);
-            }
-        } else {
-            /* unrecognized key */
-            orte_show_help("help-orted.txt", "bad-key",
-                           true, "spawn", "job level", info->key);
-        }
-    }
-    /* if the job is missing a personality setting, add it */
-    if (NULL == jdata->personality) {
-        opal_argv_append_nosize(&jdata->personality, "ompi");
-    }
-
     /* transfer the apps across */
     OPAL_LIST_FOREACH(papp, apps, opal_pmix_app_t) {
         app = OBJ_NEW(orte_app_context_t);
         app->idx = opal_pointer_array_add(jdata->apps, app);
         jdata->num_apps++;
-        app->app = strdup(papp->cmd);
-        app->argv = opal_argv_copy(papp->argv);
-        app->env = opal_argv_copy(papp->env);
+        if (NULL != papp->cmd) {
+            app->app = strdup(papp->cmd);
+        } else if (NULL == papp->argv ||
+                   NULL == papp->argv[0]) {
+            ORTE_ERROR_LOG(ORTE_ERR_BAD_PARAM);
+            OBJ_RELEASE(jdata);
+            return ORTE_ERR_BAD_PARAM;
+        } else {
+            app->app = strdup(papp->argv[0]);
+        }
+        if (NULL != papp->argv) {
+            app->argv = opal_argv_copy(papp->argv);
+        }
+        if (NULL != papp->env) {
+            app->env = opal_argv_copy(papp->env);
+        }
+        if (NULL != papp->cwd) {
+            app->cwd = strdup(papp->cwd);
+        }
         app->num_procs = papp->maxprocs;
         OPAL_LIST_FOREACH(info, &papp->info, opal_value_t) {
             if (0 == strcmp(info->key, OPAL_PMIX_HOST)) {
@@ -296,8 +240,9 @@ int pmix_server_spawn_fn(opal_process_name_t *requestor,
                     app->cwd = opal_os_path(false, cwd, info->data.string, NULL);
                 }
             } else if (0 == strcmp(info->key, OPAL_PMIX_PRELOAD_BIN)) {
+                OPAL_CHECK_BOOL(info, flag);
                 orte_set_attribute(&app->attributes, ORTE_APP_PRELOAD_BIN,
-                                   ORTE_ATTR_GLOBAL, NULL, OPAL_BOOL);
+                                   ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
             } else if (0 == strcmp(info->key, OPAL_PMIX_PRELOAD_FILES)) {
                 orte_set_attribute(&app->attributes, ORTE_APP_PRELOAD_FILES,
                                    ORTE_ATTR_GLOBAL, info->data.string, OPAL_STRING);
@@ -309,9 +254,223 @@ int pmix_server_spawn_fn(opal_process_name_t *requestor,
         }
     }
 
-    /* indicate that we are to notify the requestor when we hear back */
-    orte_set_attribute(&jdata->attributes, ORTE_JOB_LAUNCH_PROXY, ORTE_ATTR_GLOBAL,
-                       requestor, OPAL_NAME);
+    /* transfer the job info across */
+    OPAL_LIST_FOREACH_SAFE(info, next, job_info, opal_value_t) {
+        /***   PERSONALITY   ***/
+        if (0 == strcmp(info->key, OPAL_PMIX_PERSONALITY)) {
+            jdata->personality = opal_argv_split(info->data.string, ',');
+
+        /***   REQUESTED MAPPER   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_MAPPER)) {
+            jdata->map->req_mapper = strdup(info->data.string);
+
+        /***   DISPLAY MAP   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_DISPLAY_MAP)) {
+            OPAL_CHECK_BOOL(info, jdata->map->display_map);
+
+        /***   PPR (PROCS-PER-RESOURCE)   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_PPR)) {
+            if (ORTE_MAPPING_POLICY_IS_SET(jdata->map->mapping)) {
+                /* not allowed to provide multiple mapping policies */
+                orte_show_help("help-orte-rmaps-base.txt", "redefining-policy",
+                               true, "mapping", info->data.string,
+                               orte_rmaps_base_print_mapping(orte_rmaps_base.mapping));
+                return ORTE_ERR_BAD_PARAM;
+            }
+            ORTE_SET_MAPPING_DIRECTIVE(jdata->map->mapping, ORTE_MAPPING_PPR);
+            jdata->map->ppr = strdup(info->data.string);
+
+        /***   MAP-BY   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_MAPBY)) {
+            if (ORTE_MAPPING_POLICY_IS_SET(jdata->map->mapping)) {
+                /* not allowed to provide multiple mapping policies */
+                orte_show_help("help-orte-rmaps-base.txt", "redefining-policy",
+                               true, "mapping", info->data.string,
+                               orte_rmaps_base_print_mapping(orte_rmaps_base.mapping));
+                return ORTE_ERR_BAD_PARAM;
+            }
+            rc = orte_rmaps_base_set_mapping_policy(&jdata->map->mapping,
+                                                    NULL, info->data.string);
+            if (ORTE_SUCCESS != rc) {
+                return rc;
+            }
+
+        /***   RANK-BY   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_RANKBY)) {
+            if (ORTE_RANKING_POLICY_IS_SET(jdata->map->ranking)) {
+                /* not allowed to provide multiple ranking policies */
+                orte_show_help("help-orte-rmaps-base.txt", "redefining-policy",
+                               true, "ranking", info->data.string,
+                               orte_rmaps_base_print_ranking(orte_rmaps_base.ranking));
+                return ORTE_ERR_BAD_PARAM;
+            }
+            rc = orte_rmaps_base_set_ranking_policy(&jdata->map->ranking,
+                                                    jdata->map->mapping,
+                                                    info->data.string);
+            if (ORTE_SUCCESS != rc) {
+                return rc;
+            }
+
+        /***   BIND-TO   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_BINDTO)) {
+            if (OPAL_BINDING_POLICY_IS_SET(jdata->map->binding)) {
+                /* not allowed to provide multiple mapping policies */
+                orte_show_help("help-opal-hwloc-base.txt", "redefining-policy", true,
+                               info->data.string,
+                               opal_hwloc_base_print_binding(opal_hwloc_binding_policy));
+                return ORTE_ERR_BAD_PARAM;
+            }
+            rc = opal_hwloc_base_set_binding_policy(&jdata->map->binding,
+                                                    info->data.string);
+            if (ORTE_SUCCESS != rc) {
+                return rc;
+            }
+
+        /***   CPUS/RANK   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_CPUS_PER_PROC)) {
+            jdata->map->cpus_per_rank = info->data.uint32;
+
+        /***   NO USE LOCAL   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_NO_PROCS_ON_HEAD)) {
+            OPAL_CHECK_BOOL(info, flag);
+            orte_set_attribute(&jdata->attributes, ORTE_MAPPING_NO_USE_LOCAL,
+                               ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+
+        /***   OVERSUBSCRIBE   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_NO_OVERSUBSCRIBE)) {
+            OPAL_CHECK_BOOL(info, flag);
+            if (flag) {
+                ORTE_SET_MAPPING_DIRECTIVE(jdata->map->mapping, ORTE_MAPPING_NO_OVERSUBSCRIBE);
+            } else {
+                ORTE_UNSET_MAPPING_DIRECTIVE(jdata->map->mapping, ORTE_MAPPING_NO_OVERSUBSCRIBE);
+            }
+
+        /***   REPORT BINDINGS  ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_REPORT_BINDINGS)) {
+            OPAL_CHECK_BOOL(info, flag);
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_REPORT_BINDINGS,
+                               ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+
+        /***   CPU LIST  ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_CPU_LIST)) {
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_CPU_LIST,
+                               ORTE_ATTR_GLOBAL, info->data.string, OPAL_BOOL);
+
+        /***   RECOVERABLE  ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_JOB_RECOVERABLE)) {
+            OPAL_CHECK_BOOL(info, flag);
+            if (flag) {
+                ORTE_FLAG_SET(jdata, ORTE_JOB_FLAG_RECOVERABLE);
+            } else {
+                ORTE_FLAG_UNSET(jdata, ORTE_JOB_FLAG_RECOVERABLE);
+            }
+
+        /***   MAX RESTARTS  ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_MAX_RESTARTS)) {
+            for (i=0; i < jdata->apps->size; i++) {
+                if (NULL == (app = (orte_app_context_t*)opal_pointer_array_get_item(jdata->apps, i))) {
+                    continue;
+                }
+                orte_set_attribute(&app->attributes, ORTE_APP_MAX_RESTARTS,
+                                   ORTE_ATTR_GLOBAL, &info->data.uint32, OPAL_INT32);
+            }
+
+        /***   CONTINUOUS OPERATION  ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_JOB_CONTINUOUS)) {
+            OPAL_CHECK_BOOL(info, flag);
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_CONTINUOUS_OP,
+                               ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+
+        /***   NON-PMI JOB   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_NON_PMI)) {
+            OPAL_CHECK_BOOL(info, flag);
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_NON_ORTE_JOB,
+                               ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+
+        /***   SPAWN REQUESTOR IS TOOL   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_REQUESTOR_IS_TOOL)) {
+            OPAL_CHECK_BOOL(info, flag);
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_DVM_JOB,
+                               ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+            if (flag) {
+                /* request that IO be forwarded to the requesting tool */
+                orte_set_attribute(&jdata->attributes, ORTE_JOB_FWDIO_TO_TOOL,
+                                   ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+            }
+
+        /***   NOTIFY UPON JOB COMPLETION   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_NOTIFY_COMPLETION)) {
+            OPAL_CHECK_BOOL(info, flag);
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_NOTIFY_COMPLETION,
+                               ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+
+        /***   STOP ON EXEC FOR DEBUGGER   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_DEBUG_STOP_ON_EXEC)) {
+            /* we don't know how to do this */
+            return ORTE_ERR_NOT_SUPPORTED;
+
+        /***   TAG STDOUT   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_TAG_OUTPUT)) {
+            OPAL_CHECK_BOOL(info, flag);
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_TAG_OUTPUT,
+                               ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+
+        /***   TIMESTAMP OUTPUT   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_TIMESTAMP_OUTPUT)) {
+            OPAL_CHECK_BOOL(info, flag);
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_TIMESTAMP_OUTPUT,
+                               ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+
+        /***   OUTPUT TO FILES   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_OUTPUT_TO_FILE)) {
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_OUTPUT_TO_FILE,
+                               ORTE_ATTR_GLOBAL, info->data.string, OPAL_STRING);
+
+        /***   MERGE STDERR TO STDOUT   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_MERGE_STDERR_STDOUT)) {
+            OPAL_CHECK_BOOL(info, flag);
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_MERGE_STDERR_STDOUT,
+                               ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+
+        /***   STDIN TARGET   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_STDIN_TGT)) {
+            if (0 == strcmp(info->data.string, "all")) {
+                jdata->stdin_target = ORTE_VPID_WILDCARD;
+            } else if (0 == strcmp(info->data.string, "none")) {
+                jdata->stdin_target = ORTE_VPID_INVALID;
+            } else {
+                jdata->stdin_target = strtoul(info->data.string, NULL, 10);
+            }
+
+        /***   INDEX ARGV   ***/
+        } else if (0 == strcmp(info->key, OPAL_PMIX_INDEX_ARGV)) {
+            OPAL_CHECK_BOOL(info, flag);
+            orte_set_attribute(&jdata->attributes, ORTE_JOB_INDEX_ARGV,
+                               ORTE_ATTR_GLOBAL, &flag, OPAL_BOOL);
+
+        /***   DEFAULT - CACHE FOR INCLUSION WITH JOB INFO   ***/
+        } else {
+            /* cache for inclusion with job info at registration */
+            cache = NULL;
+            opal_list_remove_item(job_info, &info->super);
+            if (orte_get_attribute(&jdata->attributes, ORTE_JOB_INFO_CACHE, (void**)&cache, OPAL_PTR) &&
+                NULL != cache) {
+                opal_list_append(cache, &info->super);
+            } else {
+                cache = OBJ_NEW(opal_list_t);
+                opal_list_append(cache, &info->super);
+                orte_set_attribute(&jdata->attributes, ORTE_JOB_INFO_CACHE, ORTE_ATTR_LOCAL, (void*)cache, OPAL_PTR);
+            }
+        }
+    }
+    /* if the job is missing a personality setting, add it */
+    if (NULL == jdata->personality) {
+        opal_argv_append_nosize(&jdata->personality, "ompi");
+    }
+
+    /* indicate the requestor so bookmarks can be correctly set */
+    orte_set_attribute(&jdata->attributes, ORTE_JOB_LAUNCH_PROXY,
+                       ORTE_ATTR_GLOBAL, requestor, OPAL_NAME);
 
     /* setup a spawn tracker so we know who to call back when this is done
      * and thread-shift the entire thing so it can be safely added to
@@ -330,6 +489,8 @@ static void _cnlk(int status, opal_list_t *data, void *cbdata)
     opal_pmix_pdata_t *pdat;
     orte_job_t *jdata;
     opal_buffer_t buf;
+
+    ORTE_ACQUIRE_OBJECT(cd);
 
     /* if we failed to get the required data, then just inform
      * the embedded server that the connect cannot succeed */
@@ -357,7 +518,7 @@ static void _cnlk(int status, opal_list_t *data, void *cbdata)
         goto release;
     }
     OBJ_DESTRUCT(&buf);
-    if (ORTE_SUCCESS != (rc = orte_pmix_server_register_nspace(jdata))) {
+    if (ORTE_SUCCESS != (rc = orte_pmix_server_register_nspace(jdata, true))) {
         OBJ_RELEASE(jdata);
         goto release;
     }
@@ -365,7 +526,11 @@ static void _cnlk(int status, opal_list_t *data, void *cbdata)
 
     /* restart the cnct processor */
     ORTE_PMIX_OPERATION(cd->procs, cd->info, _cnct, cd->cbfunc, cd->cbdata);
+    /* protect the re-referenced data */
+    cd->procs = NULL;
+    cd->info = NULL;
     OBJ_RELEASE(cd);
+    return;
 
   release:
     if (NULL != cd->cbfunc) {
@@ -381,6 +546,9 @@ static void _cnct(int sd, short args, void *cbdata)
     char **keys = NULL, *key;
     orte_job_t *jdata;
     int rc = ORTE_SUCCESS;
+    opal_value_t *kv;
+
+    ORTE_ACQUIRE_OBJECT(cd);
 
     /* at some point, we need to add bookeeping to track which
      * procs are "connected" so we know who to notify upon
@@ -408,6 +576,12 @@ static void _cnct(int sd, short args, void *cbdata)
             orte_util_convert_jobid_to_string(&key, nm->name.jobid);
             opal_argv_append_nosize(&keys, key);
             free(key);
+            /* we have to add the user's id to our list of info */
+            kv = OBJ_NEW(opal_value_t);
+            kv->key = strdup(OPAL_PMIX_USERID);
+            kv->type = OPAL_UINT32;
+            kv->data.uint32 = geteuid();
+            opal_list_append(cd->info, &kv->super);
             if (ORTE_SUCCESS != (rc = pmix_server_lookup_fn(&nm->name, keys, cd->info, _cnlk, cd))) {
                 opal_argv_free(keys);
                 goto release;
@@ -421,7 +595,7 @@ static void _cnct(int sd, short args, void *cbdata)
          * registered with the local PMIx server */
         if (!orte_get_attribute(&jdata->attributes, ORTE_JOB_NSPACE_REGISTERED, NULL, OPAL_BOOL)) {
             /* it hasn't been registered yet, so register it now */
-            if (ORTE_SUCCESS != (rc = orte_pmix_server_register_nspace(jdata))) {
+            if (ORTE_SUCCESS != (rc = orte_pmix_server_register_nspace(jdata, true))) {
                 goto release;
             }
         }
@@ -457,6 +631,8 @@ static void mdxcbfunc(int status,
 {
     orte_pmix_server_op_caddy_t *cd = (orte_pmix_server_op_caddy_t*)cbdata;
 
+    ORTE_ACQUIRE_OBJECT(cd);
+
     /* ack the call */
     if (NULL != cd->cbfunc) {
         cd->cbfunc(status, cd->cbdata);
@@ -490,4 +666,14 @@ int pmix_server_disconnect_fn(opal_list_t *procs, opal_list_t *info,
     }
 
     return rc;
+}
+
+int pmix_server_alloc_fn(const opal_process_name_t *requestor,
+                         opal_pmix_alloc_directive_t dir,
+                         opal_list_t *info,
+                         opal_pmix_info_cbfunc_t cbfunc,
+                         void *cbdata)
+{
+    /* ORTE currently has no way of supporting allocation requests */
+    return ORTE_ERR_NOT_SUPPORTED;
 }

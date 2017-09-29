@@ -3,6 +3,7 @@
  * Copyright (C) Mellanox Technologies Ltd. 2001-2011.  ALL RIGHTS RESERVED.
  * Copyright (c) 2015      Los Alamos National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -25,15 +26,13 @@ OBJ_CLASS_DECLARATION(mca_pml_yalla_convertor_t);
 
 #define PML_YALLA_INIT_MXM_REQ_DATA(_req_base, _buf, _count, _dtype, _stream_type, ...) \
     { \
-        size_t size; \
-        ptrdiff_t lb; \
+        ptrdiff_t span, gap; \
         \
         if (opal_datatype_is_contiguous_memory_layout(&(_dtype)->super, _count)) { \
-            ompi_datatype_type_size(_dtype, &size); \
-            ompi_datatype_type_lb(_dtype, &lb); \
+            span = opal_datatype_span(&(_dtype)->super, (_count), &gap); \
             (_req_base)->data_type          = MXM_REQ_DATA_BUFFER; \
-            (_req_base)->data.buffer.ptr    = (char *)_buf + lb; \
-            (_req_base)->data.buffer.length = size * (_count); \
+            (_req_base)->data.buffer.ptr    = (char *)_buf + gap; \
+            (_req_base)->data.buffer.length = span; \
         } else { \
             mca_pml_yalla_set_noncontig_data_ ## _stream_type(_req_base, \
                                                               _buf, _count, \
@@ -53,7 +52,7 @@ OBJ_CLASS_DECLARATION(mca_pml_yalla_convertor_t);
 static inline void mca_pml_yalla_convertor_free(mca_pml_yalla_convertor_t *convertor)
 {
     opal_convertor_cleanup(&convertor->convertor);
-    OBJ_RELEASE(convertor->datatype);
+    OMPI_DATATYPE_RELEASE(convertor->datatype);
     PML_YALLA_FREELIST_RETURN(&ompi_pml_yalla.convs, &convertor->super);
 }
 

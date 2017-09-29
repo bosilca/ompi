@@ -12,9 +12,10 @@
  *                         reserved.
  * Copyright (c) 2010      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2012-2013 Sandia National Laboratories.  All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016      FUJITSU LIMITED.  All rights reserved.
+ * Copyright (c) 2016      IBM Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -91,7 +92,7 @@ static int ompi_osc_pt2pt_dt_send_complete (ompi_request_t *request)
     ompi_datatype_t *datatype = (ompi_datatype_t *) request->req_complete_cb_data;
     ompi_osc_pt2pt_module_t *module = NULL;
 
-    OBJ_RELEASE(datatype);
+    OMPI_DATATYPE_RELEASE(datatype);
 
     OPAL_THREAD_LOCK(&mca_osc_pt2pt_component.lock);
     (void) opal_hash_table_get_value_uint32(&mca_osc_pt2pt_component.modules,
@@ -107,7 +108,7 @@ static int ompi_osc_pt2pt_dt_send_complete (ompi_request_t *request)
 
 /* self communication optimizations */
 static inline int ompi_osc_pt2pt_put_self (ompi_osc_pt2pt_sync_t *pt2pt_sync, const void *source, int source_count,
-                                           ompi_datatype_t *source_datatype, OPAL_PTRDIFF_TYPE target_disp, int target_count,
+                                           ompi_datatype_t *source_datatype, ptrdiff_t target_disp, int target_count,
                                            ompi_datatype_t *target_datatype, ompi_osc_pt2pt_module_t *module,
                                            ompi_osc_pt2pt_request_t *request)
 {
@@ -132,7 +133,7 @@ static inline int ompi_osc_pt2pt_put_self (ompi_osc_pt2pt_sync_t *pt2pt_sync, co
 }
 
 static inline int ompi_osc_pt2pt_get_self (ompi_osc_pt2pt_sync_t *pt2pt_sync, void *target, int target_count, ompi_datatype_t *target_datatype,
-                                           OPAL_PTRDIFF_TYPE source_disp, int source_count, ompi_datatype_t *source_datatype,
+                                           ptrdiff_t source_disp, int source_count, ompi_datatype_t *source_datatype,
                                            ompi_osc_pt2pt_module_t *module, ompi_osc_pt2pt_request_t *request)
 {
     void *source = (unsigned char*) module->baseptr +
@@ -156,7 +157,7 @@ static inline int ompi_osc_pt2pt_get_self (ompi_osc_pt2pt_sync_t *pt2pt_sync, vo
 }
 
 static inline int ompi_osc_pt2pt_cas_self (ompi_osc_pt2pt_sync_t *pt2pt_sync, const void *source, const void *compare, void *result,
-                                           ompi_datatype_t *datatype, OPAL_PTRDIFF_TYPE target_disp, ompi_osc_pt2pt_module_t *module)
+                                           ompi_datatype_t *datatype, ptrdiff_t target_disp, ompi_osc_pt2pt_module_t *module)
 {
     void *target = (unsigned char*) module->baseptr +
         ((unsigned long) target_disp * module->disp_unit);
@@ -178,7 +179,7 @@ static inline int ompi_osc_pt2pt_cas_self (ompi_osc_pt2pt_sync_t *pt2pt_sync, co
 }
 
 static inline int ompi_osc_pt2pt_acc_self (ompi_osc_pt2pt_sync_t *pt2pt_sync, const void *source, int source_count, ompi_datatype_t *source_datatype,
-                                           OPAL_PTRDIFF_TYPE target_disp, int target_count, ompi_datatype_t *target_datatype,
+                                           ptrdiff_t target_disp, int target_count, ompi_datatype_t *target_datatype,
                                            ompi_op_t *op, ompi_osc_pt2pt_module_t *module, ompi_osc_pt2pt_request_t *request)
 {
     void *target = (unsigned char*) module->baseptr +
@@ -213,7 +214,7 @@ static inline int ompi_osc_pt2pt_acc_self (ompi_osc_pt2pt_sync_t *pt2pt_sync, co
 
 static inline int ompi_osc_pt2pt_gacc_self (ompi_osc_pt2pt_sync_t *pt2pt_sync, const void *source, int source_count, ompi_datatype_t *source_datatype,
                                             void *result, int result_count, ompi_datatype_t *result_datatype,
-                                            OPAL_PTRDIFF_TYPE target_disp, int target_count, ompi_datatype_t *target_datatype,
+                                            ptrdiff_t target_disp, int target_count, ompi_datatype_t *target_datatype,
                                             ompi_op_t *op, ompi_osc_pt2pt_module_t *module, ompi_osc_pt2pt_request_t *request)
 {
     void *target = (unsigned char*) module->baseptr +
@@ -266,7 +267,7 @@ static inline int ompi_osc_pt2pt_gacc_self (ompi_osc_pt2pt_sync_t *pt2pt_sync, c
 
 static inline int ompi_osc_pt2pt_put_w_req (const void *origin_addr, int origin_count,
                                            struct ompi_datatype_t *origin_dt,
-                                           int target, OPAL_PTRDIFF_TYPE target_disp,
+                                           int target, ptrdiff_t target_disp,
                                            int target_count, struct ompi_datatype_t *target_dt,
                                            ompi_win_t *win, ompi_osc_pt2pt_request_t *request)
 {
@@ -336,7 +337,16 @@ static inline int ompi_osc_pt2pt_put_w_req (const void *origin_addr, int origin_
 
     if (is_long_msg) {
         /* wait for eager sends to be active before starting a long put */
-        ompi_osc_pt2pt_sync_wait_expected (pt2pt_sync);
+        if (pt2pt_sync->type == OMPI_OSC_PT2PT_SYNC_TYPE_LOCK) {
+            OPAL_THREAD_LOCK(&pt2pt_sync->lock);
+            ompi_osc_pt2pt_peer_t *peer = ompi_osc_pt2pt_peer_lookup (module, target);
+            while (!(peer->flags & OMPI_OSC_PT2PT_PEER_FLAG_EAGER)) {
+                opal_condition_wait(&pt2pt_sync->cond, &pt2pt_sync->lock);
+            }
+            OPAL_THREAD_UNLOCK(&pt2pt_sync->lock);
+        } else {
+            ompi_osc_pt2pt_sync_wait_expected (pt2pt_sync);
+        }
     }
 
     OPAL_OUTPUT_VERBOSE((50, ompi_osc_base_framework.framework_output,
@@ -360,7 +370,7 @@ static inline int ompi_osc_pt2pt_put_w_req (const void *origin_addr, int origin_
             /* the datatype does not fit in an eager message. send it seperately */
             header->base.flags |= OMPI_OSC_PT2PT_HDR_FLAG_LARGE_DATATYPE;
 
-            OBJ_RETAIN(target_dt);
+            OMPI_DATATYPE_RETAIN(target_dt);
 
             ret = ompi_osc_pt2pt_isend_w_cb ((void *) packed_ddt, ddt_len, MPI_BYTE,
                                             target, tag_to_target(tag), module->comm,
@@ -408,7 +418,7 @@ static inline int ompi_osc_pt2pt_put_w_req (const void *origin_addr, int origin_
 int
 ompi_osc_pt2pt_put(const void *origin_addr, int origin_count,
                   struct ompi_datatype_t *origin_dt,
-                  int target, OPAL_PTRDIFF_TYPE target_disp,
+                  int target, ptrdiff_t target_disp,
                   int target_count,
                   struct ompi_datatype_t *target_dt, ompi_win_t *win)
 {
@@ -421,7 +431,7 @@ ompi_osc_pt2pt_put(const void *origin_addr, int origin_count,
 static int
 ompi_osc_pt2pt_accumulate_w_req (const void *origin_addr, int origin_count,
                                 struct ompi_datatype_t *origin_dt,
-                                int target, OPAL_PTRDIFF_TYPE target_disp,
+                                int target, ptrdiff_t target_disp,
                                 int target_count,
                                 struct ompi_datatype_t *target_dt,
                                 struct ompi_op_t *op, ompi_win_t *win,
@@ -491,11 +501,23 @@ ompi_osc_pt2pt_accumulate_w_req (const void *origin_addr, int origin_count,
 
         is_long_msg = true;
         tag = get_tag (module);
+    } else {
+        /* still need to set the tag for the active/passive logic on the target */
+        tag = !!(module->passive_target_access_epoch);
     }
 
     if (is_long_msg) {
         /* wait for synchronization before posting a long message */
-        ompi_osc_pt2pt_sync_wait_expected (pt2pt_sync);
+        if (pt2pt_sync->type == OMPI_OSC_PT2PT_SYNC_TYPE_LOCK) {
+            OPAL_THREAD_LOCK(&pt2pt_sync->lock);
+            ompi_osc_pt2pt_peer_t *peer = ompi_osc_pt2pt_peer_lookup (module, target);
+            while (!(peer->flags & OMPI_OSC_PT2PT_PEER_FLAG_EAGER)) {
+                opal_condition_wait(&pt2pt_sync->cond, &pt2pt_sync->lock);
+            }
+            OPAL_THREAD_UNLOCK(&pt2pt_sync->lock);
+        } else {
+            ompi_osc_pt2pt_sync_wait_expected (pt2pt_sync);
+        }
     }
 
     header = (ompi_osc_pt2pt_header_acc_t*) ptr;
@@ -504,6 +526,7 @@ ompi_osc_pt2pt_accumulate_w_req (const void *origin_addr, int origin_count,
     header->count = target_count;
     header->displacement = target_disp;
     header->op = op->o_f_to_c_index;
+    header->tag = tag;
     ptr += sizeof (*header);
 
     do {
@@ -516,7 +539,7 @@ ompi_osc_pt2pt_accumulate_w_req (const void *origin_addr, int origin_count,
             /* the datatype does not fit in an eager message. send it seperately */
             header->base.flags |= OMPI_OSC_PT2PT_HDR_FLAG_LARGE_DATATYPE;
 
-            OBJ_RETAIN(target_dt);
+            OMPI_DATATYPE_RETAIN(target_dt);
 
             ret = ompi_osc_pt2pt_isend_w_cb ((void *) packed_ddt, ddt_len, MPI_BYTE,
                                             target, tag_to_target(tag), module->comm,
@@ -546,7 +569,6 @@ ompi_osc_pt2pt_accumulate_w_req (const void *origin_addr, int origin_count,
             }
         } else {
             header->base.type = OMPI_OSC_PT2PT_HDR_TYPE_ACC_LONG;
-            header->tag = tag;
             osc_pt2pt_hton(header, proc);
 
             OPAL_OUTPUT_VERBOSE((25, ompi_osc_base_framework.framework_output,
@@ -571,7 +593,7 @@ ompi_osc_pt2pt_accumulate_w_req (const void *origin_addr, int origin_count,
 int
 ompi_osc_pt2pt_accumulate(const void *origin_addr, int origin_count,
                          struct ompi_datatype_t *origin_dt,
-                         int target, OPAL_PTRDIFF_TYPE target_disp,
+                         int target, ptrdiff_t target_disp,
                          int target_count,
                          struct ompi_datatype_t *target_dt,
                          struct ompi_op_t *op, ompi_win_t *win)
@@ -583,7 +605,7 @@ ompi_osc_pt2pt_accumulate(const void *origin_addr, int origin_count,
 
 int ompi_osc_pt2pt_compare_and_swap (const void *origin_addr, const void *compare_addr,
                                     void *result_addr, struct ompi_datatype_t *dt,
-                                    int target, OPAL_PTRDIFF_TYPE target_disp,
+                                    int target, ptrdiff_t target_disp,
                                     struct ompi_win_t *win)
 {
     ompi_osc_pt2pt_module_t *module = GET_MODULE(win);
@@ -620,7 +642,7 @@ int ompi_osc_pt2pt_compare_and_swap (const void *origin_addr, const void *compar
     request->type = OMPI_OSC_PT2PT_HDR_TYPE_CSWAP;
     request->origin_addr = origin_addr;
     request->internal = true;
-    OBJ_RETAIN(dt);
+    OMPI_DATATYPE_RETAIN(dt);
     request->origin_dt = dt;
 
     /* Compute datatype and payload lengths.  Note that the datatype description
@@ -675,7 +697,7 @@ int ompi_osc_pt2pt_compare_and_swap (const void *origin_addr, const void *compar
 
 int ompi_osc_pt2pt_fetch_and_op(const void *origin_addr, void *result_addr,
                                struct ompi_datatype_t *dt, int target,
-                               OPAL_PTRDIFF_TYPE target_disp, struct ompi_op_t *op,
+                               ptrdiff_t target_disp, struct ompi_op_t *op,
                                struct ompi_win_t *win)
 {
     return ompi_osc_pt2pt_get_accumulate(origin_addr, 1, dt, result_addr, 1, dt,
@@ -684,7 +706,7 @@ int ompi_osc_pt2pt_fetch_and_op(const void *origin_addr, void *result_addr,
 
 int ompi_osc_pt2pt_rput(const void *origin_addr, int origin_count,
                        struct ompi_datatype_t *origin_dt,
-                       int target, OPAL_PTRDIFF_TYPE target_disp,
+                       int target, ptrdiff_t target_disp,
                        int target_count, struct ompi_datatype_t *target_dt,
                        struct ompi_win_t *win, struct ompi_request_t **request)
 {
@@ -724,7 +746,7 @@ int ompi_osc_pt2pt_rput(const void *origin_addr, int origin_count,
 static inline int ompi_osc_pt2pt_rget_internal (void *origin_addr, int origin_count,
                                                struct ompi_datatype_t *origin_dt,
                                                int target,
-                                               OPAL_PTRDIFF_TYPE target_disp,
+                                               ptrdiff_t target_disp,
                                                int target_count,
                                                struct ompi_datatype_t *target_dt,
                                                struct ompi_win_t *win, bool release_req,
@@ -775,7 +797,7 @@ static inline int ompi_osc_pt2pt_rget_internal (void *origin_addr, int origin_co
     pt2pt_request->type = OMPI_OSC_PT2PT_HDR_TYPE_GET;
     pt2pt_request->origin_addr = origin_addr;
     pt2pt_request->origin_count = origin_count;
-    OBJ_RETAIN(origin_dt);
+    OMPI_DATATYPE_RETAIN(origin_dt);
     pt2pt_request->origin_dt = origin_dt;
 
     /* Compute datatype length.  Note that the datatype description
@@ -825,7 +847,7 @@ static inline int ompi_osc_pt2pt_rget_internal (void *origin_addr, int origin_co
             /* the datatype does not fit in an eager message. send it seperately */
             header->base.flags |= OMPI_OSC_PT2PT_HDR_FLAG_LARGE_DATATYPE;
 
-            OBJ_RETAIN(target_dt);
+            OMPI_DATATYPE_RETAIN(target_dt);
 
             ret = ompi_osc_pt2pt_isend_w_cb ((void *) packed_ddt, ddt_len, MPI_BYTE,
                                             target, tag_to_target(tag), module->comm,
@@ -857,7 +879,7 @@ static inline int ompi_osc_pt2pt_rget_internal (void *origin_addr, int origin_co
 }
 
 int ompi_osc_pt2pt_rget (void *origin_addr, int origin_count, struct ompi_datatype_t *origin_dt,
-                        int target, OPAL_PTRDIFF_TYPE target_disp, int target_count,
+                        int target, ptrdiff_t target_disp, int target_count,
                         struct ompi_datatype_t *target_dt, struct ompi_win_t *win,
                         struct ompi_request_t **request)
 {
@@ -868,7 +890,7 @@ int ompi_osc_pt2pt_rget (void *origin_addr, int origin_count, struct ompi_dataty
 
 
 int ompi_osc_pt2pt_get (void *origin_addr, int origin_count, struct ompi_datatype_t *origin_dt,
-                       int target, OPAL_PTRDIFF_TYPE target_disp, int target_count,
+                       int target, ptrdiff_t target_disp, int target_count,
                        struct ompi_datatype_t *target_dt, struct ompi_win_t *win)
 {
     ompi_request_t *request;
@@ -879,7 +901,7 @@ int ompi_osc_pt2pt_get (void *origin_addr, int origin_count, struct ompi_datatyp
 
 int ompi_osc_pt2pt_raccumulate(const void *origin_addr, int origin_count,
                               struct ompi_datatype_t *origin_dt, int target,
-                              OPAL_PTRDIFF_TYPE target_disp, int target_count,
+                              ptrdiff_t target_disp, int target_count,
                               struct ompi_datatype_t *target_dt, struct ompi_op_t *op,
                               struct ompi_win_t *win, struct ompi_request_t **request)
 {
@@ -983,7 +1005,7 @@ int ompi_osc_pt2pt_rget_accumulate_internal (const void *origin_addr, int origin
     pt2pt_request->type = OMPI_OSC_PT2PT_HDR_TYPE_GET_ACC;
     pt2pt_request->origin_addr = origin_addr;
     pt2pt_request->origin_count = origin_count;
-    OBJ_RETAIN(origin_datatype);
+    OMPI_DATATYPE_RETAIN(origin_datatype);
     pt2pt_request->origin_dt = origin_datatype;
 
     /* Compute datatype and payload lengths.  Note that the datatype description
@@ -1044,7 +1066,7 @@ int ompi_osc_pt2pt_rget_accumulate_internal (const void *origin_addr, int origin
             /* the datatype does not fit in an eager message. send it seperately */
             header->base.flags |= OMPI_OSC_PT2PT_HDR_FLAG_LARGE_DATATYPE;
 
-            OBJ_RETAIN(target_datatype);
+            OMPI_DATATYPE_RETAIN(target_datatype);
 
             ret = ompi_osc_pt2pt_isend_w_cb ((void *) packed_ddt, ddt_len, MPI_BYTE,
                                             target_rank, tag_to_target(tag), module->comm,

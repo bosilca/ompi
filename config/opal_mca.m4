@@ -11,7 +11,7 @@ dnl                         University of Stuttgart.  All rights reserved.
 dnl Copyright (c) 2004-2005 The Regents of the University of California.
 dnl                         All rights reserved.
 dnl Copyright (c) 2010-2016 Cisco Systems, Inc.  All rights reserved.
-dnl Copyright (c) 2013-2014 Intel, Inc.  All rights reserved.
+dnl Copyright (c) 2013-2017 Intel, Inc. All rights reserved.
 dnl $COPYRIGHT$
 dnl
 dnl Additional copyrights may follow
@@ -56,7 +56,10 @@ AC_DEFUN([OPAL_MCA],[
     AC_ARG_ENABLE([mca-no-build],
         [AC_HELP_STRING([--enable-mca-no-build=LIST],
                         [Comma-separated list of <type>-<component> pairs
-                         that will not be built.  Example: "--enable-mca-no-build=maffinity,btl-portals" will disable building all maffinity components and the "portals" btl components.])])
+                         that will not be built.  Example:
+                         "--enable-mca-no-build=btl-portals,oob-ud" will
+                         disable building the "portals" btl and the "ud"
+                         oob components.])])
     AC_ARG_ENABLE(mca-dso,
         AC_HELP_STRING([--enable-mca-dso=LIST],
                        [Comma-separated list of types and/or
@@ -170,6 +173,7 @@ AC_DEFUN([OPAL_MCA],[
     elif test "$enable_mca_dso" = "no"; then
         DSO_all=0
         msg=none
+        enable_dlopen=no
     else
         DSO_all=0
         ifs_save="$IFS"

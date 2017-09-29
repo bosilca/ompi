@@ -11,7 +11,7 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2007-2009 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2006-2015 Los Alamos National Security, LLC.  All rights
+ * Copyright (c) 2006-2017 Los Alamos National Security, LLC.  All rights
  *                         reserved.
  * Copyright (c) 2006-2007 Voltaire All rights reserved.
  * Copyright (c) 2007-2009 Mellanox Technologies.  All rights reserved.
@@ -501,13 +501,6 @@ static inline int check_endpoint_state(mca_btl_openib_endpoint_t *ep,
             if (OPAL_SUCCESS == rc) {
                 rc = OPAL_ERR_RESOURCE_BUSY;
             }
-            /*
-             * As long as we expect a message from the peer (in order
-             * to setup the connection) let the event engine pool the
-             * OOB events. Note: we increment it once peer active
-             * connection.
-             */
-            opal_progress_event_users_increment();
             /* fall through */
         default:
             opal_list_append(pending_list, (opal_list_item_t *)des);
@@ -584,13 +577,6 @@ static inline int post_send(mca_btl_openib_endpoint_t *ep,
             BTL_OPENIB_FOOTER_HTON(*ftr);
 
         sr_desc->wr.rdma.rkey = ep->eager_rdma_remote.rkey;
-#if BTL_OPENIB_FAILOVER_ENABLED
-        /* frag->ftr is unused on the sending fragment, so use it
-         * to indicate it is an eager fragment.  A non-zero value
-         * indicates it is eager, and the value indicates the
-         * location in the eager RDMA array that it lives. */
-        frag->ftr = (mca_btl_openib_footer_t*)(long)(1 + head);
-#endif
         sr_desc->wr.rdma.remote_addr =
             ep->eager_rdma_remote.base.lval +
             head * openib_btl->eager_rdma_frag_size +

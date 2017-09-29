@@ -13,7 +13,7 @@
  * Copyright (c) 2007-2008 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2012-2015 Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2014      Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -133,28 +133,29 @@ BEGIN_C_DECLS
  * behalf of a tool that had the HNP spawn a job. First
  * argument is the orte_job_t of the spawned job, second
  * is a pointer to the name of the requesting tool */
-#define ORTE_IOF_PROXY_PULL(a, b)                               \
-    do {                                                        \
-        opal_buffer_t *buf;                                     \
-        orte_iof_tag_t tag;                                     \
-        orte_process_name_t nm;                                 \
-                                                                \
-        buf = OBJ_NEW(opal_buffer_t);                           \
-                                                                \
-        /* setup the tag to pull from HNP */                    \
-        tag = ORTE_IOF_STDOUTALL | ORTE_IOF_PULL;               \
-        opal_dss.pack(buf, &tag, 1, ORTE_IOF_TAG);              \
-        /* pack the name of the source we want to pull */       \
-        nm.jobid = (a)->jobid;                                  \
-        nm.vpid = ORTE_VPID_WILDCARD;                           \
-        opal_dss.pack(buf, &nm, 1, ORTE_NAME);                  \
-        /* pack the name of the tool */                         \
-        opal_dss.pack(buf, (b), 1, ORTE_NAME);                  \
-                                                                \
-        /* send the buffer to the HNP */                        \
-        orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, buf,          \
-                                ORTE_RML_TAG_IOF_HNP,           \
-                                orte_rml_send_callback, NULL);  \
+#define ORTE_IOF_PROXY_PULL(a, b)                                       \
+    do {                                                                \
+        opal_buffer_t *buf;                                             \
+        orte_iof_tag_t tag;                                             \
+        orte_process_name_t nm;                                         \
+                                                                        \
+        buf = OBJ_NEW(opal_buffer_t);                                   \
+                                                                        \
+        /* setup the tag to pull from HNP */                            \
+        tag = ORTE_IOF_STDOUTALL | ORTE_IOF_PULL | ORTE_IOF_EXCLUSIVE;  \
+        opal_dss.pack(buf, &tag, 1, ORTE_IOF_TAG);                      \
+        /* pack the name of the source we want to pull */               \
+        nm.jobid = (a)->jobid;                                          \
+        nm.vpid = ORTE_VPID_WILDCARD;                                   \
+        opal_dss.pack(buf, &nm, 1, ORTE_NAME);                          \
+        /* pack the name of the tool */                                 \
+        opal_dss.pack(buf, (b), 1, ORTE_NAME);                          \
+                                                                        \
+        /* send the buffer to the HNP */                                \
+        orte_rml.send_buffer_nb(orte_mgmt_conduit,                      \
+                                ORTE_PROC_MY_HNP, buf,                  \
+                                ORTE_RML_TAG_IOF_HNP,                   \
+                                orte_rml_send_callback, NULL);          \
     } while(0);
 
 /* Initialize the selected module */
@@ -190,6 +191,13 @@ typedef int (*orte_iof_base_pull_fn_t)(const orte_process_name_t* peer,
 typedef int (*orte_iof_base_close_fn_t)(const orte_process_name_t* peer,
                                         orte_iof_tag_t source_tag);
 
+/**
+ * Output something via the IOF subsystem
+ */
+typedef int (*orte_iof_base_output_fn_t)(const orte_process_name_t* peer,
+                                         orte_iof_tag_t source_tag,
+                                         const char *msg);
+
 /* Flag that a job is complete */
 typedef void (*orte_iof_base_complete_fn_t)(const orte_job_t *jdata);
 
@@ -209,6 +217,7 @@ struct orte_iof_base_module_2_0_0_t {
     orte_iof_base_push_fn_t     push;
     orte_iof_base_pull_fn_t     pull;
     orte_iof_base_close_fn_t    close;
+    orte_iof_base_output_fn_t   output;
     orte_iof_base_complete_fn_t complete;
     orte_iof_base_finalize_fn_t finalize;
     orte_iof_base_ft_event_fn_t ft_event;

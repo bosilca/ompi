@@ -12,7 +12,7 @@
  *                         All rights reserved.
  * Copyright (c) 2014      Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015-2016 Cisco Systems, Inc.  All rights reserved.
  * $COPYRIGHT$
@@ -112,11 +112,11 @@ size_t mca_btl_tcp_frag_dump(mca_btl_tcp_frag_t* frag, char* msg, char* buf, siz
 
 bool mca_btl_tcp_frag_send(mca_btl_tcp_frag_t* frag, int sd)
 {
-    int cnt=-1;
+    ssize_t cnt;
     size_t i, num_vecs;
 
     /* non-blocking write, but continue if interrupted */
-    while(cnt < 0) {
+    do {
         cnt = writev(sd, frag->iov_ptr, frag->iov_cnt);
         if(cnt < 0) {
             switch(opal_socket_errno) {
@@ -140,12 +140,12 @@ bool mca_btl_tcp_frag_send(mca_btl_tcp_frag_t* frag, int sd)
                 return false;
             }
         }
-    }
+    } while(cnt < 0);
 
     /* if the write didn't complete - update the iovec state */
     num_vecs = frag->iov_cnt;
-    for(i=0; i<num_vecs; i++) {
-        if(cnt >= (int)frag->iov_ptr->iov_len) {
+    for( i = 0; i < num_vecs; i++) {
+        if(cnt >= (ssize_t)frag->iov_ptr->iov_len) {
             cnt -= frag->iov_ptr->iov_len;
             frag->iov_ptr++;
             frag->iov_idx++;
@@ -155,7 +155,7 @@ bool mca_btl_tcp_frag_send(mca_btl_tcp_frag_t* frag, int sd)
                 (((unsigned char*)frag->iov_ptr->iov_base) + cnt);
             frag->iov_ptr->iov_len -= cnt;
             OPAL_OUTPUT_VERBOSE((100, opal_btl_base_framework.framework_output,
-                                 "%s:%d write %d bytes on socket %d\n",
+                                 "%s:%d write %ld bytes on socket %d\n",
                                  __FILE__, __LINE__, cnt, sd));
             break;
         }
@@ -166,8 +166,8 @@ bool mca_btl_tcp_frag_send(mca_btl_tcp_frag_t* frag, int sd)
 bool mca_btl_tcp_frag_recv(mca_btl_tcp_frag_t* frag, int sd)
 {
     mca_btl_base_endpoint_t* btl_endpoint = frag->endpoint;
-    int i, num_vecs, dont_copy_data = 0;
     ssize_t cnt;
+    int32_t i, num_vecs, dont_copy_data = 0;
 
  repeat:
     num_vecs = frag->iov_cnt;
@@ -208,21 +208,20 @@ bool mca_btl_tcp_frag_recv(mca_btl_tcp_frag_t* frag, int sd)
 #endif  /* MCA_BTL_TCP_ENDPOINT_CACHE */
 
     /* non-blocking read, but continue if interrupted */
-    cnt = -1;
-    while( cnt < 0 ) {
+    do {
         cnt = readv(sd, frag->iov_ptr, num_vecs);
-	if( 0 < cnt ) goto advance_iov_position;
-	if( cnt == 0 ) {
+        if( 0 < cnt ) goto advance_iov_position;
+        if( cnt == 0 ) {
             btl_endpoint->endpoint_state = MCA_BTL_TCP_FAILED;
-	    mca_btl_tcp_endpoint_close(btl_endpoint);
-	    return false;
-	}
-	switch(opal_socket_errno) {
-	case EINTR:
-	    continue;
-	case EWOULDBLOCK:
-	    return false;
-	case EFAULT:
+            mca_btl_tcp_endpoint_close(btl_endpoint);
+            return false;
+        }
+        switch(opal_socket_errno) {
+        case EINTR:
+            continue;
+        case EWOULDBLOCK:
+            return false;
+        case EFAULT:
             BTL_ERROR(("mca_btl_tcp_frag_recv: readv error (%p, %lu)\n\t%s(%lu)\n",
                        frag->iov_ptr[0].iov_base, (unsigned long) frag->iov_ptr[0].iov_len,
                        strerror(opal_socket_errno), (unsigned long) frag->iov_cnt));
@@ -247,23 +246,23 @@ bool mca_btl_tcp_frag_recv(mca_btl_tcp_frag_t* frag, int sd)
             mca_btl_tcp_endpoint_close(btl_endpoint);
             return false;
         }
-    }
+    } while( cnt < 0 );
 
  advance_iov_position:
     /* if the read didn't complete - update the iovec state */
     num_vecs = frag->iov_cnt;
     for( i = 0; i < num_vecs; i++ ) {
-        if( cnt < (int)frag->iov_ptr->iov_len ) {
+        if( cnt < (ssize_t)frag->iov_ptr->iov_len ) {
             frag->iov_ptr->iov_base = (opal_iov_base_ptr_t)
                 (((unsigned char*)frag->iov_ptr->iov_base) + cnt);
             frag->iov_ptr->iov_len -= cnt;
             cnt = 0;
             break;
-    }
-    cnt -= frag->iov_ptr->iov_len;
-    frag->iov_idx++;
-    frag->iov_ptr++;
-    frag->iov_cnt--;
+        }
+        cnt -= frag->iov_ptr->iov_len;
+        frag->iov_idx++;
+        frag->iov_ptr++;
+        frag->iov_cnt--;
     }
 #if MCA_BTL_TCP_ENDPOINT_CACHE
     btl_endpoint->endpoint_cache_length = cnt;
@@ -280,15 +279,6 @@ bool mca_btl_tcp_frag_recv(mca_btl_tcp_frag_t* frag, int sd)
                 frag->iov[1].iov_base = (IOVBASE_TYPE*)(frag->segments[0].seg_addr.pval);
                 frag->iov[1].iov_len = frag->hdr.size;
                 frag->iov_cnt++;
-#ifndef __sparc
-#if !MCA_BTL_TCP_SUPPORT_PROGRESS_THREAD
-                /* The following cannot be done for sparc code
-                 * because it causes alignment errors when accessing
-                 * structures later on in the btl and pml code.
-                 */
-                dont_copy_data = 1;
-#endif
-#endif
                 goto repeat;
             }
             break;
@@ -300,6 +290,7 @@ bool mca_btl_tcp_frag_recv(mca_btl_tcp_frag_t* frag, int sd)
                 goto repeat;
             } else if (frag->iov_idx == 2) {
                 for( i = 0; i < frag->hdr.count; i++ ) {
+                    if (btl_endpoint->endpoint_nbo) MCA_BTL_BASE_SEGMENT_NTOH(frag->segments[i]);
                     frag->iov[i+2].iov_base = (IOVBASE_TYPE*)frag->segments[i].seg_addr.pval;
                     frag->iov[i+2].iov_len = frag->segments[i].seg_len;
                 }

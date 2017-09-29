@@ -13,7 +13,7 @@
  * Copyright (c) 2007-2015 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2011-2015 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2014-2016 Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2016      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
@@ -52,14 +52,13 @@
 
 #include "orte/mca/oob/oob.h"
 #include "orte/mca/oob/base/base.h"
+#include "orte/mca/routed/routed.h"
 #include "rml_oob.h"
 
 static int rml_oob_open(void);
 static int rml_oob_close(void);
 static orte_rml_base_module_t* open_conduit(opal_list_t *attributes);
 static orte_rml_pathway_t* query_transports(void);
-static char* get_contact_info(void);
-static void set_contact_info(const char *uri);
 static void close_conduit(orte_rml_base_module_t *mod);
 /**
  * component definition
@@ -85,8 +84,6 @@ orte_rml_component_t mca_rml_oob_component = {
     .priority = 5,
     .open_conduit = open_conduit,
     .query_transports = query_transports,
-    .get_contact_info = get_contact_info,
-    .set_contact_info = set_contact_info,
     .close_conduit = close_conduit
 };
 
@@ -136,6 +133,7 @@ static orte_rml_base_module_t* make_module(void)
     /* initialize its internal storage */
     OBJ_CONSTRUCT(&mod->queued_routing_messages, opal_list_t);
     mod->timer_event = NULL;
+    mod->routed = NULL;
 
     /* return the result */
     return (orte_rml_base_module_t*)mod;
@@ -143,47 +141,124 @@ static orte_rml_base_module_t* make_module(void)
 
 static orte_rml_base_module_t* open_conduit(opal_list_t *attributes)
 {
-    char *comp_attrib = NULL;
+    char *comp_attrib;
     char **comps;
     int i;
-    orte_attribute_t *attr;
+    orte_rml_base_module_t *md;
 
     opal_output_verbose(20,orte_rml_base_framework.framework_output,
                     "%s - Entering rml_oob_open_conduit()",
                     ORTE_NAME_PRINT(ORTE_PROC_MY_NAME));
 
     /* someone may require this specific component, so look for "oob" */
+    comp_attrib = NULL;
     if (orte_get_attribute(attributes, ORTE_RML_INCLUDE_COMP_ATTRIB, (void**)&comp_attrib, OPAL_STRING) &&
         NULL != comp_attrib) {
         /* they specified specific components - could be multiple */
         comps = opal_argv_split(comp_attrib, ',');
+        free(comp_attrib);
         for (i=0; NULL != comps[i]; i++) {
-            if (0 == strcmp(comps[i], "oob")) {
+            if (0 == strcasecmp(comps[i], "oob")) {
                 /* we are a candidate */
                 opal_argv_free(comps);
-                return make_module();
+                md = make_module();
+                free(comp_attrib);
+                comp_attrib = NULL;
+                orte_get_attribute(attributes, ORTE_RML_ROUTED_ATTRIB, (void**)&comp_attrib, OPAL_STRING);
+                /* the routed system understands a NULL request, so no need to check
+                 * return status/value here */
+                md->routed = orte_routed.assign_module(comp_attrib);
+                if (NULL != comp_attrib) {
+                    free(comp_attrib);
+                }
+                return md;
             }
         }
         /* we are not a candidate */
         opal_argv_free(comps);
+        free(comp_attrib);
         return NULL;
-    } else if (orte_get_attribute(attributes, ORTE_RML_EXCLUDE_COMP_ATTRIB, (void**)&comp_attrib, OPAL_STRING) &&
-               NULL != comp_attrib) {
+    }
+
+    comp_attrib = NULL;
+    if (orte_get_attribute(attributes, ORTE_RML_EXCLUDE_COMP_ATTRIB, (void**)&comp_attrib, OPAL_STRING) &&
+        NULL != comp_attrib) {
         /* see if we are on the list */
         comps = opal_argv_split(comp_attrib, ',');
+        free(comp_attrib);
         for (i=0; NULL != comps[i]; i++) {
-            if (0 == strcmp(comps[i], "oob")) {
+            if (0 == strcasecmp(comps[i], "oob")) {
                 /* we cannot be a candidate */
                 opal_argv_free(comps);
+                free(comp_attrib);
                 return NULL;
             }
         }
     }
 
     /* Alternatively, check the attributes to see if we qualify - we only handle
-     * "routed", "Ethernet", and "TCP" */
-    OPAL_LIST_FOREACH(attr, attributes, orte_attribute_t) {
+     * "Ethernet" and "TCP" */
+    comp_attrib = NULL;
+    if (orte_get_attribute(attributes, ORTE_RML_TRANSPORT_TYPE, (void**)&comp_attrib, OPAL_STRING) &&
+        NULL != comp_attrib) {
+        comps = opal_argv_split(comp_attrib, ',');
+        for (i=0; NULL != comps[i]; i++) {
+            if (0 == strcasecmp(comps[i], "Ethernet") ||
+                0 == strcasecmp(comps[i], "oob")) {
+                /* we are a candidate */
+                opal_argv_free(comps);
+                md = make_module();
+                free(comp_attrib);
+                comp_attrib = NULL;
+                orte_get_attribute(attributes, ORTE_RML_ROUTED_ATTRIB, (void**)&comp_attrib, OPAL_STRING);
+                /* the routed system understands a NULL request, so no need to check
+                 * return status/value here */
+                md->routed = orte_routed.assign_module(comp_attrib);
+                if (NULL != comp_attrib) {
+                    free(comp_attrib);
+                }
+                return md;
+            }
+        }
+        /* we are not a candidate */
+        opal_argv_free(comps);
+        free(comp_attrib);
+        return NULL;
+    }
 
+    comp_attrib = NULL;
+    if (orte_get_attribute(attributes, ORTE_RML_PROTOCOL_TYPE, (void**)&comp_attrib, OPAL_STRING) &&
+        NULL != comp_attrib) {
+        comps = opal_argv_split(comp_attrib, ',');
+        for (i=0; NULL != comps[i]; i++) {
+            if (0 == strcasecmp(comps[i], "TCP")) {
+                /* we are a candidate */
+                opal_argv_free(comps);
+                md = make_module();
+                free(comp_attrib);
+                comp_attrib = NULL;
+                orte_get_attribute(attributes, ORTE_RML_ROUTED_ATTRIB, (void**)&comp_attrib, OPAL_STRING);
+                /* the routed system understands a NULL request, so no need to check
+                 * return status/value here */
+                md->routed = orte_routed.assign_module(comp_attrib);
+                if (NULL != comp_attrib) {
+                    free(comp_attrib);
+                }
+                return md;
+            }
+        }
+        /* we are not a candidate */
+        opal_argv_free(comps);
+        free(comp_attrib);
+        return NULL;
+    }
+
+    /* if they didn't specify a protocol or a transport, then we can be considered */
+    if (!orte_get_attribute(attributes, ORTE_RML_TRANSPORT_TYPE, NULL, OPAL_STRING) ||
+        !orte_get_attribute(attributes, ORTE_RML_PROTOCOL_TYPE, NULL, OPAL_STRING)) {
+        md = make_module();
+        md->routed = orte_routed.assign_module(NULL);
+        return md;
     }
 
     /* if we get here, we cannot handle it */
@@ -207,20 +282,13 @@ static void close_conduit(orte_rml_base_module_t *md)
     /* cleanup the list of messages */
     OBJ_DESTRUCT(&mod->queued_routing_messages);
 
+    /* clear the storage */
+    if (NULL != mod->routed) {
+        free(mod->routed);
+        mod->routed = NULL;
+    }
+
     /* the rml_base_stub takes care of clearing the base receive
      * and free'ng the module */
     return;
-}
-
-static char* get_contact_info(void)
-{
-    char *ret;
-
-    ORTE_OOB_GET_URI(&ret);
-    return ret;
-}
-
-static void set_contact_info(const char *uri)
-{
-    ORTE_OOB_SET_URI(uri);
 }

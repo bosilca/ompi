@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2010 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2011 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -16,10 +16,11 @@
  * Copyright (c) 2006      University of Houston. All rights reserved.
  * Copyright (c) 2009      Sun Microsystems, Inc.  All rights reserved.
  * Copyright (c) 2011      Sandia National Laboratories. All rights reserved.
- * Copyright (c) 2014-2016 Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2016      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  *
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -82,6 +83,7 @@
 #include "ompi/runtime/params.h"
 #include "ompi/dpm/dpm.h"
 #include "ompi/mpiext/mpiext.h"
+#include "ompi/mca/hook/base/base.h"
 
 #if OPAL_ENABLE_FT_CR == 1
 #include "ompi/mca/crcp/crcp.h"
@@ -90,7 +92,6 @@
 #include "ompi/runtime/ompi_cr.h"
 
 extern bool ompi_enable_timing;
-extern bool ompi_enable_timing_ext;
 
 static void fence_cbfunc(int status, void *cbdata)
 {
@@ -105,8 +106,12 @@ int ompi_mpi_finalize(void)
     ompi_proc_t** procs;
     size_t nprocs;
     volatile bool active;
-    OPAL_TIMING_DECLARE(tm);
-    OPAL_TIMING_INIT_EXT(&tm, OPAL_TIMING_GET_TIME_OF_DAY);
+    uint32_t key;
+    ompi_datatype_t * datatype;
+    //OPAL_TIMING_DECLARE(tm);
+    //OPAL_TIMING_INIT_EXT(&tm, OPAL_TIMING_GET_TIME_OF_DAY);
+
+    ompi_hook_base_mpi_finalize_top();
 
     /* Be a bit social if an erroneous program calls MPI_FINALIZE in
        two different threads, otherwise we may deadlock in
@@ -171,7 +176,7 @@ int ompi_mpi_finalize(void)
     opal_progress_event_users_increment();
 
     /* check to see if we want timing information */
-    OPAL_TIMING_MSTART((&tm,"time to execute finalize barrier"));
+    //OPAL_TIMING_MSTART((&tm,"time to execute finalize barrier"));
 
     /* NOTE: MPI-2.1 requires that MPI_FINALIZE is "collective" across
        *all* connected processes.  This only means that all processes
@@ -266,7 +271,7 @@ int ompi_mpi_finalize(void)
              * reasons cited above), followed by a blocking PMIx fence
              * (which does not call opal_progress()). */
             ompi_communicator_t *comm = &ompi_mpi_comm_world.comm;
-            comm->c_coll.coll_barrier(comm, comm->c_coll.coll_barrier_module);
+            comm->c_coll->coll_barrier(comm, comm->c_coll->coll_barrier_module);
 
             opal_pmix.fence(NULL, 0);
         }
@@ -274,10 +279,7 @@ int ompi_mpi_finalize(void)
 
     /* check for timing request - get stop time and report elapsed
      time if so */
-    OPAL_TIMING_MSTOP(&tm);
-    OPAL_TIMING_DELTAS(ompi_enable_timing, &tm);
-    OPAL_TIMING_REPORT(ompi_enable_timing_ext, &tm);
-    OPAL_TIMING_RELEASE(&tm);
+    //OPAL_TIMING_DELTAS(ompi_enable_timing, &tm);
 
     /*
      * Shutdown the Checkpoint/Restart Mech.
@@ -297,14 +299,16 @@ int ompi_mpi_finalize(void)
     }
     OBJ_DESTRUCT(&ompi_registered_datareps);
 
-    /* Remove all F90 types from the hash tables. As the OBJ_DESTRUCT will
-     * call a special destructor able to release predefined types, we can
-     * simply call the OBJ_DESTRUCT on the hash table and all memory will
-     * be correctly released.
-     */
-    OBJ_DESTRUCT( &ompi_mpi_f90_integer_hashtable );
-    OBJ_DESTRUCT( &ompi_mpi_f90_real_hashtable );
-    OBJ_DESTRUCT( &ompi_mpi_f90_complex_hashtable );
+    /* Remove all F90 types from the hash tables */
+    OPAL_HASH_TABLE_FOREACH(key, uint32, datatype, &ompi_mpi_f90_integer_hashtable)
+        OBJ_RELEASE(datatype);
+    OBJ_DESTRUCT(&ompi_mpi_f90_integer_hashtable);
+    OPAL_HASH_TABLE_FOREACH(key, uint32, datatype, &ompi_mpi_f90_real_hashtable)
+        OBJ_RELEASE(datatype);
+    OBJ_DESTRUCT(&ompi_mpi_f90_real_hashtable);
+    OPAL_HASH_TABLE_FOREACH(key, uint32, datatype, &ompi_mpi_f90_complex_hashtable)
+        OBJ_RELEASE(datatype);
+    OBJ_DESTRUCT(&ompi_mpi_f90_complex_hashtable);
 
     /* Free communication objects */
 
@@ -420,7 +424,7 @@ int ompi_mpi_finalize(void)
     }
 
     /* free info resources */
-    if (OMPI_SUCCESS != (ret = ompi_info_finalize())) {
+    if (OMPI_SUCCESS != (ret = ompi_mpiinfo_finalize())) {
         goto done;
     }
 
@@ -483,6 +487,12 @@ int ompi_mpi_finalize(void)
         goto done;
     }
 
+    /* Now close the hook framework */
+    if (OMPI_SUCCESS != (ret = mca_base_framework_close(&ompi_hook_base_framework) ) ) {
+        OMPI_ERROR_LOG(ret);
+        goto done;
+    }
+
     if (OPAL_SUCCESS != (ret = opal_finalize_util())) {
         goto done;
     }
@@ -494,10 +504,15 @@ int ompi_mpi_finalize(void)
         opal_class_finalize();
     }
 
+    /* cleanup environment */
+    opal_unsetenv("OMPI_COMMAND", &environ);
+    opal_unsetenv("OMPI_ARGV", &environ);
+
     /* All done */
 
  done:
     opal_mutex_unlock(&ompi_mpi_bootstrap_mutex);
+    ompi_hook_base_mpi_finalize_bottom();
 
     return ret;
 }

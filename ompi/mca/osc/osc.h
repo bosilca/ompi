@@ -11,8 +11,9 @@
  * Copyright (c) 2007-2015 Los Alamos National Security, LLC.  All rights
  *                         reserved.
  * Copyright (c) 2010      Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -45,7 +46,7 @@ BEGIN_C_DECLS
 
 
 struct ompi_win_t;
-struct ompi_info_t;
+struct opal_info_t;
 struct ompi_communicator_t;
 struct ompi_group_t;
 struct ompi_datatype_t;
@@ -116,7 +117,7 @@ typedef int (*ompi_osc_base_component_query_fn_t)(struct ompi_win_t *win,
                                                   size_t size,
                                                   int disp_unit,
                                                   struct ompi_communicator_t *comm,
-                                                  struct ompi_info_t *info,
+                                                  struct opal_info_t *info,
                                                   int flavor);
 
 /**
@@ -148,7 +149,7 @@ typedef int (*ompi_osc_base_component_select_fn_t)(struct ompi_win_t *win,
                                                    size_t size,
                                                    int disp_unit,
                                                    struct ompi_communicator_t *comm,
-                                                   struct ompi_info_t *info,
+                                                   struct opal_info_t *info,
                                                    int flavor,
                                                    int *model);
 
@@ -207,7 +208,7 @@ typedef int (*ompi_osc_base_module_put_fn_t)(const void *origin_addr,
                                             int origin_count,
                                             struct ompi_datatype_t *origin_dt,
                                             int target,
-                                            OPAL_PTRDIFF_TYPE target_disp,
+                                            ptrdiff_t target_disp,
                                             int target_count,
                                             struct ompi_datatype_t *target_dt,
                                             struct ompi_win_t *win);
@@ -217,7 +218,7 @@ typedef int (*ompi_osc_base_module_get_fn_t)(void *origin_addr,
                                             int origin_count,
                                             struct ompi_datatype_t *origin_dt,
                                             int target,
-                                            OPAL_PTRDIFF_TYPE target_disp,
+                                            ptrdiff_t target_disp,
                                             int target_count,
                                             struct ompi_datatype_t *target_dt,
                                             struct ompi_win_t *win);
@@ -227,7 +228,7 @@ typedef int (*ompi_osc_base_module_accumulate_fn_t)(const void *origin_addr,
                                                    int origin_count,
                                                    struct ompi_datatype_t *origin_dt,
                                                    int target,
-                                                   OPAL_PTRDIFF_TYPE target_disp,
+                                                   ptrdiff_t target_disp,
                                                    int target_count,
                                                    struct ompi_datatype_t *target_dt,
                                                    struct ompi_op_t *op,
@@ -238,14 +239,14 @@ typedef int (*ompi_osc_base_module_compare_and_swap_fn_t)(const void *origin_add
                                                           void *result_addr,
                                                           struct ompi_datatype_t *dt,
                                                           int target,
-                                                          OPAL_PTRDIFF_TYPE target_disp,
+                                                          ptrdiff_t target_disp,
                                                           struct ompi_win_t *win);
 
 typedef int (*ompi_osc_base_module_fetch_and_op_fn_t)(const void *origin_addr,
                                                       void *result_addr,
                                                       struct ompi_datatype_t *dt,
                                                       int target,
-                                                      OPAL_PTRDIFF_TYPE target_disp,
+                                                      ptrdiff_t target_disp,
                                                       struct ompi_op_t *op,
                                                       struct ompi_win_t *win);
 
@@ -256,7 +257,7 @@ typedef int (*ompi_osc_base_module_get_accumulate_fn_t)(const void *origin_addr,
                                                         int result_count,
                                                         struct ompi_datatype_t *result_datatype,
                                                         int target_rank,
-                                                        OPAL_PTRDIFF_TYPE target_disp,
+                                                        ptrdiff_t target_disp,
                                                         int target_count,
                                                         struct ompi_datatype_t *target_datatype,
                                                         struct ompi_op_t *op,
@@ -266,7 +267,7 @@ typedef int (*ompi_osc_base_module_rput_fn_t)(const void *origin_addr,
                                               int origin_count,
                                               struct ompi_datatype_t *origin_dt,
                                               int target,
-                                              OPAL_PTRDIFF_TYPE target_disp,
+                                              ptrdiff_t target_disp,
                                               int target_count,
                                               struct ompi_datatype_t *target_dt,
                                               struct ompi_win_t *win,
@@ -276,7 +277,7 @@ typedef int (*ompi_osc_base_module_rget_fn_t)(void *origin_addr,
                                               int origin_count,
                                               struct ompi_datatype_t *origin_dt,
                                               int target,
-                                              OPAL_PTRDIFF_TYPE target_disp,
+                                              ptrdiff_t target_disp,
                                               int target_count,
                                               struct ompi_datatype_t *target_dt,
                                               struct ompi_win_t *win,
@@ -287,7 +288,7 @@ typedef int (*ompi_osc_base_module_raccumulate_fn_t)(const void *origin_addr,
                                                      int origin_count,
                                                      struct ompi_datatype_t *origin_dt,
                                                      int target,
-                                                     OPAL_PTRDIFF_TYPE target_disp,
+                                                     ptrdiff_t target_disp,
                                                      int target_count,
                                                      struct ompi_datatype_t *target_dt,
                                                      struct ompi_op_t *op,
@@ -301,7 +302,7 @@ typedef int (*ompi_osc_base_module_rget_accumulate_fn_t)(const void *origin_addr
                                                          int result_count,
                                                          struct ompi_datatype_t *result_datatype,
                                                          int target_rank,
-                                                         OPAL_PTRDIFF_TYPE target_disp,
+                                                         ptrdiff_t target_disp,
                                                          int target_count,
                                                          struct ompi_datatype_t *target_datatype,
                                                          struct ompi_op_t *op,
@@ -351,9 +352,6 @@ typedef int (*ompi_osc_base_module_flush_all_fn_t)(struct ompi_win_t *win);
 typedef int (*ompi_osc_base_module_flush_local_fn_t)(int target,
                                                struct ompi_win_t *win);
 typedef int (*ompi_osc_base_module_flush_local_all_fn_t)(struct ompi_win_t *win);
-
-typedef int (*ompi_osc_base_module_set_info_fn_t)(struct ompi_win_t *win, struct ompi_info_t *info);
-typedef int (*ompi_osc_base_module_get_info_fn_t)(struct ompi_win_t *win, struct ompi_info_t **info_used);
 
 
 
@@ -406,9 +404,6 @@ struct ompi_osc_base_module_3_0_0_t {
     ompi_osc_base_module_flush_all_fn_t osc_flush_all;
     ompi_osc_base_module_flush_local_fn_t osc_flush_local;
     ompi_osc_base_module_flush_local_all_fn_t osc_flush_local_all;
-
-    ompi_osc_base_module_set_info_fn_t osc_set_info;
-    ompi_osc_base_module_get_info_fn_t osc_get_info;
 };
 typedef struct ompi_osc_base_module_3_0_0_t ompi_osc_base_module_3_0_0_t;
 typedef ompi_osc_base_module_3_0_0_t ompi_osc_base_module_t;

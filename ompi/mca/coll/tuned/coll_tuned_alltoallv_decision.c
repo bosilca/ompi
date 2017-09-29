@@ -1,6 +1,6 @@
 /* -*- Mode: C; c-basic-offset:4 ; indent-tabs-mode:nil -*- */
 /*
- * Copyright (c) 2004-2015 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2015      Research Organization for Information Science
@@ -61,7 +61,7 @@ int ompi_coll_tuned_alltoallv_intra_check_forced_init(coll_tuned_force_algorithm
                                            MCA_BASE_VAR_FLAG_DEFAULT_ONLY,
                                            OPAL_INFO_LVL_5,
                                            MCA_BASE_VAR_SCOPE_CONSTANT,
-                                           &cnt);
+                                           &ompi_coll_tuned_forced_max_algorithms[ALLTOALLV]);
 
     /* MPI_T: This variable should eventually be bound to a communicator */
     coll_tuned_alltoallv_forced_algorithm = 0;
@@ -72,53 +72,17 @@ int ompi_coll_tuned_alltoallv_intra_check_forced_init(coll_tuned_force_algorithm
                                         "Which alltoallv algorithm is used. "
                                         "Can be locked down to choice of: 0 ignore, "
                                         "1 basic linear, 2 pairwise.",
-                                        MCA_BASE_VAR_TYPE_INT, new_enum, 0, 0,
+                                        MCA_BASE_VAR_TYPE_INT, new_enum, 0, MCA_BASE_VAR_FLAG_SETTABLE,
                                         OPAL_INFO_LVL_5,
-                                        MCA_BASE_VAR_SCOPE_READONLY,
+                                        MCA_BASE_VAR_SCOPE_ALL,
                                         &coll_tuned_alltoallv_forced_algorithm);
+
     OBJ_RELEASE(new_enum);
     if (mca_param_indices->algorithm_param_index < 0) {
         return mca_param_indices->algorithm_param_index;
     }
 
     return (MPI_SUCCESS);
-}
-
-
-
-int ompi_coll_tuned_alltoallv_intra_do_forced(const void *sbuf, const int *scounts, const int *sdisps,
-                                              struct ompi_datatype_t *sdtype,
-                                              void* rbuf, const int *rcounts, const int *rdisps,
-                                              struct ompi_datatype_t *rdtype,
-                                              struct ompi_communicator_t *comm,
-                                              mca_coll_base_module_t *module)
-{
-    mca_coll_tuned_module_t *tuned_module = (mca_coll_tuned_module_t*) module;
-
-    OPAL_OUTPUT((ompi_coll_tuned_stream,
-                 "coll:tuned:alltoallv_intra_do_forced selected algorithm %d",
-                 tuned_module->user_forced[ALLTOALLV].algorithm));
-
-    switch (tuned_module->user_forced[ALLTOALLV].algorithm) {
-    case (0):
-        return ompi_coll_tuned_alltoallv_intra_dec_fixed(sbuf, scounts, sdisps, sdtype,
-                                                         rbuf, rcounts, rdisps, rdtype,
-                                                         comm, module);
-    case (1):
-        return ompi_coll_base_alltoallv_intra_basic_linear(sbuf, scounts, sdisps, sdtype,
-                                                           rbuf, rcounts, rdisps, rdtype,
-                                                           comm, module);
-    case (2):
-        return ompi_coll_base_alltoallv_intra_pairwise(sbuf, scounts, sdisps, sdtype,
-                                                       rbuf, rcounts, rdisps, rdtype,
-                                                       comm, module);
-    }  /* switch */
-    OPAL_OUTPUT((ompi_coll_tuned_stream,
-                 "coll:tuned:alltoallv_intra_do_forced attempt to "
-                 "select algorithm %d when only 0-%d is valid.",
-                 tuned_module->user_forced[ALLTOALLV].algorithm,
-                 ompi_coll_tuned_forced_max_algorithms[ALLTOALLV]));
-    return (MPI_ERR_ARG);
 }
 
 /* If the user selects dynamic rules and specifies the algorithm to

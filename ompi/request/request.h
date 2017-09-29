@@ -10,7 +10,7 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2006-2012 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2006-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2009-2012 Oracle and/or its affiliates.  All rights reserved.
  * Copyright (c) 2012      Oak Ridge National Labs.  All rights reserved.
  * Copyright (c) 2015-2016 Los Alamos National Security, LLC.  All rights
@@ -54,6 +54,26 @@ OMPI_DECLSPEC OBJ_CLASS_DECLARATION(ompi_request_t);
 #include "request_dbg.h"
 
 struct ompi_request_t;
+
+/**
+ * Initiate one or more persistent requests.
+ *
+ * This function is called by MPI_START and MPI_STARTALL.
+ *
+ * When called by MPI_START, count is 1.
+ *
+ * When called by MPI_STARTALL, multiple requests which have the same
+ * req_start value are passed. This may help scheduling optimization
+ * of multiple communications.
+ *
+ * @param count (IN)        Number of requests
+ * @param requests (IN/OUT) Array of persistent requests
+ * @return                  OMPI_SUCCESS or failure status.
+ */
+typedef int (*ompi_request_start_fn_t)(
+    size_t count,
+    struct ompi_request_t ** requests
+);
 
 /*
  * Required function to free the request and any associated resources.
@@ -109,6 +129,7 @@ struct ompi_request_t {
     volatile ompi_request_state_t req_state;    /**< enum indicate state of the request */
     bool req_persistent;                        /**< flag indicating if the this is a persistent request */
     int req_f_to_c_index;                       /**< Index in Fortran <-> C translation array */
+    ompi_request_start_fn_t req_start;          /**< Called by MPI_START and MPI_STARTALL */
     ompi_request_free_fn_t req_free;            /**< Called by free */
     ompi_request_cancel_fn_t req_cancel;        /**< Optional function to cancel the request */
     ompi_request_complete_fn_t req_complete_cb; /**< Called when the request is MPI completed */
@@ -128,7 +149,7 @@ typedef struct ompi_request_t ompi_request_t;
  * See ompi/communicator/communicator.h comments with struct ompi_communicator_t
  * for full explanation why we chose the following padding construct for predefines.
  */
-#define PREDEFINED_REQUEST_PAD (sizeof(void*) * 32)
+#define PREDEFINED_REQUEST_PAD 256
 
 struct ompi_predefined_request_t {
     struct ompi_request_t request;
@@ -143,13 +164,14 @@ typedef struct ompi_predefined_request_t ompi_predefined_request_t;
  * performance path (since requests may be re-used, it is possible
  * that we will have to initialize a request multiple times).
  */
-#define OMPI_REQUEST_INIT(request, persistent)        \
-    do {                                              \
-        (request)->req_complete = REQUEST_PENDING;    \
-        (request)->req_state = OMPI_REQUEST_INACTIVE; \
-        (request)->req_persistent = (persistent);     \
-        (request)->req_complete_cb  = NULL;           \
-        (request)->req_complete_cb_data = NULL;       \
+#define OMPI_REQUEST_INIT(request, persistent)                  \
+    do {                                                        \
+        (request)->req_complete =                               \
+            (persistent) ? REQUEST_COMPLETED : REQUEST_PENDING; \
+        (request)->req_state = OMPI_REQUEST_INACTIVE;           \
+        (request)->req_persistent = (persistent);               \
+        (request)->req_complete_cb  = NULL;                     \
+        (request)->req_complete_cb_data = NULL;                 \
     } while (0);
 
 
@@ -316,12 +338,6 @@ typedef struct ompi_request_fns_t {
  * Globals used for tracking requests and request completion.
  */
 OMPI_DECLSPEC extern opal_pointer_array_t   ompi_request_f_to_c_table;
-OMPI_DECLSPEC extern size_t                 ompi_request_waiting;
-OMPI_DECLSPEC extern size_t                 ompi_request_completed;
-OMPI_DECLSPEC extern size_t                 ompi_request_failed;
-OMPI_DECLSPEC extern int32_t                ompi_request_poll;
-OMPI_DECLSPEC extern opal_recursive_mutex_t ompi_request_lock;
-OMPI_DECLSPEC extern opal_condition_t       ompi_request_cond;
 OMPI_DECLSPEC extern ompi_predefined_request_t        ompi_request_null;
 OMPI_DECLSPEC extern ompi_predefined_request_t        *ompi_request_null_addr;
 OMPI_DECLSPEC extern ompi_request_t         ompi_request_empty;
@@ -456,11 +472,7 @@ static inline int ompi_request_complete(ompi_request_t* request, bool with_signa
             }
         } else
             request->req_complete = REQUEST_COMPLETED;
-        
-        if( OPAL_UNLIKELY(MPI_SUCCESS != request->req_status.MPI_ERROR) ) {
-            ompi_request_failed++;
         }
-        
     }
     
     //printf("[%" PRIx64 ", request %p]: ompi_request_complete unlock \n", gettid(), (void *)request);

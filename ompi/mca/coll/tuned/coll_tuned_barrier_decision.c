@@ -64,7 +64,7 @@ int ompi_coll_tuned_barrier_intra_check_forced_init (coll_tuned_force_algorithm_
                                            MCA_BASE_VAR_FLAG_DEFAULT_ONLY,
                                            OPAL_INFO_LVL_5,
                                            MCA_BASE_VAR_SCOPE_CONSTANT,
-                                           &cnt);
+                                           &ompi_coll_tuned_forced_max_algorithms[BARRIER]);
 
     /* MPI_T: This variable should eventually be bound to a communicator */
     coll_tuned_barrier_forced_algorithm = 0;
@@ -73,9 +73,9 @@ int ompi_coll_tuned_barrier_intra_check_forced_init (coll_tuned_force_algorithm_
         mca_base_component_var_register(&mca_coll_tuned_component.super.collm_version,
                                         "barrier_algorithm",
                                         "Which barrier algorithm is used. Can be locked down to choice of: 0 ignore, 1 linear, 2 double ring, 3: recursive doubling 4: bruck, 5: two proc only, 6: tree",
-                                        MCA_BASE_VAR_TYPE_INT, new_enum, 0, 0,
+                                        MCA_BASE_VAR_TYPE_INT, new_enum, 0, MCA_BASE_VAR_FLAG_SETTABLE,
                                         OPAL_INFO_LVL_5,
-                                        MCA_BASE_VAR_SCOPE_READONLY,
+                                        MCA_BASE_VAR_SCOPE_ALL,
                                         &coll_tuned_barrier_forced_algorithm);
     OBJ_RELEASE(new_enum);
     if (mca_param_indices->algorithm_param_index < 0) {
@@ -84,33 +84,6 @@ int ompi_coll_tuned_barrier_intra_check_forced_init (coll_tuned_force_algorithm_
 
     return (MPI_SUCCESS);
 }
-
-
-
-int ompi_coll_tuned_barrier_intra_do_forced(struct ompi_communicator_t *comm,
-                                            mca_coll_base_module_t *module)
-{
-    mca_coll_tuned_module_t *tuned_module = (mca_coll_tuned_module_t*) module;
-
-    OPAL_OUTPUT((ompi_coll_tuned_stream,
-                 "coll:tuned:barrier_intra_do_forced selected algorithm %d",
-                 tuned_module->user_forced[BARRIER].algorithm));
-
-    switch (tuned_module->user_forced[BARRIER].algorithm) {
-    case (0):   return ompi_coll_tuned_barrier_intra_dec_fixed(comm, module);
-    case (1):   return ompi_coll_base_barrier_intra_basic_linear(comm, module);
-    case (2):   return ompi_coll_base_barrier_intra_doublering(comm, module);
-    case (3):   return ompi_coll_base_barrier_intra_recursivedoubling(comm, module);
-    case (4):   return ompi_coll_base_barrier_intra_bruck(comm, module);
-    case (5):   return ompi_coll_base_barrier_intra_two_procs(comm, module);
-    case (6):   return ompi_coll_base_barrier_intra_tree(comm, module);
-    } /* switch */
-    OPAL_OUTPUT((ompi_coll_tuned_stream,"coll:tuned:barrier_intra_do_forced attempt to select algorithm %d when only 0-%d is valid?",
-                 tuned_module->user_forced[BARRIER].algorithm,
-                 ompi_coll_tuned_forced_max_algorithms[BARRIER]));
-    return (MPI_ERR_ARG);
-}
-
 
 int ompi_coll_tuned_barrier_intra_do_this (struct ompi_communicator_t *comm,
                                            mca_coll_base_module_t *module,

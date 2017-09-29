@@ -2,7 +2,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2014 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -10,7 +10,7 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2006-2010 University of Houston. All rights reserved.
- * Copyright (c) 2015-2016 Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
@@ -24,11 +24,11 @@
 
 #include "mpi.h"
 #include "ompi/datatype/ompi_datatype.h"
-#include "ompi/request/request.h"
 #include "ompi/communicator/communicator.h"
 #include "ompi/constants.h"
 #include "ompi/mca/coll/coll.h"
 #include "ompi/mca/coll/base/coll_tags.h"
+#include "ompi/mca/coll/base/coll_base_util.h"
 #include "ompi/mca/pml/pml.h"
 
 
@@ -51,7 +51,6 @@ mca_coll_inter_allgatherv_inter(const void *sbuf, int scount,
     int *count=NULL,*displace=NULL;
     char *ptmp_free=NULL, *ptmp=NULL;
     ompi_datatype_t *ndtype = NULL;
-    ompi_request_t *req[2];
 
     rank = ompi_comm_rank(comm);
     size_local = ompi_comm_size(comm->c_local_comm);
@@ -66,10 +65,10 @@ mca_coll_inter_allgatherv_inter(const void *sbuf, int scount,
 	}
     }
     /* Local gather to get the scount of each process */
-    err = comm->c_local_comm->c_coll.coll_gather(&scount, 1, MPI_INT,
+    err = comm->c_local_comm->c_coll->coll_gather(&scount, 1, MPI_INT,
 						 count, 1, MPI_INT,
 						 0, comm->c_local_comm,
-                                                 comm->c_local_comm->c_coll.coll_gather_module);
+                                                 comm->c_local_comm->c_coll->coll_gather_module);
     if (OMPI_SUCCESS != err) {
         goto exit;
     }
@@ -93,10 +92,10 @@ mca_coll_inter_allgatherv_inter(const void *sbuf, int scount,
             ptmp = ptmp_free - gap;
 	}
     }
-    err = comm->c_local_comm->c_coll.coll_gatherv(sbuf, scount, sdtype,
+    err = comm->c_local_comm->c_coll->coll_gatherv(sbuf, scount, sdtype,
 						  ptmp, count, displace,
 						  sdtype,0, comm->c_local_comm,
-                                                  comm->c_local_comm->c_coll.coll_gatherv_module);
+                                                  comm->c_local_comm->c_coll->coll_gatherv_module);
     if (OMPI_SUCCESS != err) {
         goto exit;
     }
@@ -106,31 +105,20 @@ mca_coll_inter_allgatherv_inter(const void *sbuf, int scount,
 
     if (0 == rank) {
 	/* Exchange data between roots */
-	err = MCA_PML_CALL(irecv(rbuf, 1, ndtype, 0,
-                                 MCA_COLL_BASE_TAG_ALLGATHERV, comm,
-                                 &(req[0])));
+        err = ompi_coll_base_sendrecv_actual(ptmp, total, sdtype, 0,
+                                             MCA_COLL_BASE_TAG_ALLGATHERV,
+	                                     rbuf, 1, ndtype, 0,
+                                             MCA_COLL_BASE_TAG_ALLGATHERV,
+                                             comm, MPI_STATUS_IGNORE);
         if (OMPI_SUCCESS != err) {
             goto exit;
         }
-
-        err = MCA_PML_CALL(isend(ptmp, total, sdtype, 0,
-                                 MCA_COLL_BASE_TAG_ALLGATHERV,
-                                 MCA_PML_BASE_SEND_STANDARD,
-                                 comm, &(req[1])));
-        if (OMPI_SUCCESS != err) {
-            goto exit;
-        }
-
-        err = ompi_request_wait_all(2, req, MPI_STATUSES_IGNORE);
-        if (OMPI_SUCCESS != err) {
-            goto exit;
-	}
     }
 
     /* bcast the message to all the local processes */
-    err = comm->c_local_comm->c_coll.coll_bcast(rbuf, 1, ndtype,
+    err = comm->c_local_comm->c_coll->coll_bcast(rbuf, 1, ndtype,
 						0, comm->c_local_comm,
-                                                comm->c_local_comm->c_coll.coll_bcast_module);
+                                                comm->c_local_comm->c_coll->coll_bcast_module);
   exit:
     if( NULL != ndtype ) {
         ompi_datatype_destroy(&ndtype);

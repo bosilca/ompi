@@ -10,6 +10,7 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2008      Sun Microsystems, Inc.  All rights reserved.
+ * Copyright (c) 2016      Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -120,7 +121,7 @@ ompi_coll_tuned_forced_getvalues( enum COLLTYPE type,
                                   coll_tuned_force_algorithm_params_t *forced_values )
 {
     coll_tuned_force_algorithm_mca_param_indices_t* mca_params;
-    const int *tmp;
+    const int *tmp = NULL;
 
     mca_params = &(ompi_coll_tuned_forced_params[type]);
 
@@ -152,7 +153,6 @@ ompi_coll_tuned_forced_getvalues( enum COLLTYPE type,
         (TMOD)->com_rules[(TYPE)] = NULL;                               \
         if( 0 != (TMOD)->user_forced[(TYPE)].algorithm ) {              \
             need_dynamic_decision = 1;                                  \
-            EXECUTE;                                                    \
         }                                                               \
         if( NULL != mca_coll_tuned_component.all_base_rules ) {         \
             (TMOD)->com_rules[(TYPE)]                                   \
@@ -164,7 +164,6 @@ ompi_coll_tuned_forced_getvalues( enum COLLTYPE type,
         }                                                               \
         if( 1 == need_dynamic_decision ) {                              \
             OPAL_OUTPUT((ompi_coll_tuned_stream,"coll:tuned: enable dynamic selection for "#TYPE)); \
-            ompi_coll_tuned_use_dynamic_rules = true;                   \
             EXECUTE;                                                    \
         }                                                               \
     }
@@ -208,10 +207,6 @@ tuned_module_enable( mca_coll_base_module_t *module,
 
     if (ompi_coll_tuned_use_dynamic_rules) {
         OPAL_OUTPUT((ompi_coll_tuned_stream,"coll:tuned:module_init MCW & Dynamic"));
-        /**
-         * Reset it to 0, it will be enabled again if we discover any need for dynamic decisions.
-         */
-        ompi_coll_tuned_use_dynamic_rules = false;
 
         /**
          * next dynamic state, recheck all forced rules as well
@@ -249,12 +244,6 @@ tuned_module_enable( mca_coll_base_module_t *module,
                                       tuned_module->super.coll_scatter    = ompi_coll_tuned_scatter_intra_dec_dynamic);
         COLL_TUNED_EXECUTE_IF_DYNAMIC(tuned_module, SCATTERV,
                                       tuned_module->super.coll_scatterv   = NULL);
-
-        if( false == ompi_coll_tuned_use_dynamic_rules ) {
-            /* no real need for dynamic decisions */
-            OPAL_OUTPUT((ompi_coll_tuned_stream, "coll:tuned:module_enable switch back to fixed"
-                         " decision by lack of dynamic rules"));
-        }
     }
 
     /* general n fan out tree */

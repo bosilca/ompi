@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2011 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -15,8 +15,8 @@
  * Copyright (c) 2009      Sun Microsystems, Inc.  All rights reserved.
  * Copyright (c) 2011-2015 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2013-2015 Intel, Inc. All rights reserved
- * Copyright (c) 2014-2016 Research Organization for Information Science
+ * Copyright (c) 2013-2017 Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
@@ -40,6 +40,7 @@
 #include "opal/util/argv.h"
 #include "opal/util/opal_getcwd.h"
 #include "opal/util/proc.h"
+#include "opal/util/show_help.h"
 #include "opal/dss/dss.h"
 #include "opal/mca/hwloc/base/base.h"
 #include "opal/mca/pmix/pmix.h"
@@ -112,6 +113,12 @@ int ompi_dpm_connect_accept(ompi_communicator_t *comm, int root,
     if (NULL == opal_pmix.publish || NULL == opal_pmix.connect ||
         NULL == opal_pmix.unpublish ||
        (NULL == opal_pmix.lookup && NULL == opal_pmix.lookup_nb)) {
+        /* print a nice message explaining we don't have support */
+        opal_show_help("help-mpi-runtime.txt", "noconxcpt", true);
+        return OMPI_ERR_NOT_SUPPORTED;
+    }
+    if (!ompi_rte_connect_accept_support(port_string)) {
+        /* they will have printed the help message */
         return OMPI_ERR_NOT_SUPPORTED;
     }
 
@@ -158,8 +165,8 @@ int ompi_dpm_connect_accept(ompi_communicator_t *comm, int root,
                                               sizeof(ompi_proc_t *));
             for (i=0 ; i<group->grp_proc_count ; i++) {
                 if (NULL == (proc_list[i] = ompi_group_peer_lookup(group,i))) {
-                    ORTE_ERROR_LOG(ORTE_ERR_NOT_FOUND);
-                    rc = ORTE_ERR_NOT_FOUND;
+                    OMPI_ERROR_LOG(OMPI_ERR_NOT_FOUND);
+                    rc = OMPI_ERR_NOT_FOUND;
                     free(proc_list);
                     goto exit;
                 }
@@ -229,8 +236,8 @@ int ompi_dpm_connect_accept(ompi_communicator_t *comm, int root,
      * side's participants */
 
     /* bcast the list-length to all processes in the local comm */
-    rc = comm->c_coll.coll_bcast(&rportlen, 1, MPI_INT, root, comm,
-                                 comm->c_coll.coll_bcast_module);
+    rc = comm->c_coll->coll_bcast(&rportlen, 1, MPI_INT, root, comm,
+                                 comm->c_coll->coll_bcast_module);
     if (OMPI_SUCCESS != rc) {
         free(rport);
         goto exit;
@@ -245,8 +252,8 @@ int ompi_dpm_connect_accept(ompi_communicator_t *comm, int root,
         }
     }
     /* now share the list of remote participants */
-    rc = comm->c_coll.coll_bcast(rport, rportlen, MPI_BYTE, root, comm,
-                                 comm->c_coll.coll_bcast_module);
+    rc = comm->c_coll->coll_bcast(rport, rportlen, MPI_BYTE, root, comm,
+                                 comm->c_coll->coll_bcast_module);
     if (OMPI_SUCCESS != rc) {
         free(rport);
         goto exit;
@@ -460,8 +467,7 @@ int ompi_dpm_connect_accept(ompi_communicator_t *comm, int root,
                          group,                    /* local group */
                          new_group_pointer         /* remote group */
                          );
-    if ( NULL == newcomp ) {
-        rc = OMPI_ERR_OUT_OF_RESOURCE;
+    if (OMPI_SUCCESS != rc) {
         goto exit;
     }
 
@@ -665,17 +671,17 @@ int ompi_dpm_spawn(int count, const char *array_of_commands[],
     for (i = 0; i < count; ++i) {
         app = OBJ_NEW(opal_pmix_app_t);
         if (NULL == app) {
-            ORTE_ERROR_LOG(ORTE_ERR_OUT_OF_RESOURCE);
+            OMPI_ERROR_LOG(OMPI_ERR_OUT_OF_RESOURCE);
             OPAL_LIST_DESTRUCT(&apps);
             opal_progress_event_users_decrement();
-            return ORTE_ERR_OUT_OF_RESOURCE;
+            return OMPI_ERR_OUT_OF_RESOURCE;
         }
         /* add the app to the job data */
         opal_list_append(&apps, &app->super);
 
         /* copy over the name of the executable */
         app->cmd = strdup(array_of_commands[i]);
-        opal_argv_append(&app->argc, &app->argv, app->cmd);
+        opal_argv_append_nosize(&app->argv, app->cmd);
 
         /* record the number of procs to be generated */
         app->maxprocs = array_of_maxprocs[i];
@@ -684,7 +690,7 @@ int ompi_dpm_spawn(int count, const char *array_of_commands[],
         if (MPI_ARGVS_NULL != array_of_argv &&
             MPI_ARGV_NULL != array_of_argv[i]) {
             for (j=0; NULL != array_of_argv[i][j]; j++) {
-                opal_argv_append(&app->argc, &app->argv, array_of_argv[i][j]);
+                opal_argv_append_nosize(&app->argv, array_of_argv[i][j]);
             }
         }
 
@@ -893,9 +899,9 @@ int ompi_dpm_spawn(int count, const char *array_of_commands[],
             ompi_info_get (array_of_info[i], "ompi_stdin_target", sizeof(stdin_target) - 1, stdin_target, &flag);
             if ( flag ) {
                 if (0 == strcmp(stdin_target, "all")) {
-                    ui32 = ORTE_VPID_WILDCARD;
+                    ui32 = OPAL_VPID_WILDCARD;
                 } else if (0 == strcmp(stdin_target, "none")) {
-                    ui32 = ORTE_VPID_INVALID;
+                    ui32 = OPAL_VPID_INVALID;
                 } else {
                     ui32 = strtoul(stdin_target, NULL, 10);
                 }
@@ -911,7 +917,7 @@ int ompi_dpm_spawn(int count, const char *array_of_commands[],
          */
         if ( !have_wdir ) {
             if (OMPI_SUCCESS != (rc = opal_getcwd(cwd, OPAL_PATH_MAX))) {
-                ORTE_ERROR_LOG(rc);
+                OMPI_ERROR_LOG(rc);
                 OPAL_LIST_DESTRUCT(&apps);
                 opal_progress_event_users_decrement();
                 return rc;
@@ -1182,8 +1188,8 @@ static int disconnect_waitall (int count, ompi_dpm_disconnect_obj **objs)
     for (i=0; i< count; i++ ) {
         if (NULL != objs[i]->reqs ) {
             free(objs[i]->reqs );
-            free(objs[i]);
         }
+        free(objs[i]);
     }
 
     free(reqs);

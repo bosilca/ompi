@@ -11,9 +11,11 @@ dnl Copyright (c) 2004-2005 The Regents of the University of California.
 dnl                         All rights reserved.
 dnl Copyright (c) 2008-2015 Cisco Systems, Inc.  All rights reserved.
 dnl Copyright (c) 2010      Oracle and/or its affiliates.  All rights reserved.
-dnl Copyright (c) 2015      Research Organization for Information Science
+dnl Copyright (c) 2015-2017 Research Organization for Information Science
 dnl                         and Technology (RIST). All rights reserved.
-dnl Copyright (c) 2014-2016 Los Alamos National Security, LLC. All rights
+dnl Copyright (c) 2014-2017 Los Alamos National Security, LLC. All rights
+dnl                         reserved.
+dnl Copyright (c) 2017      Amazon.com, Inc. or its affiliates.  All Rights
 dnl                         reserved.
 dnl $COPYRIGHT$
 dnl
@@ -191,9 +193,15 @@ AC_DEFUN([OPAL_CHECK_GCC_BUILTIN_CSWAP_INT128], [
 AC_DEFUN([OPAL_CHECK_GCC_ATOMIC_BUILTINS], [
   AC_MSG_CHECKING([for __atomic builtin atomics])
 
-  AC_TRY_LINK([long tmp, old = 0;], [__atomic_thread_fence(__ATOMIC_SEQ_CST);
+  AC_TRY_LINK([
+#include <stdint.h>
+uint32_t tmp, old = 0;
+uint64_t tmp64, old64 = 0;], [
+__atomic_thread_fence(__ATOMIC_SEQ_CST);
 __atomic_compare_exchange_n(&tmp, &old, 1, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
-__atomic_add_fetch(&tmp, 1, __ATOMIC_RELAXED);],
+__atomic_add_fetch(&tmp, 1, __ATOMIC_RELAXED);
+__atomic_compare_exchange_n(&tmp64, &old64, 1, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+__atomic_add_fetch(&tmp64, 1, __ATOMIC_RELAXED);],
     [AC_MSG_RESULT([yes])
      $1],
     [AC_MSG_RESULT([no])
@@ -876,6 +884,7 @@ return ret;
 
     if test "$asm_result" = "yes" ; then
         OPAL_C_GCC_INLINE_ASSEMBLY=1
+	opal_cv_asm_inline_supported="yes"
     else
         OPAL_C_GCC_INLINE_ASSEMBLY=0
     fi
@@ -886,70 +895,6 @@ return ret;
 
     unset OPAL_C_GCC_INLINE_ASSEMBLY assembly asm_result
 ])dnl
-
-
-dnl #################################################################
-dnl
-dnl OPAL_CHECK_INLINE_DEC
-dnl
-dnl DEFINE OPAL_DEC to 0 or 1 depending on DEC
-dnl                support
-dnl
-dnl #################################################################
-AC_DEFUN([OPAL_CHECK_INLINE_C_DEC],[
-
-    AC_MSG_CHECKING([if $CC supports DEC inline assembly])
-
-    AC_LINK_IFELSE([AC_LANG_PROGRAM([
-AC_INCLUDES_DEFAULT
-#include <c_asm.h>],
-[[asm("");
-return 0;]])],
-        [asm_result="yes"], [asm_result="no"])
-
-    AC_MSG_RESULT([$asm_result])
-
-    if test "$asm_result" = "yes" ; then
-        OPAL_C_DEC_INLINE_ASSEMBLY=1
-    else
-        OPAL_C_DEC_INLINE_ASSEMBLY=0
-    fi
-
-    AC_DEFINE_UNQUOTED([OPAL_C_DEC_INLINE_ASSEMBLY],
-                       [$OPAL_C_DEC_INLINE_ASSEMBLY],
-                       [Whether C compiler supports DEC style inline assembly])
-
-    unset OPAL_C_DEC_INLINE_ASSEMBLY asm_result
-])dnl
-
-
-dnl #################################################################
-dnl
-dnl OPAL_CHECK_INLINE_XLC
-dnl
-dnl DEFINE OPAL_XLC to 0 or 1 depending on XLC
-dnl                support
-dnl
-dnl #################################################################
-AC_DEFUN([OPAL_CHECK_INLINE_C_XLC],[
-
-    AC_MSG_CHECKING([if $CC supports XLC inline assembly])
-
-    OPAL_C_XLC_INLINE_ASSEMBLY=0
-    asm_result="no"
-    if test "$CC" = "xlc" ; then
-        OPAL_XLC_INLINE_ASSEMBLY=1
-        asm_result="yes"
-    fi
-
-    AC_MSG_RESULT([$asm_result])
-    AC_DEFINE_UNQUOTED([OPAL_C_XLC_INLINE_ASSEMBLY],
-                       [$OPAL_C_XLC_INLINE_ASSEMBLY],
-                       [Whether C compiler supports XLC style inline assembly])
-
-    unset OPAL_C_XLC_INLINE_ASSEMBLY
-])dnl
-
 
 dnl #################################################################
 dnl
@@ -968,24 +913,15 @@ AC_DEFUN([OPAL_CONFIG_ASM],[
 
     AC_ARG_ENABLE([builtin-atomics],
       [AC_HELP_STRING([--enable-builtin-atomics],
-         [Enable use of __sync builtin atomics (default: enabled)])],
-         [], [enable_builtin_atomics="yes"])
-    AC_ARG_ENABLE([osx-builtin-atomics],
-      [AC_HELP_STRING([--enable-osx-builtin-atomics],
-         [Enable use of OSX builtin atomics (default: enabled)])],
-         [], [enable_osx_builtin_atomics="yes"])
+         [Enable use of __sync builtin atomics (default: enabled)])])
 
     opal_cv_asm_builtin="BUILTIN_NO"
-    if test "$opal_cv_asm_builtin" = "BUILTIN_NO" && test "$enable_builtin_atomics" = "yes" ; then
-       OPAL_CHECK_GCC_ATOMIC_BUILTINS([opal_cv_asm_builtin="BUILTIN_GCC"], [])
-    fi
-    if test "$opal_cv_asm_builtin" = "BUILTIN_NO" && test "$enable_builtin_atomics" = "yes" ; then
-       OPAL_CHECK_SYNC_BUILTINS([opal_cv_asm_builtin="BUILTIN_SYNC"], [])
-    fi
-    if test "$opal_cv_asm_builtin" = "BUILTIN_NO" && test "$enable_osx_builtin_atomics" = "yes" ; then
-       AC_CHECK_HEADER([libkern/OSAtomic.h],
-                       [opal_cv_asm_builtin="BUILTIN_OSX"])
-    fi
+    AS_IF([test "$opal_cv_asm_builtin" = "BUILTIN_NO" && test "$enable_builtin_atomics" != "no"],
+          [OPAL_CHECK_GCC_ATOMIC_BUILTINS([opal_cv_asm_builtin="BUILTIN_GCC"], [])])
+    AS_IF([test "$opal_cv_asm_builtin" = "BUILTIN_NO" && test "$enable_builtin_atomics" != "no"],
+          [OPAL_CHECK_SYNC_BUILTINS([opal_cv_asm_builtin="BUILTIN_SYNC"], [])])
+    AS_IF([test "$opal_cv_asm_builtin" = "BUILTIN_NO" && test "$enable_builtin_atomics" = "yes"],
+          [AC_MSG_ERROR([__sync builtin atomics requested but not found.])])
 
         OPAL_CHECK_ASM_PROC
         OPAL_CHECK_ASM_TEXT
@@ -1003,11 +939,16 @@ AC_DEFUN([OPAL_CONFIG_ASM],[
         OPAL_GCC_INLINE_ASSIGN=""
         OPAL_ASM_SUPPORT_64BIT=0
         case "${host}" in
-        i?86-*|x86_64*)
+        x86_64-*x32)
+            opal_cv_asm_arch="X86_64"
+            OPAL_ASM_SUPPORT_64BIT=1
+            OPAL_GCC_INLINE_ASSIGN='"xaddl %1,%0" : "=m"(ret), "+r"(negone) : "m"(ret)'
+            ;;
+        i?86-*|x86_64*|amd64*)
             if test "$ac_cv_sizeof_long" = "4" ; then
                 opal_cv_asm_arch="IA32"
             else
-                opal_cv_asm_arch="AMD64"
+                opal_cv_asm_arch="X86_64"
             fi
             OPAL_ASM_SUPPORT_64BIT=1
             OPAL_GCC_INLINE_ASSIGN='"xaddl %1,%0" : "=m"(ret), "+r"(negone) : "m"(ret)'
@@ -1028,7 +969,7 @@ AC_DEFUN([OPAL_CONFIG_ASM],[
             OPAL_GCC_INLINE_ASSIGN='"mov %0, #0" : "=&r"(ret)'
             ;;
 
-        armv7*)
+        armv7*|arm-*-linux-gnueabihf)
             opal_cv_asm_arch="ARM"
             OPAL_ASM_SUPPORT_64BIT=1
             OPAL_ASM_ARM_VERSION=7
@@ -1047,7 +988,7 @@ AC_DEFUN([OPAL_CONFIG_ASM],[
             OPAL_GCC_INLINE_ASSIGN='"mov %0, #0" : "=&r"(ret)'
             ;;
 
-        armv5*linux*|armv4*linux*)
+        armv5*linux*|armv4*linux*|arm-*-linux-gnueabi)
             # uses Linux kernel helpers for some atomic operations
             opal_cv_asm_arch="ARM"
             OPAL_ASM_SUPPORT_64BIT=0
@@ -1084,7 +1025,19 @@ AC_DEFUN([OPAL_CONFIG_ASM],[
             fi
             OPAL_GCC_INLINE_ASSIGN='"1: li %0,0" : "=&r"(ret)'
             ;;
-
+        # There is no current difference between s390 and s390x
+        # But use two different defines in case some come later
+        # as s390 is 31bits while s390x is 64bits
+        s390-*)
+            opal_cv_asm_arch="S390"
+            OPAL_CHECK_SYNC_BUILTINS([opal_cv_asm_builtin="BUILTIN_SYNC"],
+              [AC_MSG_ERROR([No atomic primitives available for $host])])
+            ;;
+        s390x-*)
+            opal_cv_asm_arch="S390X"
+            OPAL_CHECK_SYNC_BUILTINS([opal_cv_asm_builtin="BUILTIN_SYNC"],
+              [AC_MSG_ERROR([No atomic primitives available for $host])])
+            ;;
         sparc*-*)
             # SPARC v9 (and above) are the only ones with 64bit support
             # if compiling 32 bit, see if we are v9 (aka v8plus) or
@@ -1146,10 +1099,9 @@ AC_MSG_ERROR([Can not continue.])
             ;;
          esac
 
+	 opal_cv_asm_inline_supported="no"
          # now that we know our architecture, try to inline assemble
          OPAL_CHECK_INLINE_C_GCC([$OPAL_GCC_INLINE_ASSIGN])
-         OPAL_CHECK_INLINE_C_DEC
-         OPAL_CHECK_INLINE_C_XLC
 
          # format:
          #   config_file-text-global-label_suffix-gsym-lsym-type-size-align_log-ppc_r_reg-64_bit-gnu_stack
@@ -1188,7 +1140,7 @@ AC_MSG_ERROR([Can not continue.])
 
     # Check for RDTSCP support
     result=0
-    AS_IF([test "$opal_cv_asm_arch" = "OPAL_AMD64" || test "$opal_cv_asm_arch" = "OPAL_IA32"],
+    AS_IF([test "$opal_cv_asm_arch" = "OPAL_X86_64" || test "$opal_cv_asm_arch" = "OPAL_IA32"],
           [AC_MSG_CHECKING([for RDTSCP assembly support])
            AC_LANG_PUSH([C])
            AC_TRY_RUN([[
@@ -1234,72 +1186,10 @@ AC_DEFUN([OPAL_ASM_FIND_FILE], [
     AC_REQUIRE([AC_PROG_GREP])
     AC_REQUIRE([AC_PROG_FGREP])
 
-if test "$opal_cv_asm_arch" != "WINDOWS" && test "$opal_cv_asm_builtin" != "BUILTIN_SYNC" && test "$opal_cv_asm_builtin" != "BUILTIN_OSX" ; then
-    AC_CHECK_PROG([PERL], [perl], [perl])
-
-    # see if we have a pre-built one already
-    AC_MSG_CHECKING([for pre-built assembly file])
-    opal_cv_asm_file=""
-    if $GREP "$opal_cv_asm_arch" "${OPAL_TOP_SRCDIR}/opal/asm/asm-data.txt" | $FGREP "$opal_cv_asm_format" >conftest.out 2>&1 ; then
-        opal_cv_asm_file="`cut -f3 conftest.out`"
-        if test ! "$opal_cv_asm_file" = "" ; then
-            opal_cv_asm_file="atomic-${opal_cv_asm_file}.s"
-            if test -f "${OPAL_TOP_SRCDIR}/opal/asm/generated/${opal_cv_asm_file}" ; then
-                AC_MSG_RESULT([yes ($opal_cv_asm_file)])
-            else
-                AC_MSG_RESULT([no ($opal_cv_asm_file not found)])
-                opal_cv_asm_file=""
-            fi
-        fi
-    else
-        AC_MSG_RESULT([no (not in asm-data)])
-    fi
-    rm -rf conftest.*
-
-    if test "$opal_cv_asm_file" = "" ; then
-        if test ! "$PERL" = "" ; then
-            # we have perl...  Can we generate a file?
-            AC_MSG_CHECKING([whether possible to generate assembly file])
-            mkdir -p opal/asm/generated
-            opal_cv_asm_file="atomic-local.s"
-            opal_try='$PERL $OPAL_TOP_SRCDIR/opal/asm/generate-asm.pl $opal_cv_asm_arch "$opal_cv_asm_format" $OPAL_TOP_SRCDIR/opal/asm/base $OPAL_TOP_BUILDDIR/opal/asm/generated/$opal_cv_asm_file >conftest.out 2>&1'
-            if AC_TRY_EVAL(opal_try) ; then
-                # save the warnings
-                cat conftest.out >&AC_FD_CC
-                AC_MSG_RESULT([yes])
-            else
-                # save output
-                cat conftest.out >&AC_FD_CC
-                opal_cv_asm_file=""
-                AC_MSG_RESULT([failed])
-                AC_MSG_WARN([Could not build atomic operations assembly file.])
-                AC_MSG_WARN([There will be no atomic operations for this build.])
-            fi
-        else
-            AC_MSG_WARN([Could not find prebuilt atomic operations file and could not])
-            AC_MSG_WARN([find perl to attempt to generate a custom assembly file.])
-            AC_MSG_WARN([There will be no atomic operations for this build.])
-        fi
-    fi
-    rm -rf conftest.*
+if test "$opal_cv_asm_arch" != "WINDOWS" && test "$opal_cv_asm_builtin" != "BUILTIN_SYNC" && test "$opal_cv_asm_builtin" != "BUILTIN_GCC" && test "$opal_cv_asm_builtin" != "BUILTIN_OSX"  && test "$opal_cv_asm_inline_arch" = "no" ; then
+    AC_MSG_ERROR([no atomic support available. exiting])
 else
     # On windows with VC++, atomics are done with compiler primitives
     opal_cv_asm_file=""
 fi
-
-    AC_MSG_CHECKING([for atomic assembly filename])
-    if test "$opal_cv_asm_file" = "" ; then
-        AC_MSG_RESULT([none])
-        result=0
-    else
-        AC_MSG_RESULT([$opal_cv_asm_file])
-        result=1
-    fi
-
-    AC_DEFINE_UNQUOTED([OPAL_HAVE_ASM_FILE], [$result],
-                       [Whether there is an atomic assembly file available])
-    AM_CONDITIONAL([OPAL_HAVE_ASM_FILE], [test "$result" = "1"])
-
-    OPAL_ASM_FILE=$opal_cv_asm_file
-    AC_SUBST(OPAL_ASM_FILE)
 ])dnl

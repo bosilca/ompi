@@ -12,7 +12,7 @@
  * Copyright (c) 2010-2016 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2011-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2014-2016 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -89,7 +89,7 @@ int orte_err2str(int errnum, const char **errmsg)
         if (orte_report_silent_errors) {
             retval = "Silent error";
         } else {
-            retval = NULL;
+            retval = "";
         }
         break;
     case ORTE_ERR_ADDRESSEE_UNKNOWN:
@@ -174,7 +174,7 @@ int orte_err2str(int errnum, const char **errmsg)
         if (orte_report_silent_errors) {
             retval = "Next option";
         } else {
-            retval = NULL;
+            retval = "";
         }
         break;
     case ORTE_ERR_SENSOR_LIMIT_EXCEEDED:
@@ -195,38 +195,11 @@ int orte_err2str(int errnum, const char **errmsg)
     case ORTE_ERR_OP_IN_PROGRESS:
         retval = "Operation in progress";
         break;
-    case ORTE_ERR_OPEN_CHANNEL_PEER_FAIL:
-        retval = "Open channel to peer failed";
-        break;
-    case ORTE_ERR_OPEN_CHANNEL_PEER_REJECT:
-        retval = "Open channel to peer was rejected";
-        break;
-    case ORTE_ERR_QOS_TYPE_UNSUPPORTED:
-        retval = "QoS type unsupported";
-        break;
-    case ORTE_ERR_QOS_ACK_WINDOW_FULL:
-        retval = "QoS ack window full";
-        break;
-    case ORTE_ERR_ACK_TIMEOUT_SENDER:
-        retval = "Send ack timed out";
-        break;
-    case ORTE_ERR_ACK_TIMEOUT_RECEIVER:
-        retval = "Recv ack timed out";
-        break;
-    case ORTE_ERR_LOST_MSG_IN_WINDOW:
-        retval = "Msg lost in window";
-        break;
-    case ORTE_ERR_CHANNEL_BUSY:
-        retval = "Channel busy";
-        break;
-    case ORTE_ERR_DUPLICATE_MSG:
-        retval = "Duplicate message";
+    case ORTE_ERR_OPEN_CONDUIT_FAIL:
+        retval = "Open messaging conduit failed";
         break;
     case ORTE_ERR_OUT_OF_ORDER_MSG:
         retval = "Out of order message";
-        break;
-    case ORTE_ERR_OPEN_CHANNEL_DUPLICATE:
-        retval = "Duplicate channel open request";
         break;
     case ORTE_ERR_FORCE_SELECT:
         retval = "Force select";
@@ -244,11 +217,7 @@ int orte_err2str(int errnum, const char **errmsg)
         retval = "Partial success";
         break;
     default:
-        if (orte_report_silent_errors) {
-            retval = "Unknown error";
-        } else {
-            retval = NULL;
-        }
+        retval = "Unknown error";
     }
 
     *errmsg = retval;
@@ -354,6 +323,8 @@ const char *orte_job_state_to_str(orte_job_state_t state)
         return "FAULT TOLERANCE RESTART";
     case ORTE_JOB_STATE_ANY:
         return "ANY";
+    case ORTE_JOB_STATE_DEBUGGER_DETACH:
+        return "DEBUGGER DETACH";
     default:
         return "UNKNOWN STATE!";
     }
@@ -432,6 +403,12 @@ const char *orte_proc_state_to_str(orte_proc_state_t state)
         return "UNABLE TO SEND MSG";
     case ORTE_PROC_STATE_LIFELINE_LOST:
         return "LIFELINE LOST";
+    case ORTE_PROC_STATE_NO_PATH_TO_TARGET:
+        return "NO PATH TO TARGET";
+    case ORTE_PROC_STATE_FAILED_TO_CONNECT:
+        return "FAILED TO CONNECT";
+    case ORTE_PROC_STATE_PEER_UNKNOWN:
+        return "PEER UNKNOWN";
     case ORTE_PROC_STATE_ANY:
         return "ANY";
     default:

@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2015 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -12,8 +12,9 @@
  *                         All rights reserved.
  * Copyright (c) 2013      Los Alamos National Security, LLC. All Rights
  *                         reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -49,8 +50,8 @@ ompi_coll_base_gather_intra_binomial(const void *sbuf, int scount,
     char *ptmp     = NULL, *tempbuf  = NULL;
     ompi_coll_tree_t* bmtree;
     MPI_Status status;
-    MPI_Aint sextent, sgap, ssize;
-    MPI_Aint rextent, rgap, rsize;
+    MPI_Aint sextent, sgap = 0, ssize;
+    MPI_Aint rextent, rgap = 0, rsize;
     mca_coll_base_module_t *base_module = (mca_coll_base_module_t*) module;
     mca_coll_base_comm_t *data = base_module->base_data;
 
@@ -65,13 +66,13 @@ ompi_coll_base_gather_intra_binomial(const void *sbuf, int scount,
     bmtree = data->cached_in_order_bmtree;
 
     ompi_datatype_type_extent(sdtype, &sextent);
-    ompi_datatype_type_extent(rdtype, &rextent);
     ssize = opal_datatype_span(&sdtype->super, (int64_t)scount * size, &sgap);
-    rsize = opal_datatype_span(&rdtype->super, (int64_t)rcount * size, &rgap);
 
     vrank = (rank - root + size) % size;
 
     if (rank == root) {
+        ompi_datatype_type_extent(rdtype, &rextent);
+        rsize = opal_datatype_span(&rdtype->super, (int64_t)rcount * size, &rgap);
         if (0 == root){
             /* root on 0, just use the recv buffer */
             ptmp = (char *) rbuf;
@@ -267,7 +268,7 @@ ompi_coll_base_gather_intra_linear_sync(const void *sbuf, int scount,
         */
         char *ptmp;
         ompi_request_t *first_segment_req;
-        reqs = coll_base_comm_get_reqs(module->base_data, size);
+        reqs = ompi_coll_base_comm_get_reqs(module->base_data, size);
         if (NULL == reqs) { ret = -1; line = __LINE__; goto error_hndl; }
 
         ompi_datatype_type_size(rdtype, &typelng);

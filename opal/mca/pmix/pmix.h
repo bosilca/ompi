@@ -1,6 +1,6 @@
 /* -*- Mode: C; c-basic-offset:4 ; indent-tabs-mode:nil -*- */
 /*
- * Copyright (c) 2014-2015 Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2015      Los Alamos National Security, LLC. All rights
  *                         reserved.
  * $COPYRIGHT$
@@ -163,6 +163,47 @@ extern int opal_pmix_base_exchange(opal_value_t *info,
 
 /**
  * Provide a simplified macro for retrieving modex data
+ * from another process when we want the PMIx module
+ * to request it from the server if not found, but do not
+ * want the server to go find it if the server doesn't
+ * already have it:
+ *
+ * r - the integer return status from the modex op (int)
+ * s - string key (char*)
+ * p - pointer to the opal_process_name_t of the proc that posted
+ *     the data (opal_process_name_t*)
+ * d - pointer to a location wherein the data object
+ *     is to be returned
+ * t - the expected data type
+ */
+#define OPAL_MODEX_RECV_VALUE_IMMEDIATE(r, s, p, d, t)                                   \
+    do {                                                                                 \
+        opal_value_t *_kv, *_info;                                                       \
+        opal_list_t _ilist;                                                              \
+        opal_output_verbose(1, opal_pmix_verbose_output,                                \
+                            "%s[%s:%d] MODEX RECV VALUE IMMEDIATE FOR PROC %s KEY %s",   \
+                            OPAL_NAME_PRINT(OPAL_PROC_MY_NAME),                          \
+                            __FILE__, __LINE__,                                          \
+                            OPAL_NAME_PRINT(*(p)), (s));                                \
+        OBJ_CONSTRUCT(&(_ilist), opal_list_t);                                           \
+        _info = OBJ_NEW(opal_value_t);                                                   \
+        _info->key = strdup(OPAL_PMIX_IMMEDIATE);                                        \
+        _info->type = OPAL_BOOL;                                                         \
+        _info->data.flag = true;                                                         \
+        opal_list_append(&(_ilist), &(_info)->super);                                    \
+        if (OPAL_SUCCESS == ((r) = opal_pmix.get((p), (s), &(_ilist), &(_kv)))) {        \
+            if (NULL == _kv) {                                                           \
+                (r) = OPAL_ERR_NOT_FOUND;                                                \
+            } else {                                                                     \
+                (r) = opal_value_unload(_kv, (void**)(d), (t));                          \
+                OBJ_RELEASE(_kv);                                                        \
+            }                                                                            \
+        }                                                                                \
+        OPAL_LIST_DESTRUCT(&(_ilist));                                                   \
+    } while(0);
+
+/**
+ * Provide a simplified macro for retrieving modex data
  * from another process:
  *
  * r - the integer return status from the modex op (int)
@@ -284,7 +325,7 @@ extern int opal_pmix_base_exchange(opal_value_t *info,
  * If the information is not found, or the server connection fails, then
  * an appropriate error constant will be returned.
  */
-typedef int (*opal_pmix_base_module_init_fn_t)(void);
+typedef int (*opal_pmix_base_module_init_fn_t)(opal_list_t *ilist);
 
 /* Finalize the PMIx client, closing the connection to the local server.
  * An error code will be returned if, for some reason, the connection
@@ -694,6 +735,23 @@ typedef int (*opal_pmix_base_module_server_notify_event_fn_t)(int status,
 
 
 /************************************************************
+ *                         TOOL APIs                        *
+ ************************************************************/
+/* Initialize the PMIx tool support
+ * When called the library will check for the required connection
+ * information of the local server and will establish the connection.
+ * The connection info can be provided either in the environment or
+ * in the list of attributes. If the information is not found, or the
+ * server connection fails, then an appropriate error constant will
+ * be returned.
+ */
+typedef int (*opal_pmix_base_module_tool_init_fn_t)(opal_list_t *ilist);
+
+/* Finalize the PMIx tool support */
+typedef int (*opal_pmix_base_module_tool_fini_fn_t)(void);
+
+
+/************************************************************
  *                       UTILITY APIs                       *
  ************************************************************/
 
@@ -794,6 +852,21 @@ typedef void (*opal_pmix_base_module_query_fn_t)(opal_list_t *queries,
 typedef void (*opal_pmix_base_log_fn_t)(opal_list_t *info,
                                         opal_pmix_op_cbfunc_t cbfunc, void *cbdata);
 
+/* allocation */
+typedef int (*opal_pmix_base_alloc_fn_t)(opal_pmix_alloc_directive_t directive,
+                                         opal_list_t *info,
+                                         opal_pmix_info_cbfunc_t cbfunc, void *cbdata);
+
+/* job control */
+typedef int (*opal_pmix_base_job_control_fn_t)(opal_list_t *targets,
+                                               opal_list_t *directives,
+                                               opal_pmix_info_cbfunc_t cbfunc, void *cbdata);
+
+/* monitoring */
+typedef int (*opal_pmix_base_process_monitor_fn_t)(opal_list_t *monitor,
+                                                   opal_list_t *directives,
+                                                   opal_pmix_info_cbfunc_t cbfunc, void *cbdata);
+
 /*
  * the standard public API data structure
  */
@@ -825,6 +898,9 @@ typedef struct {
     opal_pmix_base_module_resolve_nodes_fn_t                resolve_nodes;
     opal_pmix_base_module_query_fn_t                        query;
     opal_pmix_base_log_fn_t                                 log;
+    opal_pmix_base_alloc_fn_t                               allocate;
+    opal_pmix_base_job_control_fn_t                         job_control;
+    opal_pmix_base_process_monitor_fn_t                     monitor;
     /* server APIs */
     opal_pmix_base_module_server_init_fn_t                  server_init;
     opal_pmix_base_module_server_finalize_fn_t              server_finalize;
@@ -837,6 +913,9 @@ typedef struct {
     opal_pmix_base_module_server_setup_fork_fn_t            server_setup_fork;
     opal_pmix_base_module_server_dmodex_request_fn_t        server_dmodex_request;
     opal_pmix_base_module_server_notify_event_fn_t          server_notify_event;
+    /* tool APIs */
+    opal_pmix_base_module_tool_init_fn_t                    tool_init;
+    opal_pmix_base_module_tool_fini_fn_t                    tool_finalize;
     /* Utility APIs */
     opal_pmix_base_module_get_version_fn_t                  get_version;
     opal_pmix_base_module_register_fn_t                     register_evhandler;

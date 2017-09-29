@@ -12,7 +12,8 @@
  * Copyright (c) 2007-2012 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2011-2013 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2014-2016 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2017      Mellanox Technologies. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -35,6 +36,7 @@
 #include "orte/mca/errmgr/errmgr.h"
 #include "orte/mca/odls/odls_types.h"
 #include "orte/util/name_fns.h"
+#include "orte/util/threads.h"
 #include "orte/mca/state/state.h"
 #include "orte/runtime/orte_globals.h"
 #include "orte/runtime/orte_wait.h"
@@ -48,11 +50,12 @@ static void restart_stdin(int fd, short event, void *cbdata)
 {
     orte_timer_t *tm = (orte_timer_t*)cbdata;
 
+    ORTE_ACQUIRE_OBJECT(tm);
+
     if (NULL != mca_iof_hnp_component.stdinev &&
         !orte_job_term_ordered &&
         !mca_iof_hnp_component.stdinev->active) {
-        mca_iof_hnp_component.stdinev->active = true;
-        opal_event_add(mca_iof_hnp_component.stdinev->ev, 0);
+        ORTE_IOF_READ_ACTIVATE(mca_iof_hnp_component.stdinev);
     }
 
     /* if this was a timer callback, then release the timer */
@@ -74,12 +77,16 @@ bool orte_iof_hnp_stdin_check(int fd)
 
 void orte_iof_hnp_stdin_cb(int fd, short event, void *cbdata)
 {
-    bool should_process = orte_iof_hnp_stdin_check(0);
+    bool should_process;
+
+    ORTE_ACQUIRE_OBJECT(mca_iof_hnp_component.stdinev);
+
+    should_process = orte_iof_hnp_stdin_check(0);
 
     if (should_process) {
-        mca_iof_hnp_component.stdinev->active = true;
-        opal_event_add(mca_iof_hnp_component.stdinev->ev, 0);
+        ORTE_IOF_READ_ACTIVATE(mca_iof_hnp_component.stdinev);
     } else {
+
         opal_event_del(mca_iof_hnp_component.stdinev->ev);
         mca_iof_hnp_component.stdinev->active = false;
     }
@@ -99,6 +106,13 @@ void orte_iof_hnp_read_local_handler(int fd, short event, void *cbdata)
     bool exclusive;
     orte_iof_sink_t *sink;
 
+    ORTE_ACQUIRE_OBJECT(rev);
+
+    /* As we may use timer events, fd can be bogus (-1)
+     * use the right one here
+     */
+    fd = rev->fd;
+
     /* read up to the fragment size */
     numbytes = read(fd, data, sizeof(data));
 
@@ -113,7 +127,7 @@ void orte_iof_hnp_read_local_handler(int fd, short event, void *cbdata)
 
         /* non-blocking, retry */
         if (EAGAIN == errno || EINTR == errno) {
-            opal_event_add(rev->ev, 0);
+            ORTE_IOF_READ_ACTIVATE(rev);
             return;
         }
 
@@ -262,9 +276,7 @@ void orte_iof_hnp_read_local_handler(int fd, short event, void *cbdata)
             NULL == proct->revstderr &&
             NULL == proct->revstddiag) {
             /* this proc's iof is complete */
-            opal_list_remove_item(&mca_iof_hnp_component.procs, &proct->super);
             ORTE_ACTIVATE_PROC_STATE(&proct->name, ORTE_PROC_STATE_IOF_COMPLETE);
-            OBJ_RELEASE(proct);
         }
         return;
     }
@@ -295,7 +307,6 @@ void orte_iof_hnp_read_local_handler(int fd, short event, void *cbdata)
     }
 
     /* re-add the event */
-    opal_event_add(rev->ev, 0);
-
+    ORTE_IOF_READ_ACTIVATE(rev);
     return;
 }

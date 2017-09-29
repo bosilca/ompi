@@ -17,10 +17,12 @@
  * Copyright (c) 2008-2009 Sun Microsystems, Inc.  All rights reserved.
  * Copyright (c) 2011      Sandia National Laboratories. All rights reserved.
  * Copyright (c) 2012-2013 Inria.  All rights reserved.
- * Copyright (c) 2014-2015 Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
  * Copyright (c) 2014-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016      Mellanox Technologies Ltd. All rights reserved.
  *
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -33,9 +35,7 @@
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif  /* HAVE_SYS_TIME_H */
-#ifdef HAVE_PTHREAD_H
 #include <pthread.h>
-#endif
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -61,6 +61,7 @@
 #include "opal/mca/btl/base/base.h"
 #include "opal/mca/pmix/pmix.h"
 #include "opal/util/timings.h"
+#include "opal/util/opal_environ.h"
 
 #include "ompi/constants.h"
 #include "ompi/mpi/fortran/base/constants.h"
@@ -70,6 +71,7 @@
 #include "ompi/info/info.h"
 #include "ompi/errhandler/errcode.h"
 #include "ompi/errhandler/errhandler.h"
+#include "ompi/interlib/interlib.h"
 #include "ompi/request/request.h"
 #include "ompi/message/message.h"
 #include "ompi/op/op.h"
@@ -92,6 +94,8 @@
 #include "ompi/mca/pml/base/pml_base_bsend.h"
 #include "ompi/dpm/dpm.h"
 #include "ompi/mpiext/mpiext.h"
+#include "ompi/mca/hook/base/base.h"
+#include "ompi/util/timings.h"
 
 #if OPAL_ENABLE_FT_CR == 1
 #include "ompi/mca/crcp/crcp.h"
@@ -278,9 +282,8 @@ opal_hash_table_t ompi_mpi_f90_complex_hashtable = {{0}};
  */
 opal_list_t ompi_registered_datareps = {{0}};
 
-bool ompi_enable_timing = false, ompi_enable_timing_ext = false;
+bool ompi_enable_timing = false;
 extern bool ompi_mpi_yield_when_idle;
-extern bool ompi_mpi_lazy_wait_in_init;
 extern int ompi_mpi_event_tick_rate;
 
 /**
@@ -313,7 +316,6 @@ static int _convert_process_name_to_string(char** name_string,
 {
     return ompi_rte_convert_process_name_to_string(name_string, name);
 }
-
 
 void ompi_mpi_thread_level(int requested, int *provided)
 {
@@ -348,6 +350,9 @@ static int ompi_register_mca_variables(void)
     }
 
     /* check to see if we want timing information */
+    /* TODO: enable OMPI init and OMPI finalize timings if
+     * this variable was set to 1!
+     */
     ompi_enable_timing = false;
     (void) mca_base_var_register("ompi", "ompi", NULL, "timing",
                                  "Request that critical timing loops be measured",
@@ -356,13 +361,6 @@ static int ompi_register_mca_variables(void)
                                  MCA_BASE_VAR_SCOPE_READONLY,
                                  &ompi_enable_timing);
 
-    ompi_enable_timing_ext = false;
-    (void) mca_base_var_register("ompi", "ompi", NULL, "timing_ext",
-                                 "Request that critical timing loops be measured",
-                                 MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
-                                 OPAL_INFO_LVL_9,
-                                 MCA_BASE_VAR_SCOPE_READONLY,
-                                 &ompi_enable_timing_ext);
     return OMPI_SUCCESS;
 }
 
@@ -378,17 +376,18 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
     ompi_proc_t** procs;
     size_t nprocs;
     char *error = NULL;
-    char *cmd=NULL, *av=NULL;
     ompi_errhandler_errtrk_t errtrk;
     volatile bool active;
     opal_list_t info;
     opal_value_t *kv;
-    OPAL_TIMING_DECLARE(tm);
-    OPAL_TIMING_INIT_EXT(&tm, OPAL_TIMING_GET_TIME_OF_DAY);
+
+    OMPI_TIMING_INIT(32);
 
     /* bitflag of the thread level support provided. To be used
      * for the modex in order to work in heterogeneous environments. */
     uint8_t threadlevel_bf;
+
+    ompi_hook_base_mpi_init_top(argc, argv, requested, provided);
 
     /* Ensure that we were not already initialized or finalized.
 
@@ -476,7 +475,16 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
         mca_base_var_set_value(ret, allvalue, 4, MCA_BASE_VAR_SOURCE_DEFAULT, NULL);
     }
 
-    OPAL_TIMING_MSTART((&tm,"time from start to completion of rte_init"));
+    /* open the ompi hook framework */
+    if (OMPI_SUCCESS != (ret = mca_base_framework_open(&ompi_hook_base_framework, 0))) {
+        error = "ompi_hook_base_open() failed";
+        goto error;
+    }
+
+    ompi_hook_base_mpi_init_top_post_opal(argc, argv, requested, provided);
+
+
+    OMPI_TIMING_NEXT("initialization");
 
     /* if we were not externally started, then we need to setup
      * some envars so the MPI_INFO_ENV can get the cmd name
@@ -484,15 +492,13 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
      * the requested thread level
      */
     if (NULL == getenv("OMPI_COMMAND") && NULL != argv && NULL != argv[0]) {
-        asprintf(&cmd, "OMPI_COMMAND=%s", argv[0]);
-        putenv(cmd);
+        opal_setenv("OMPI_COMMAND", argv[0], true, &environ);
     }
     if (NULL == getenv("OMPI_ARGV") && 1 < argc) {
         char *tmp;
         tmp = opal_argv_join(&argv[1], ' ');
-        asprintf(&av, "OMPI_ARGV=%s", tmp);
+        opal_setenv("OMPI_ARGV", tmp, true, &environ);
         free(tmp);
-        putenv(av);
     }
 
     /* open the rte framework */
@@ -507,20 +513,10 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
         error = "ompi_mpi_init: ompi_rte_init failed";
         goto error;
     }
+
+    OMPI_TIMING_NEXT("rte_init");
+
     ompi_rte_initialized = true;
-
-    /* check for timing request - get stop time and report elapsed time if so */
-    OPAL_TIMING_MNEXT((&tm,"time from completion of rte_init to modex"));
-
-    /* if hwloc is available but didn't get setup for some
-     * reason, do so now
-     */
-    if (NULL == opal_hwloc_topology) {
-        if (OPAL_SUCCESS != (ret = opal_hwloc_base_get_topology())) {
-            error = "Topology init";
-            goto error;
-        }
-    }
 
     /* Register the default errhandler callback  */
     errtrk.status = OPAL_ERROR;
@@ -530,14 +526,16 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
     kv = OBJ_NEW(opal_value_t);
     kv->key = strdup(OPAL_PMIX_EVENT_ORDER_PREPEND);
     opal_list_append(&info, &kv->super);
+    /* give it a name so we can distinguish it */
+    kv = OBJ_NEW(opal_value_t);
+    kv->key = strdup(OPAL_PMIX_EVENT_HDLR_NAME);
+    kv->type = OPAL_STRING;
+    kv->data.string = strdup("MPI-Default");
+    opal_list_append(&info, &kv->super);
     opal_pmix.register_evhandler(NULL, &info, ompi_errhandler_callback,
                                  ompi_errhandler_registration_callback,
                                  (void*)&errtrk);
-    if( ompi_mpi_lazy_wait_in_init ){
-        OMPI_LAZY_WAIT_FOR_COMPLETION(errtrk.active);
-    } else {
-        OMPI_WAIT_FOR_COMPLETION(errtrk.active);
-    }
+    OMPI_LAZY_WAIT_FOR_COMPLETION(errtrk.active);
 
     OPAL_LIST_DESTRUCT(&info);
     if (OPAL_SUCCESS != errtrk.status) {
@@ -546,6 +544,12 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
         goto error;
     }
 
+    /* declare our presence for interlib coordination, and
+     * register for callbacks when other libs declare */
+    if (OMPI_SUCCESS != (ret = ompi_interlib_declare(*provided, OMPI_IDENT_STRING))) {
+        error = "ompi_interlib_declare";
+        goto error;
+    }
 
     /* determine the bitflag belonging to the threadlevel_support provided */
     memset ( &threadlevel_bf, 0, sizeof(uint8_t));
@@ -651,30 +655,55 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
         goto error;
     }
 
-    /* check for timing request - get stop time and report elapsed time if so */
-    OPAL_TIMING_MNEXT((&tm,"time to execute modex"));
+    OMPI_TIMING_IMPORT_OPAL("orte_init");
+    OMPI_TIMING_IMPORT_OPAL("opal_init_util");
+    OMPI_TIMING_NEXT("rte_init-commit");
+
 
     /* exchange connection info - this function may also act as a barrier
      * if data exchange is required. The modex occurs solely across procs
      * in our job. If a barrier is required, the "modex" function will
      * perform it internally */
-    active = true;
     opal_pmix.commit();
-    if (!opal_pmix_base_async_modex) {
-        if (NULL != opal_pmix.fence_nb) {
+    OMPI_TIMING_NEXT("commit");
+
+    /* If we have a non-blocking fence:
+     * if we are doing an async modex, but we are collecting all
+     * data, then execute the non-blocking modex in the background.
+     * All calls to modex_recv will be cached until the background
+     * modex completes. If collect_all_data is false, then we skip
+     * the fence completely and retrieve data on-demand from the
+     * source node.
+     *
+     * If we do not have a non-blocking fence, then we must always
+     * execute the blocking fence as the system does not support
+     * later data retrieval. */
+    if (NULL != opal_pmix.fence_nb) {
+        if (opal_pmix_base_async_modex && opal_pmix_collect_all_data) {
+            /* execute the fence_nb in the background to collect
+             * the data */
+            if (!ompi_async_mpi_init) {
+                /* we are going to execute a barrier at the
+                 * end of MPI_Init. We can only have ONE fence
+                 * operation with the identical involved procs
+                 * at a time, so we will need to wait when we
+                 * get there */
+                active = true;
+                opal_pmix.fence_nb(NULL, true, fence_release, (void*)&active);
+            } else {
+                opal_pmix.fence_nb(NULL, true, NULL, NULL);
+            }
+        } else if (!opal_pmix_base_async_modex) {
+            active = true;
             opal_pmix.fence_nb(NULL, opal_pmix_collect_all_data,
                                fence_release, (void*)&active);
-            if( ompi_mpi_lazy_wait_in_init ){
-                OMPI_LAZY_WAIT_FOR_COMPLETION(active);
-            } else {
-                OMPI_WAIT_FOR_COMPLETION(active);
-            }
-        } else {
-            opal_pmix.fence(NULL, opal_pmix_collect_all_data);
+            OMPI_LAZY_WAIT_FOR_COMPLETION(active);
         }
+    } else {
+        opal_pmix.fence(NULL, opal_pmix_collect_all_data);
     }
 
-    OPAL_TIMING_MNEXT((&tm,"time from modex to first barrier"));
+    OMPI_TIMING_NEXT("modex");
 
     /* select buffered send allocator component to be used */
     if( OMPI_SUCCESS !=
@@ -720,7 +749,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
     }
 
     /* initialize info */
-    if (OMPI_SUCCESS != (ret = ompi_info_init())) {
+    if (OMPI_SUCCESS != (ret = ompi_mpiinfo_init())) {
         error = "ompi_info_init() failed";
         goto error;
     }
@@ -835,29 +864,32 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
     ompi_rte_wait_for_debugger();
 
     /* Next timing measurement */
-    OPAL_TIMING_MNEXT((&tm,"time to execute barrier"));
+    OMPI_TIMING_NEXT("modex-barrier");
 
     /* wait for everyone to reach this point - this is a hard
      * barrier requirement at this time, though we hope to relax
      * it at a later point */
     if (!ompi_async_mpi_init) {
-        active = true;
-        if (NULL != opal_pmix.fence_nb) {
-            opal_pmix.fence_nb(NULL, opal_pmix_collect_all_data,
-                               fence_release, (void*)&active);
-            if( ompi_mpi_lazy_wait_in_init ){
+        /* if we executed the above fence in the background, then
+         * we have to wait here for it to complete. However, there
+         * is no reason to do two barriers! */
+        if (opal_pmix_base_async_modex && opal_pmix_collect_all_data) {
+            OMPI_LAZY_WAIT_FOR_COMPLETION(active);
+        } else {
+            active = true;
+            if (NULL != opal_pmix.fence_nb) {
+                opal_pmix.fence_nb(NULL, false,
+                                   fence_release, (void*)&active);
                 OMPI_LAZY_WAIT_FOR_COMPLETION(active);
             } else {
-                OMPI_WAIT_FOR_COMPLETION(active);
+                opal_pmix.fence(NULL, false);
             }
-        } else {
-            opal_pmix.fence(NULL, opal_pmix_collect_all_data);
         }
     }
 
     /* check for timing request - get stop time and report elapsed
        time if so, then start the clock again */
-    OPAL_TIMING_MNEXT((&tm,"time from barrier to complete mpi_init"));
+    OMPI_TIMING_NEXT("barrier");
 
 #if OPAL_ENABLE_PROGRESS_THREADS == 0
     /* Start setting up the event engine for MPI operations.  Don't
@@ -958,13 +990,15 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
  error:
     if (ret != OMPI_SUCCESS) {
         /* Only print a message if one was not already printed */
-        if (NULL != error) {
+        if (NULL != error && OMPI_ERR_SILENT != ret) {
             const char *err_msg = opal_strerror(ret);
             opal_show_help("help-mpi-runtime.txt",
                            "mpi_init:startup:internal-failure", true,
                            "MPI_INIT", "MPI_INIT", error, err_msg, ret);
         }
         opal_mutex_unlock(&ompi_mpi_bootstrap_mutex);
+        ompi_hook_base_mpi_init_error(argc, argv, requested, provided);
+        OMPI_TIMING_FINALIZE;
         return ret;
     }
 
@@ -989,11 +1023,13 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided)
 
     /* Finish last measurement, output results
      * and clear timing structure */
-    OPAL_TIMING_MSTOP(&tm);
-    OPAL_TIMING_DELTAS(ompi_enable_timing, &tm);
-    OPAL_TIMING_REPORT(ompi_enable_timing_ext, &tm);
-    OPAL_TIMING_RELEASE(&tm);
+    OMPI_TIMING_NEXT("barrier-finish");
+    OMPI_TIMING_OUT;
+    OMPI_TIMING_FINALIZE;
 
     opal_mutex_unlock(&ompi_mpi_bootstrap_mutex);
+
+    ompi_hook_base_mpi_init_bottom(argc, argv, requested, provided);
+
     return MPI_SUCCESS;
 }

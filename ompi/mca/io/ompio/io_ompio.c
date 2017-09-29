@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2013 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -13,7 +13,7 @@
  * Copyright (c) 2008-2016 University of Houston. All rights reserved.
  * Copyright (c) 2011-2015 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2012-2013 Inria.  All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
@@ -67,7 +67,7 @@ int ompi_io_ompio_generate_current_file_view (struct mca_io_ompio_file_t *fh,
     k = 0;
 
     while (bytes_to_write) {
-        OPAL_PTRDIFF_TYPE disp;
+        ptrdiff_t disp;
         /* reallocate if needed */
         if (OMPIO_IOVEC_INITIAL_SIZE*block <= k) {
             block ++;
@@ -93,7 +93,7 @@ int ompi_io_ompio_generate_current_file_view (struct mca_io_ompio_file_t *fh,
             }
         }
 
-        disp = (OPAL_PTRDIFF_TYPE)(fh->f_decoded_iov[j].iov_base) +
+        disp = (ptrdiff_t)(fh->f_decoded_iov[j].iov_base) +
             (fh->f_total_bytes - sum_previous_counts);
         iov[k].iov_base = (IOVBASE_TYPE *)(intptr_t)(disp + fh->f_offset);
 
@@ -125,7 +125,7 @@ int ompi_io_ompio_generate_current_file_view (struct mca_io_ompio_file_t *fh,
 	int *row_index=NULL, i=0, l=0, m=0;
 	int column_index=0, r_index=0;
 	int blocklen[3] = {1, 1, 1};
-	OPAL_PTRDIFF_TYPE d[3], base;
+	ptrdiff_t d[3], base;
 	ompi_datatype_t *types[3];
 	ompi_datatype_t *io_array_type=MPI_DATATYPE_NULL;
 	int **adj_matrix=NULL;
@@ -142,7 +142,7 @@ int ompi_io_ompio_generate_current_file_view (struct mca_io_ompio_file_t *fh,
             return OMPI_ERR_OUT_OF_RESOURCE;
 	}
 
-        fh->f_comm->c_coll.coll_gather (&k,
+        fh->f_comm->c_coll->coll_gather (&k,
                                         1,
                                         MPI_INT,
                                         recvcounts,
@@ -150,7 +150,7 @@ int ompi_io_ompio_generate_current_file_view (struct mca_io_ompio_file_t *fh,
 					MPI_INT,
                                         OMPIO_ROOT,
                                         fh->f_comm,
-                                        fh->f_comm->c_coll.coll_gather_module);
+                                        fh->f_comm->c_coll->coll_gather_module);
 
         per_process = (mca_io_ompio_offlen_array_t *)
 	    malloc (k * sizeof(mca_io_ompio_offlen_array_t));
@@ -172,9 +172,9 @@ int ompi_io_ompio_generate_current_file_view (struct mca_io_ompio_file_t *fh,
         types[1] = &ompi_mpi_long.dt;
         types[2] = &ompi_mpi_int.dt;
 
-	d[0] = (OPAL_PTRDIFF_TYPE)&per_process[0];
-        d[1] = (OPAL_PTRDIFF_TYPE)&per_process[0].length;
-        d[2] = (OPAL_PTRDIFF_TYPE)&per_process[0].process_id;
+        d[0] = (ptrdiff_t)&per_process[0];
+        d[1] = (ptrdiff_t)&per_process[0].length;
+        d[2] = (ptrdiff_t)&per_process[0].process_id;
         base = d[0];
         for (i=0;i<3;i++){
             d[i] -= base;
@@ -248,7 +248,7 @@ int ompi_io_ompio_generate_current_file_view (struct mca_io_ompio_file_t *fh,
                 }
             }
 	}
-	fh->f_comm->c_coll.coll_gatherv (per_process,
+	fh->f_comm->c_coll->coll_gatherv (per_process,
 					 k,
 					 io_array_type,
 					 all_process,
@@ -257,7 +257,7 @@ int ompi_io_ompio_generate_current_file_view (struct mca_io_ompio_file_t *fh,
 					 io_array_type,
 					 OMPIO_ROOT,
 					 fh->f_comm,
-					 fh->f_comm->c_coll.coll_gatherv_module);
+					 fh->f_comm->c_coll->coll_gatherv_module);
 
 	ompi_datatype_destroy(&io_array_type);
 

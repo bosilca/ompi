@@ -118,7 +118,18 @@ typedef int (*mca_spml_base_module_wait_fn_t)(void* addr,
  *
  * @param mkey remote mkey
  */
-typedef void (*mca_spml_base_module_mkey_unpack_fn_t)(sshmem_mkey_t *, int remote_pe);
+typedef void (*mca_spml_base_module_mkey_unpack_fn_t)(sshmem_mkey_t *, uint32_t segno, int remote_pe, int tr_id);
+
+/**
+ * If possible, get a pointer to the remote memory described by the mkey
+ *
+ * @param dst_addr  address of the symmetric variable
+ * @param mkey      remote memory key
+ * @param pe        remote PE
+ *
+ * @return pointer to remote memory or NULL
+ */
+typedef void * (*mca_spml_base_module_mkey_ptr_fn_t)(const void *dst_addr, sshmem_mkey_t *mkey, int pe);
 
 /**
  * free resources used by deserialized remote mkey
@@ -149,9 +160,9 @@ typedef int (*mca_spml_base_module_deregister_fn_t)(sshmem_mkey_t *mkeys);
 
 /**
  * try to fill up mkeys that can be used to reach remote pe.
- * @param pe  remote pe
+ * @param pe         remote pe
  * @param seg 0 - symmetric heap, 1 - static data, everything else are static data in .so
- * @param mkeys  mkeys array
+ * @param mkeys      mkeys array
  *
  * @return OSHMEM_SUCCSESS if keys are found
  */
@@ -278,6 +289,15 @@ typedef int (*mca_spml_base_module_fence_fn_t)(void);
 typedef int (*mca_spml_base_module_wait_nb_fn_t)(void *);
 
 /**
+ * Called by memheap when memory is allocated by shmalloc(),
+ * shcalloc(), shmemalign() or shrealloc()
+ *
+ * @param addr   base address of the registered buffer.
+ * @param size   the size of the buffer to be registered.
+ */
+typedef void (*mca_spml_base_module_memuse_hook_fn_t)(void *, size_t);
+
+/**
  *  SPML instance.
  */
 struct mca_spml_base_module_1_0_0_t {
@@ -304,6 +324,9 @@ struct mca_spml_base_module_1_0_0_t {
 
     mca_spml_base_module_mkey_unpack_fn_t spml_rmkey_unpack;
     mca_spml_base_module_mkey_free_fn_t   spml_rmkey_free;
+    mca_spml_base_module_mkey_ptr_fn_t    spml_rmkey_ptr;
+
+    mca_spml_base_module_memuse_hook_fn_t spml_memuse_hook;
     void *self;
 };
 

@@ -11,8 +11,9 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2008-2016 University of Houston. All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -48,6 +49,9 @@ extern int mca_io_ompio_num_aggregators;
 extern int mca_io_ompio_record_offset_info;
 extern int mca_io_ompio_sharedfp_lazy_open;
 extern int mca_io_ompio_grouping_option;
+extern int mca_io_ompio_max_aggregators_ratio;
+extern int mca_io_ompio_aggregators_cutoff_threshold;
+
 OMPI_DECLSPEC extern int mca_io_ompio_coll_timing_info;
 
 /*
@@ -72,6 +76,7 @@ OMPI_DECLSPEC extern int mca_io_ompio_coll_timing_info;
  * General values
  */
 #define OMPIO_PREALLOC_MAX_BUF_SIZE   33554432
+#define OMPIO_DEFAULT_CYCLE_BUF_SIZE  536870912
 #define OMPIO_PERM_NULL               -1
 #define OMPIO_IOVEC_INITIAL_SIZE      100
 #define OMPIO_ROOT                    0
@@ -208,7 +213,7 @@ struct mca_io_ompio_file_t {
     const char            *f_filename;
     char                  *f_datarep;
     opal_convertor_t      *f_convertor;
-    ompi_info_t           *f_info;
+    opal_info_t           *f_info;
     int32_t                f_flags;
     void                  *f_fs_ptr;
     int                    f_atomicity;
@@ -236,7 +241,7 @@ struct mca_io_ompio_file_t {
     size_t            f_position_in_file_view; /* in bytes */
     size_t            f_total_bytes; /* total bytes read/written within 1 Fview*/
     int               f_index_in_file_view;
-    OPAL_PTRDIFF_TYPE f_view_extent;
+    ptrdiff_t f_view_extent;
     size_t            f_view_size;
     ompi_datatype_t  *f_etype;
     ompi_datatype_t  *f_filetype;
@@ -339,7 +344,7 @@ int mca_io_ompio_file_set_view (struct ompi_file_t *fh,
                                 struct ompi_datatype_t *etype,
                                 struct ompi_datatype_t *filetype,
                                 const char *datarep,
-                                struct ompi_info_t *info);
+                                struct opal_info_t *info);
 
 int mca_io_ompio_file_get_view (struct ompi_file_t *fh,
                                 OMPI_MPI_OFFSET_TYPE *disp,
@@ -349,11 +354,11 @@ int mca_io_ompio_file_get_view (struct ompi_file_t *fh,
 int mca_io_ompio_file_open (struct ompi_communicator_t *comm,
                             const char *filename,
                             int amode,
-                            struct ompi_info_t *info,
+                            struct opal_info_t *info,
                             struct ompi_file_t *fh);
 int mca_io_ompio_file_close (struct ompi_file_t *fh);
 int mca_io_ompio_file_delete (const char *filename,
-                              struct ompi_info_t *info);
+                              struct opal_info_t *info);
 int mca_io_ompio_file_set_size (struct ompi_file_t *fh,
                                 OMPI_MPI_OFFSET_TYPE size);
 int mca_io_ompio_file_preallocate (struct ompi_file_t *fh,
@@ -362,10 +367,6 @@ int mca_io_ompio_file_get_size (struct ompi_file_t *fh,
                                 OMPI_MPI_OFFSET_TYPE * size);
 int mca_io_ompio_file_get_amode (struct ompi_file_t *fh,
                                  int *amode);
-int mca_io_ompio_file_set_info (struct ompi_file_t *fh,
-                                struct ompi_info_t *info);
-int mca_io_ompio_file_get_info (struct ompi_file_t *fh,
-                                struct ompi_info_t ** info_used);
 int mca_io_ompio_file_sync (struct ompi_file_t *fh);
 int mca_io_ompio_file_seek (struct ompi_file_t *fh,
                             OMPI_MPI_OFFSET_TYPE offet,
@@ -376,7 +377,7 @@ int mca_io_ompio_file_set_view (struct ompi_file_t *fh,
                                 struct ompi_datatype_t *etype,
                                 struct ompi_datatype_t *filetype,
                                 const char *datarep,
-                                struct ompi_info_t *info);
+                                struct opal_info_t *info);
 int mca_io_ompio_file_get_view (struct ompi_file_t *fh,
                                 OMPI_MPI_OFFSET_TYPE *disp,
                                 struct ompi_datatype_t **etype,

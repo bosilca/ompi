@@ -6,7 +6,7 @@
  * Copyright (c) 2010      Oracle and/or its affiliates.  All rights reserved.
  * Copyright (c) 2012      Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015      Intel, Inc. All rights reserved.
  * $COPYRIGHT$
@@ -59,6 +59,7 @@ int OMPI_Affinity_str(ompi_affinity_fmt_t fmt_type,
 
     memset(ompi_bound, 0, OMPI_AFFINITY_STRING_MAX);
     memset(current_binding, 0, OMPI_AFFINITY_STRING_MAX);
+    memset(exists, 0, OMPI_AFFINITY_STRING_MAX);
 
     /* If we have no hwloc support, return nothing */
     if (NULL == opal_hwloc_topology) {
@@ -130,7 +131,7 @@ static int get_rsrc_current_binding(char str[OMPI_AFFINITY_STRING_MAX])
 
     /* get our root object */
     root = hwloc_get_root_obj(opal_hwloc_topology);
-    rootset = opal_hwloc_base_get_available_cpus(opal_hwloc_topology, root);
+    rootset = root->cpuset;
 
     /* get our bindings */
     boundset = hwloc_bitmap_alloc();
@@ -323,7 +324,7 @@ static int get_layout_current_binding(char str[OMPI_AFFINITY_STRING_MAX])
 
     /* get our root object */
     root = hwloc_get_root_obj(opal_hwloc_topology);
-    rootset = opal_hwloc_base_get_available_cpus(opal_hwloc_topology, root);
+    rootset = root->cpuset;
 
     /* get our bindings */
     boundset = hwloc_bitmap_alloc();

@@ -9,10 +9,10 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2006-2011 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2006-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2011      Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2014-2016 Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016      IBM Corporation.  All rights reserved.
@@ -36,7 +36,7 @@
 
 #include "opal/util/if.h"
 #include "opal/util/net.h"
-#include "opal/mca/hwloc/hwloc.h"
+#include "opal/mca/hwloc/hwloc-internal.h"
 
 #include "orte/util/show_help.h"
 #include "orte/mca/errmgr/errmgr.h"
@@ -54,7 +54,7 @@ static int orte_rmaps_seq_map(orte_job_t *jdata);
 
 /* define the module */
 orte_rmaps_base_module_t orte_rmaps_seq_module = {
-    orte_rmaps_seq_map
+    .map_job = orte_rmaps_seq_map
 };
 
 /* local object for tracking rank locations */
@@ -412,6 +412,7 @@ static int orte_rmaps_seq_map(orte_job_t *jdata)
                  * properly set
                  */
                 ORTE_FLAG_SET(node, ORTE_NODE_FLAG_OVERSUBSCRIBED);
+                ORTE_FLAG_SET(jdata, ORTE_JOB_FLAG_OVERSUBSCRIBED);
                 /* check for permission */
                 if (ORTE_FLAG_TEST(node, ORTE_NODE_FLAG_SLOTS_GIVEN)) {
                     /* if we weren't given a directive either way, then we will error out
@@ -441,7 +442,7 @@ static int orte_rmaps_seq_map(orte_job_t *jdata)
             if (NULL != sq->cpuset) {
                 hwloc_cpuset_t bitmap;
                 char *cpu_bitmap;
-                if (NULL == node->topology) {
+                if (NULL == node->topology || NULL == node->topology->topo) {
                     /* not allowed - for sequential cpusets, we must have
                      * the topology info
                      */
@@ -459,7 +460,7 @@ static int orte_rmaps_seq_map(orte_job_t *jdata)
                     /* setup the bitmap */
                     bitmap = hwloc_bitmap_alloc();
                     /* parse the slot_list to find the socket and core */
-                    if (ORTE_SUCCESS != (rc = opal_hwloc_base_slot_list_parse(sq->cpuset, node->topology, rtype, bitmap))) {
+                    if (ORTE_SUCCESS != (rc = opal_hwloc_base_cpu_list_parse(sq->cpuset, node->topology->topo, rtype, bitmap))) {
                         ORTE_ERROR_LOG(rc);
                         hwloc_bitmap_free(bitmap);
                         goto error;
@@ -489,8 +490,8 @@ static int orte_rmaps_seq_map(orte_job_t *jdata)
                 /* assign the locale - okay for the topo to be null as
                  * it just means it wasn't returned
                  */
-                if (NULL != node->topology) {
-                    locale = hwloc_get_root_obj(node->topology);
+                if (NULL != node->topology && NULL != node->topology->topo) {
+                    locale = hwloc_get_root_obj(node->topology->topo);
                     orte_set_attribute(&proc->attributes, ORTE_PROC_HWLOC_LOCALE,
                                        ORTE_ATTR_LOCAL, locale, OPAL_PTR);
                 }
@@ -516,6 +517,10 @@ static int orte_rmaps_seq_map(orte_job_t *jdata)
         }
     }
 
+    /* mark that this job is to be fully
+     * described in the launch msg */
+    orte_set_attribute(&jdata->attributes, ORTE_JOB_FULLY_DESCRIBED, ORTE_ATTR_GLOBAL, NULL, OPAL_BOOL);
+
     return ORTE_SUCCESS;
 
  error:
@@ -530,12 +535,10 @@ static char *orte_getline(FILE *fp)
 
     ret = fgets(input, 1024, fp);
     if (NULL != ret) {
-	   input[strlen(input)-1] = '\0';  /* remove newline */
-	   buff = strdup(input);
-	   return buff;
+           input[strlen(input)-1] = '\0';  /* remove newline */
+           buff = strdup(input);
+           return buff;
     }
 
     return NULL;
 }
-
-

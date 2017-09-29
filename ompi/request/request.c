@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2016 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2007 High Performance Computing Center Stuttgart,
@@ -33,11 +33,6 @@
 #include "ompi/constants.h"
 
 opal_pointer_array_t             ompi_request_f_to_c_table = {{0}};
-size_t                           ompi_request_waiting = 0;
-size_t                           ompi_request_completed = 0;
-size_t                           ompi_request_failed = 0;
-opal_recursive_mutex_t           ompi_request_lock = {{0}};
-opal_condition_t                 ompi_request_cond = {{0}};
 ompi_predefined_request_t        ompi_request_null = {{{{{0}}}}};
 ompi_predefined_request_t        *ompi_request_null_addr = &ompi_request_null;
 ompi_request_t                   ompi_request_empty = {{{{0}}}};
@@ -60,6 +55,7 @@ static void ompi_request_construct(ompi_request_t* req)
     req->req_state        = OMPI_REQUEST_INVALID;
     req->req_complete     = false;
     req->req_persistent   = false;
+    req->req_start        = NULL;
     req->req_free         = NULL;
     req->req_cancel       = NULL;
     req->req_complete_cb  = NULL;
@@ -111,13 +107,11 @@ OBJ_CLASS_INSTANCE(
 
 int ompi_request_init(void)
 {
-    OBJ_CONSTRUCT(&ompi_request_lock, opal_recursive_mutex_t);
-    OBJ_CONSTRUCT(&ompi_request_cond, opal_condition_t);
 
     OBJ_CONSTRUCT(&ompi_request_null, ompi_request_t);
     OBJ_CONSTRUCT(&ompi_request_f_to_c_table, opal_pointer_array_t);
     if( OPAL_SUCCESS != opal_pointer_array_init(&ompi_request_f_to_c_table,
-                                                0, OMPI_FORTRAN_HANDLE_MAX, 64) ) {
+                                                0, OMPI_FORTRAN_HANDLE_MAX, 32) ) {
         return OMPI_ERROR;
     }
     ompi_request_null.request.req_type = OMPI_REQUEST_NULL;
@@ -132,6 +126,7 @@ int ompi_request_init(void)
     ompi_request_null.request.req_persistent = false;
     ompi_request_null.request.req_f_to_c_index =
         opal_pointer_array_add(&ompi_request_f_to_c_table, &ompi_request_null);
+    ompi_request_null.request.req_start = NULL; /* should not be called */
     ompi_request_null.request.req_free = ompi_request_null_free;
     ompi_request_null.request.req_cancel = ompi_request_null_cancel;
     ompi_request_null.request.req_mpi_object.comm = &ompi_mpi_comm_world.comm;
@@ -164,6 +159,7 @@ int ompi_request_init(void)
     ompi_request_empty.req_persistent = false;
     ompi_request_empty.req_f_to_c_index =
         opal_pointer_array_add(&ompi_request_f_to_c_table, &ompi_request_empty);
+    ompi_request_empty.req_start = NULL; /* should not be called */
     ompi_request_empty.req_free = ompi_request_empty_free;
     ompi_request_empty.req_cancel = ompi_request_null_cancel;
     ompi_request_empty.req_mpi_object.comm = &ompi_mpi_comm_world.comm;
@@ -188,8 +184,6 @@ int ompi_request_finalize(void)
     OBJ_DESTRUCT( &ompi_request_null.request );
     OMPI_REQUEST_FINI( &ompi_request_empty );
     OBJ_DESTRUCT( &ompi_request_empty );
-    OBJ_DESTRUCT( &ompi_request_cond );
-    OBJ_DESTRUCT( &ompi_request_lock );
     OBJ_DESTRUCT( &ompi_request_f_to_c_table );
     return OMPI_SUCCESS;
 }

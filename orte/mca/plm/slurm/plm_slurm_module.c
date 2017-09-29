@@ -12,7 +12,7 @@
  * Copyright (c) 2006-2014 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2007-2015 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2014      Intel Corporation.  All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -61,11 +61,12 @@
 #include "orte/types.h"
 #include "orte/util/show_help.h"
 #include "orte/util/name_fns.h"
+#include "orte/util/threads.h"
 #include "orte/runtime/orte_globals.h"
 #include "orte/runtime/orte_wait.h"
 #include "orte/runtime/orte_quit.h"
 #include "orte/mca/errmgr/errmgr.h"
-#include "orte/mca/rmaps/rmaps.h"
+#include "orte/mca/rmaps/base/base.h"
 #include "orte/mca/state/state.h"
 
 #include "orte/orted/orted.h"
@@ -108,7 +109,6 @@ orte_plm_base_module_1_0_0_t orte_plm_slurm_module = {
  */
 static pid_t primary_srun_pid = 0;
 static bool primary_pid_set = false;
-static bool launching_daemons;
 static void launch_daemons(int fd, short args, void *cbdata);
 
 /**
@@ -189,6 +189,8 @@ static void launch_daemons(int fd, short args, void *cbdata)
     orte_job_t *daemons;
     orte_state_caddy_t *state = (orte_state_caddy_t*)cbdata;
 
+    ORTE_ACQUIRE_OBJECT(state);
+
     OPAL_OUTPUT_VERBOSE((1, orte_plm_base_framework.framework_output,
                          "%s plm:slurm: LAUNCH DAEMONS CALLED",
                          ORTE_NAME_PRINT(ORTE_PROC_MY_NAME)));
@@ -265,8 +267,10 @@ static void launch_daemons(int fd, short args, void *cbdata)
     /* start one orted on each node */
     opal_argv_append(&argc, &argv, "--ntasks-per-node=1");
 
-    /* alert us if any orteds die during startup */
-    opal_argv_append(&argc, &argv, "--kill-on-bad-exit");
+    if (!orte_enable_recovery) {
+        /* kill the job if any orteds die */
+        opal_argv_append(&argc, &argv, "--kill-on-bad-exit");
+    }
 
     /* ensure the orteds are not bound to a single processor,
      * just in case the TaskAffinity option is set by default.
@@ -346,6 +350,7 @@ static void launch_daemons(int fd, short args, void *cbdata)
     OPAL_OUTPUT_VERBOSE((2, orte_plm_base_framework.framework_output,
                          "%s plm:slurm: launching on nodes %s",
                          ORTE_NAME_PRINT(ORTE_PROC_MY_NAME), nodelist_flat));
+    free(nodelist_flat);
 
     /*
      * ORTED OPTIONS
@@ -356,9 +361,7 @@ static void launch_daemons(int fd, short args, void *cbdata)
 
     /* Add basic orted command line options, including debug flags */
     orte_plm_base_orted_append_basic_args(&argc, &argv,
-                                          "slurm", &proc_vpid_index,
-                                          nodelist_flat);
-    free(nodelist_flat);
+                                          "slurm", &proc_vpid_index);
 
     /* tell the new daemons the base of the name list so they can compute
      * their own name on the other end
@@ -546,27 +549,18 @@ static void srun_wait_cb(orte_proc_t *proc, void* cbdata){
 
     jdata = orte_get_job_data_object(ORTE_PROC_MY_NAME->jobid);
 
-    /* if we are in the launch phase, then any termination is bad */
-    if (launching_daemons) {
-        /* report that one or more daemons failed to launch so we can exit */
-        OPAL_OUTPUT_VERBOSE((1, orte_plm_base_framework.framework_output,
-                             "%s plm:slurm: daemon failed during launch",
-                             ORTE_NAME_PRINT(ORTE_PROC_MY_NAME)));
-        /* notify the error manager */
-        ORTE_ACTIVATE_JOB_STATE(jdata, ORTE_JOB_STATE_FAILED_TO_START);
-    } else {
-        /* if this is after launch, then we need to abort only if the status
-         * returned is non-zero - i.e., if the orteds exited with an error
+    /* abort only if the status returned is non-zero - i.e., if
+    * the orteds exited with an error
+     */
+    if (0 != proc->exit_code) {
+        /* an orted must have died unexpectedly - report
+         * that the daemon has failed so we exit
          */
-        if (0 != proc->exit_code) {
-            /* an orted must have died unexpectedly after launch - report
-             * that the daemon has failed so we exit
-             */
-            OPAL_OUTPUT_VERBOSE((1, orte_plm_base_framework.framework_output,
-                                 "%s plm:slurm: daemon failed while running",
-                                 ORTE_NAME_PRINT(ORTE_PROC_MY_NAME)));
-            ORTE_ACTIVATE_JOB_STATE(jdata, ORTE_JOB_STATE_ABORTED);
-        }
+        OPAL_OUTPUT_VERBOSE((1, orte_plm_base_framework.framework_output,
+                             "%s plm:slurm: daemon failed while running",
+                             ORTE_NAME_PRINT(ORTE_PROC_MY_NAME)));
+        ORTE_ACTIVATE_JOB_STATE(jdata, ORTE_JOB_STATE_ABORTED);
+    } else {
         /* otherwise, check to see if this is the primary pid */
         if (primary_srun_pid == proc->pid) {
             /* in this case, we just want to fire the proper trigger so
@@ -580,6 +574,7 @@ static void srun_wait_cb(orte_proc_t *proc, void* cbdata){
             ORTE_ACTIVATE_JOB_STATE(jdata, ORTE_JOB_STATE_DAEMONS_TERMINATED);
         }
     }
+
     /* done with this dummy */
     OBJ_RELEASE(proc);
 }
@@ -594,7 +589,8 @@ static int plm_slurm_start_proc(int argc, char **argv, char **env,
     orte_proc_t *dummy;
 
     if (NULL == exec_argv) {
-        return ORTE_ERR_NOT_FOUND;
+        orte_show_help("help-plm-slurm.txt", "no-srun", true);
+        return ORTE_ERR_SILENT;
     }
 
     srun_pid = fork();
@@ -602,6 +598,13 @@ static int plm_slurm_start_proc(int argc, char **argv, char **env,
         ORTE_ERROR_LOG(ORTE_ERR_SYS_LIMITS_CHILDREN);
         free(exec_argv);
         return ORTE_ERR_SYS_LIMITS_CHILDREN;
+    }
+    /* if this is the primary launch - i.e., not a comm_spawn of a
+     * child job - then save the pid
+     */
+    if (0 < srun_pid && !primary_pid_set) {
+        primary_srun_pid = srun_pid;
+        primary_pid_set = true;
     }
 
     /* setup a dummy proc object to track the srun */
@@ -692,14 +695,6 @@ static int plm_slurm_start_proc(int argc, char **argv, char **env,
            process group any more.  Stevens says always do this on both
            sides of the fork... */
         setpgid(srun_pid, srun_pid);
-
-        /* if this is the primary launch - i.e., not a comm_spawn of a
-         * child job - then save the pid
-         */
-        if (!primary_pid_set) {
-            primary_srun_pid = srun_pid;
-            primary_pid_set = true;
-        }
 
         free(exec_argv);
     }

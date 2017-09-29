@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2014 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -39,7 +39,7 @@
 #include "coll_basic.h"
 #include "ompi/op/op.h"
 
-#define COMMUTATIVE_LONG_MSG 8 * 1024 * 1024
+#define COMMUTATIVE_LONG_MSG (8 * 1024 * 1024)
 
 /*
  *	reduce_scatter
@@ -60,7 +60,7 @@
  * usage for the recusive halving is msg_size + 2 * comm_size greater
  * for the recursive halving, so I've limited where the recursive
  * halving is used to be nice to the app memory wise.  There are much
- * better algorithms for large messages with cummutative operations,
+ * better algorithms for large messages with commutative operations,
  * so this should be investigated further.
  */
 int
@@ -331,14 +331,14 @@ mca_coll_basic_reduce_scatter_intra(const void *sbuf, void *rbuf, const int *rco
 
         /* reduction */
         err =
-            comm->c_coll.coll_reduce(sbuf, recv_buf, count, dtype, op, 0,
-                                     comm, comm->c_coll.coll_reduce_module);
+            comm->c_coll->coll_reduce(sbuf, recv_buf, count, dtype, op, 0,
+                                     comm, comm->c_coll->coll_reduce_module);
 
         /* scatter */
         if (MPI_SUCCESS == err) {
-            err = comm->c_coll.coll_scatterv(recv_buf, rcounts, disps, dtype,
+            err = comm->c_coll->coll_scatterv(recv_buf, rcounts, disps, dtype,
                                              rbuf, rcounts[rank], dtype, 0,
-                                             comm, comm->c_coll.coll_scatterv_module);
+                                             comm, comm->c_coll->coll_scatterv_module);
         }
     }
 
@@ -469,10 +469,10 @@ mca_coll_basic_reduce_scatter_inter(const void *sbuf, void *rbuf, const int *rco
     }
 
     /* Now do a scatterv on the local communicator */
-    err = comm->c_local_comm->c_coll.coll_scatterv(lbuf, rcounts, disps, dtype,
+    err = comm->c_local_comm->c_coll->coll_scatterv(lbuf, rcounts, disps, dtype,
                                                    rbuf, rcounts[rank], dtype, 0,
                                                    comm->c_local_comm,
-                                                   comm->c_local_comm->c_coll.coll_scatterv_module);
+                                                   comm->c_local_comm->c_coll->coll_scatterv_module);
 
   exit:
     if (NULL != tmpbuf) {

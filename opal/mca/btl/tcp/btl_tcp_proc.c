@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2006 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2014 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -11,12 +11,12 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2008-2010 Oracle and/or its affiliates.  All rights reserved
- * Copyright (c) 2013-2015 Intel, Inc. All rights reserved
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
  * Copyright (c) 2014-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015-2016 Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2015 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2015-2017 Cisco Systems, Inc.  All rights reserved
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -41,6 +41,7 @@
 #include "opal/util/if.h"
 #include "opal/util/net.h"
 #include "opal/util/proc.h"
+#include "opal/util/show_help.h"
 
 #include "btl_tcp.h"
 #include "btl_tcp_proc.h"
@@ -125,16 +126,18 @@ mca_btl_tcp_proc_t* mca_btl_tcp_proc_create(opal_proc_t* proc)
         return btl_proc;
     }
 
-    do {
+    do {  /* This loop is only necessary so that we can break out of the serial code */
         btl_proc = OBJ_NEW(mca_btl_tcp_proc_t);
         if(NULL == btl_proc) {
             rc = OPAL_ERR_OUT_OF_RESOURCE;
             break;
         }
 
-        btl_proc->proc_opal = proc;
-
-        OBJ_RETAIN(btl_proc->proc_opal);
+        /* Retain the proc, but don't store the ref into the btl_proc just yet. This
+         * provides a way to release the btl_proc in case of failure without having to
+         * unlock the mutex.
+         */
+        OBJ_RETAIN(proc);
 
         /* lookup tcp parameters exported by this proc */
         OPAL_MODEX_RECV(rc, &mca_btl_tcp_component.super.btl_version,
@@ -163,10 +166,6 @@ mca_btl_tcp_proc_t* mca_btl_tcp_proc_create(opal_proc_t* proc)
             break;
         }
 
-        if(NULL == mca_btl_tcp_component.tcp_local && (proc == opal_proc_local_get())) {
-            mca_btl_tcp_component.tcp_local = btl_proc;
-        }
-
         /* convert the OPAL addr_family field to OS constants,
          * so we can check for AF_INET (or AF_INET6) and don't have
          * to deal with byte ordering anymore.
@@ -184,12 +183,14 @@ mca_btl_tcp_proc_t* mca_btl_tcp_proc_create(opal_proc_t* proc)
     } while (0);
 
     if (OPAL_SUCCESS == rc) {
+        btl_proc->proc_opal = proc;  /* link with the proc */
         /* add to hash table of all proc instance. */
         opal_proc_table_set_value(&mca_btl_tcp_component.tcp_procs,
                                   proc->proc_name, btl_proc);
     } else {
         if (btl_proc) {
-            OBJ_RELEASE(btl_proc);
+            OBJ_RELEASE(btl_proc);  /* release the local proc */
+            OBJ_RELEASE(proc);      /* and the ref on the OMPI proc */
             btl_proc = NULL;
         }
     }
@@ -420,6 +421,7 @@ int mca_btl_tcp_proc_insert( mca_btl_tcp_proc_t* btl_proc,
     mca_btl_tcp_proc_data_t _proc_data, *proc_data=&_proc_data;
     size_t max_peer_interfaces;
     memset(proc_data, 0, sizeof(mca_btl_tcp_proc_data_t));
+    char str_local[128], str_remote[128];
 
     if (NULL == (proc_hostname = opal_get_proc_hostname(btl_proc->proc_opal))) {
         return OPAL_ERR_UNREACH;
@@ -507,10 +509,7 @@ int mca_btl_tcp_proc_insert( mca_btl_tcp_proc_t* btl_proc,
         default:
             opal_output(0, "unknown address family for tcp: %d\n",
                         endpoint_addr_ss.ss_family);
-            /*
-             * return OPAL_UNREACH or some error, as this is not
-             * good
-             */
+            return OPAL_ERR_UNREACH;
         }
     }
 
@@ -552,14 +551,26 @@ int mca_btl_tcp_proc_insert( mca_btl_tcp_proc_t* btl_proc,
             if(NULL != proc_data->local_interfaces[i]->ipv4_address &&
                NULL != peer_interfaces[j]->ipv4_address) {
 
+                /* Convert the IPv4 addresses into nicely-printable strings for verbose debugging output */
+                inet_ntop(AF_INET, &(((struct sockaddr_in*) proc_data->local_interfaces[i]->ipv4_address))->sin_addr,
+                          str_local, sizeof(str_local));
+                inet_ntop(AF_INET, &(((struct sockaddr_in*) peer_interfaces[j]->ipv4_address))->sin_addr,
+                          str_remote, sizeof(str_remote));
+
                 if(opal_net_addr_isipv4public((struct sockaddr*) local_interface->ipv4_address) &&
                    opal_net_addr_isipv4public((struct sockaddr*) peer_interfaces[j]->ipv4_address)) {
                     if(opal_net_samenetwork((struct sockaddr*) local_interface->ipv4_address,
                                             (struct sockaddr*) peer_interfaces[j]->ipv4_address,
                                             local_interface->ipv4_netmask)) {
                         proc_data->weights[i][j] = CQ_PUBLIC_SAME_NETWORK;
+                        opal_output_verbose(20, opal_btl_base_framework.framework_output,
+                                            "btl:tcp: path from %s to %s: IPV4 PUBLIC SAME NETWORK",
+                                            str_local, str_remote);
                     } else {
                         proc_data->weights[i][j] = CQ_PUBLIC_DIFFERENT_NETWORK;
+                        opal_output_verbose(20, opal_btl_base_framework.framework_output,
+                                            "btl:tcp: path from %s to %s: IPV4 PUBLIC DIFFERENT NETWORK",
+                                            str_local, str_remote);
                     }
                     proc_data->best_addr[i][j] = peer_interfaces[j]->ipv4_endpoint_addr;
                     continue;
@@ -568,8 +579,14 @@ int mca_btl_tcp_proc_insert( mca_btl_tcp_proc_t* btl_proc,
                                         (struct sockaddr*) peer_interfaces[j]->ipv4_address,
                                         local_interface->ipv4_netmask)) {
                     proc_data->weights[i][j] = CQ_PRIVATE_SAME_NETWORK;
+                    opal_output_verbose(20, opal_btl_base_framework.framework_output,
+                                       "btl:tcp: path from %s to %s: IPV4 PRIVATE SAME NETWORK",
+                                       str_local, str_remote);
                 } else {
                     proc_data->weights[i][j] = CQ_PRIVATE_DIFFERENT_NETWORK;
+                    opal_output_verbose(20, opal_btl_base_framework.framework_output,
+                                       "btl:tcp: path from %s to %s: IPV4 PRIVATE DIFFERENT NETWORK",
+                                       str_local, str_remote);
                 }
                 proc_data->best_addr[i][j] = peer_interfaces[j]->ipv4_endpoint_addr;
                 continue;
@@ -581,12 +598,24 @@ int mca_btl_tcp_proc_insert( mca_btl_tcp_proc_t* btl_proc,
             if(NULL != local_interface->ipv6_address &&
                NULL != peer_interfaces[j]->ipv6_address) {
 
+                /* Convert the IPv6 addresses into nicely-printable strings for verbose debugging output */
+                inet_ntop(AF_INET6, &(((struct sockaddr_in6*) local_interface->ipv6_address))->sin6_addr,
+                          str_local, sizeof(str_local));
+                inet_ntop(AF_INET6, &(((struct sockaddr_in6*) peer_interfaces[j]->ipv6_address))->sin6_addr,
+                          str_remote, sizeof(str_remote));
+
                 if(opal_net_samenetwork((struct sockaddr*) local_interface->ipv6_address,
                                          (struct sockaddr*) peer_interfaces[j]->ipv6_address,
                                          local_interface->ipv6_netmask)) {
                     proc_data->weights[i][j] = CQ_PUBLIC_SAME_NETWORK;
+                    opal_output_verbose(20, opal_btl_base_framework.framework_output,
+                                       "btl:tcp: path from %s to %s: IPV6 PUBLIC SAME NETWORK",
+                                       str_local, str_remote);
                 } else {
                     proc_data->weights[i][j] = CQ_PUBLIC_DIFFERENT_NETWORK;
+                    opal_output_verbose(20, opal_btl_base_framework.framework_output,
+                                       "btl:tcp: path from %s to %s: IPV6 PUBLIC DIFFERENT NETWORK",
+                                       str_local, str_remote);
                 }
                 proc_data->best_addr[i][j] = peer_interfaces[j]->ipv6_endpoint_addr;
                 continue;
@@ -659,6 +688,12 @@ int mca_btl_tcp_proc_insert( mca_btl_tcp_proc_t* btl_proc,
             rc = OPAL_SUCCESS;
         }
     }
+    if (OPAL_ERR_UNREACH == rc) {
+        opal_output_verbose(10, opal_btl_base_framework.framework_output,
+                            "btl:tcp: host %s, process %s UNREACHABLE",
+                            proc_hostname,
+                            OPAL_NAME_PRINT(btl_proc->proc_opal->proc_name));
+    }
 
     for(i = 0; i < perm_size; ++i) {
         free(proc_data->weights[i]);
@@ -715,7 +750,7 @@ int mca_btl_tcp_proc_remove(mca_btl_tcp_proc_t* btl_proc, mca_btl_base_endpoint_
                     OBJ_RELEASE(btl_proc);
                     return OPAL_SUCCESS;
                 }
-                /* The endpoint_addr may still be NULL if this enpoint is
+                /* The endpoint_addr may still be NULL if this endpoint is
                    being removed early in the wireup sequence (e.g., if it
                    is unreachable by all other procs) */
                 if (NULL != btl_endpoint->endpoint_addr) {
@@ -745,8 +780,8 @@ mca_btl_tcp_proc_t* mca_btl_tcp_proc_lookup(const opal_process_name_t *name)
         mca_btl_base_endpoint_t *endpoint;
         opal_proc_t *opal_proc;
 
-        BTL_VERBOSE(("adding tcp proc for unknown peer {.jobid = 0x%x, .vpid = 0x%x}",
-                     name->jobid, name->vpid));
+        BTL_VERBOSE(("adding tcp proc for unknown peer {%s}",
+                     OPAL_NAME_PRINT(*name)));
 
         opal_proc = opal_proc_for_name (*name);
         if (NULL == opal_proc) {
@@ -759,7 +794,7 @@ mca_btl_tcp_proc_t* mca_btl_tcp_proc_lookup(const opal_process_name_t *name)
             (void) mca_btl_tcp_add_procs (&mca_btl_tcp_component.tcp_btls[i]->super, 1, &opal_proc,
                                           &endpoint, NULL);
             if (NULL != endpoint && NULL == proc) {
-                /* get the proc and continue on (could probably just break here) */
+                /* construct all the endpoints and get the proc */
                 proc = endpoint->endpoint_proc;
             }
         }
@@ -781,12 +816,20 @@ void mca_btl_tcp_proc_accept(mca_btl_tcp_proc_t* btl_proc, struct sockaddr* addr
         if( btl_endpoint->endpoint_addr->addr_family != addr->sa_family ) {
             continue;
         }
-
         switch (addr->sa_family) {
         case AF_INET:
             if( memcmp( &btl_endpoint->endpoint_addr->addr_inet,
                         &(((struct sockaddr_in*)addr)->sin_addr),
                         sizeof(struct in_addr) ) ) {
+                char tmp[2][16];
+                opal_output_verbose(20, opal_btl_base_framework.framework_output,
+                                    "btl: tcp: Match incoming connection from %s %s with locally known IP %s failed (iface %d/%d)!\n",
+                                    OPAL_NAME_PRINT(btl_proc->proc_opal->proc_name),
+                                    inet_ntop(AF_INET, (void*)&((struct sockaddr_in*)addr)->sin_addr,
+                                              tmp[0], 16),
+                                    inet_ntop(AF_INET, (void*)(struct in_addr*)&btl_endpoint->endpoint_addr->addr_inet,
+                                              tmp[1], 16),
+                                    (int)i, (int)btl_proc->proc_endpoint_count);
                 continue;
             }
             break;
@@ -795,6 +838,15 @@ void mca_btl_tcp_proc_accept(mca_btl_tcp_proc_t* btl_proc, struct sockaddr* addr
             if( memcmp( &btl_endpoint->endpoint_addr->addr_inet,
                         &(((struct sockaddr_in6*)addr)->sin6_addr),
                         sizeof(struct in6_addr) ) ) {
+                char tmp[2][INET6_ADDRSTRLEN];
+                opal_output_verbose(20, opal_btl_base_framework.framework_output,
+                                    "btl: tcp: Match incoming connection from %s %s with locally known IP %s failed (iface %d/%d)!\n",
+                                    OPAL_NAME_PRINT(btl_proc->proc_opal->proc_name),
+                                    inet_ntop(AF_INET6, (void*)&((struct sockaddr_in6*)addr)->sin6_addr,
+                                              tmp[0], INET6_ADDRSTRLEN),
+                                    inet_ntop(AF_INET6, (void*)(struct in6_addr*)&btl_endpoint->endpoint_addr->addr_inet,
+                                              tmp[1], INET6_ADDRSTRLEN),
+                                    (int)i, (int)btl_proc->proc_endpoint_count);
                 continue;
             }
             break;
@@ -807,9 +859,36 @@ void mca_btl_tcp_proc_accept(mca_btl_tcp_proc_t* btl_proc, struct sockaddr* addr
         OPAL_THREAD_UNLOCK(&btl_proc->proc_lock);
         return;
     }
-    OPAL_THREAD_UNLOCK(&btl_proc->proc_lock);
     /* No further use of this socket. Close it */
     CLOSE_THE_SOCKET(sd);
+    {
+        char *addr_str = NULL, *tmp, *pnet;
+        for (size_t i = 0; i < btl_proc->proc_endpoint_count; i++) {
+            mca_btl_base_endpoint_t* btl_endpoint = btl_proc->proc_endpoints[i];
+            if (btl_endpoint->endpoint_addr->addr_family != addr->sa_family) {
+                continue;
+            }
+            pnet = opal_net_get_hostname((struct sockaddr*)&btl_endpoint->endpoint_addr->addr_inet);
+            if (NULL == addr_str) {
+                (void)asprintf(&tmp, "\n\t%s", pnet);
+            } else {
+                (void)asprintf(&tmp, "%s\n\t%s", addr_str, pnet);
+                free(addr_str);
+            }
+            addr_str = tmp;
+        }
+        opal_show_help("help-mpi-btl-tcp.txt", "dropped inbound connection",
+                       true, opal_process_info.nodename,
+                       getpid(),
+                       btl_proc->proc_opal->proc_hostname,
+                       OPAL_NAME_PRINT(btl_proc->proc_opal->proc_name),
+                       opal_net_get_hostname((struct sockaddr*)addr),
+                       (NULL == addr_str) ? "NONE" : addr_str);
+        if (NULL != addr_str) {
+            free(addr_str);
+        }
+    }
+    OPAL_THREAD_UNLOCK(&btl_proc->proc_lock);
 }
 
 /*

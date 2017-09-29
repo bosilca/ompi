@@ -11,7 +11,7 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2010-2011 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2014-2015 Research Organization for Information Science
+ * Copyright (c) 2014-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2014-2015 Los Alamos National Security, LLC. All rights
  *                         reserved.
@@ -53,12 +53,6 @@
 #define MCA_BTL_TCP_STATISTICS 0
 BEGIN_C_DECLS
 
-#if (HAVE_PTHREAD_H == 1)
-#define MCA_BTL_TCP_SUPPORT_PROGRESS_THREAD 1
-#else
-#define MCA_BTL_TCP_SUPPORT_PROGRESS_THREAD 0
-#endif  /* (HAVE_PTHREAD_H == 1) */
-
 extern opal_event_base_t* mca_btl_tcp_event_base;
 
 #define MCA_BTL_TCP_COMPLETE_FRAG_SEND(frag)                            \
@@ -81,7 +75,6 @@ extern opal_event_base_t* mca_btl_tcp_event_base;
         }                                                               \
     } while (0)
 
-#if MCA_BTL_TCP_SUPPORT_PROGRESS_THREAD
 extern opal_list_t mca_btl_tcp_ready_frag_pending_queue;
 extern opal_mutex_t mca_btl_tcp_ready_frag_mutex;
 extern int mca_btl_tcp_pipe_to_progress[2];
@@ -103,14 +96,6 @@ extern int mca_btl_tcp_progress_thread_trigger;
             opal_event_add(event, (value));                             \
         }                                                               \
     } while (0)
-#else
-#define MCA_BTL_TCP_CRITICAL_SECTION_ENTER(name)
-#define MCA_BTL_TCP_CRITICAL_SECTION_LEAVE(name)
-#define MCA_BTL_TCP_ACTIVATE_EVENT(event, value)                    \
-    do {                                                            \
-        opal_event_add(event, (value));                             \
-    } while (0)
-#endif  /* MCA_BTL_TCP_SUPPORT_PROGRESS_THREAD */
 
 /**
  * TCP BTL component.
@@ -122,7 +107,6 @@ struct mca_btl_tcp_component_t {
     uint32_t tcp_num_btls;                  /**< number of interfaces available to the TCP component */
     unsigned int tcp_num_links;             /**< number of logical links per physical device */
     struct mca_btl_tcp_module_t **tcp_btls; /**< array of available BTL modules */
-    struct mca_btl_tcp_proc_t* tcp_local;   /**< local proc struct */
     int tcp_free_list_num;                  /**< initial size of free lists */
     int tcp_free_list_max;                  /**< maximum size of free lists */
     int tcp_free_list_inc;                  /**< number of elements to alloc when growing free lists */
@@ -158,12 +142,10 @@ struct mca_btl_tcp_component_t {
 
     int tcp_enable_progress_thread;         /** Support for tcp progress thread flag */
 
-#if MCA_BTL_TCP_SUPPORT_PROGRESS_THREAD
     opal_event_t tcp_recv_thread_async_event;
     opal_mutex_t tcp_frag_eager_mutex;
     opal_mutex_t tcp_frag_max_mutex;
     opal_mutex_t tcp_frag_user_mutex;
-#endif
     /* Do we want to use TCP_NODELAY? */
     int    tcp_not_use_nodelay;
 
@@ -187,7 +169,10 @@ struct mca_btl_tcp_module_t {
 #endif
     struct sockaddr_storage tcp_ifaddr; /**< BTL interface address */
     uint32_t           tcp_ifmask;  /**< BTL interface netmask */
+
+    opal_mutex_t       tcp_endpoints_mutex;
     opal_list_t        tcp_endpoints;
+
     mca_btl_base_module_error_cb_fn_t tcp_error_cb;  /**< Upper layer error callback */
 #if MCA_BTL_TCP_STATISTICS
     size_t tcp_bytes_sent;
@@ -365,6 +350,24 @@ mca_btl_tcp_dump(struct mca_btl_base_module_t* btl,
   * @return OPAL_SUCCESS or failure status
   */
 int mca_btl_tcp_ft_event(int state);
+
+/*
+ * A blocking send on a non-blocking socket. Used to send the small
+ * amount of connection information that identifies the endpoints
+ * endpoint.
+ */
+int mca_btl_tcp_send_blocking(int sd, const void* data, size_t size);
+
+/*
+ * A blocking recv for both blocking and non-blocking socket.
+ * Used to receive the small amount of connection information
+ * that identifies the endpoints
+ *
+ * when the socket is blocking (the caller introduces timeout)
+ * which happens during initial handshake otherwise socket is
+ * non-blocking most of the time.
+ */
+int mca_btl_tcp_recv_blocking(int sd, void* data, size_t size);
 
 END_C_DECLS
 #endif

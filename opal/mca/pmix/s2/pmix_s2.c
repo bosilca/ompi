@@ -3,9 +3,9 @@
  * Copyright (c) 2007      The Trustees of Indiana University.
  *                         All rights reserved.
  * Copyright (c) 2011-2016 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2011-2013 Los Alamos National Security, LLC. All
+ * Copyright (c) 2011-2017 Los Alamos National Security, LLC. All
  *                         rights reserved.
- * Copyright (c) 2013-2016 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2013-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2014-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
@@ -30,14 +30,13 @@
 #include "pmi2_pmap_parser.h"
 
 #include <string.h>
-#include <pmi.h>
 #include <pmi2.h>
 
 #include "opal/mca/pmix/base/base.h"
 #include "opal/mca/pmix/base/pmix_base_hash.h"
 #include "pmix_s2.h"
 
-static int s2_init(void);
+static int s2_init(opal_list_t *ilist);
 static int s2_fini(void);
 static int s2_initialized(void);
 static int s2_abort(int flag, const char msg[],
@@ -159,7 +158,7 @@ static int kvs_get(const char key[], char value [], int maxvalue)
     return OPAL_SUCCESS;
 }
 
-static int s2_init(void)
+static int s2_init(opal_list_t *ilist)
 {
     int spawned, size, rank, appnum;
     int rc, ret = OPAL_ERROR;
@@ -174,6 +173,11 @@ static int s2_init(void)
     char *str;
     char nmtmp[64];
     opal_process_name_t wildcard_rank;
+
+    if (0 < pmix_init_count) {
+        ++pmix_init_count;
+        return OPAL_SUCCESS;
+    }
 
     /* if we can't startup PMI, we can't be used */
     if ( PMI2_Initialized () ) {
@@ -377,7 +381,7 @@ static int s2_init(void)
     kv.key = strdup(OPAL_PMIX_LOCALLDR);
     kv.type = OPAL_UINT64;
     kv.data.uint64 = *(uint64_t*)&ldr;
-    if (OPAL_SUCCESS != (ret = opal_pmix_base_store(&OPAL_PROC_MY_NAME, &kv))) {
+    if (OPAL_SUCCESS != (ret = opal_pmix_base_store(&wildcard_rank, &kv))) {
         OPAL_ERROR_LOG(ret);
         OBJ_DESTRUCT(&kv);
         goto err_exit;
@@ -422,13 +426,13 @@ static int s2_fini(void) {
 
     if (0 == --pmix_init_count) {
         PMI2_Finalize();
-    }
-    if (NULL != pmix_kvs_name) {
-        free(pmix_kvs_name);
-        pmix_kvs_name = NULL;
-    }
-    if (NULL != s2_lranks) {
-        free(s2_lranks);
+        if (NULL != pmix_kvs_name) {
+            free(pmix_kvs_name);
+            pmix_kvs_name = NULL;
+        }
+        if (NULL != s2_lranks) {
+            free(s2_lranks);
+        }
     }
     return OPAL_SUCCESS;
 }

@@ -13,6 +13,7 @@
  * Copyright (c) 2012      Sandia National Laboratories.  All rights reserved.
  * Copyright (c) 2015      Los Alamos National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2017      Intel, Inc. All rights reserved
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -92,7 +93,8 @@ do {                                                                           \
                                            src,                         \
                                            datatype,                    \
                                            addr,                        \
-                                           count )                      \
+                                           count,                       \
+					   flags )                      \
 do {                                                                    \
     OMPI_REQUEST_INIT(&(request)->req_base.req_ompi, false);            \
     (request)->req_base.req_ompi.req_mpi_object.comm = comm;            \
@@ -101,19 +103,20 @@ do {                                                                    \
     request->req_base.req_comm = comm;                                  \
     request->req_base.req_datatype = datatype;                          \
     OBJ_RETAIN(comm);                                                   \
-    OBJ_RETAIN(datatype);                                               \
+    OMPI_DATATYPE_RETAIN(datatype);                                     \
                                                                         \
     if( MPI_ANY_SOURCE == src ) {                                       \
         ompi_proc = ompi_proc_local_proc;                               \
     } else {                                                            \
         ompi_proc = ompi_comm_peer_lookup( comm, src );                 \
     }                                                                   \
+    MCA_PML_CM_SWITCH_CUDA_CONVERTOR_OFF(flags, datatype, count);       \
     opal_convertor_copy_and_prepare_for_recv(                           \
                                   ompi_proc->super.proc_convertor,      \
                                   &(datatype->super),                   \
                                   count,                                \
                                   addr,                                 \
-                                  0,                                    \
+                                  flags,                                    \
                                   &(request)->req_base.req_convertor ); \
 } while(0)
 #else
@@ -123,7 +126,8 @@ do {                                                                    \
                                            src,                         \
                                            datatype,                    \
                                            addr,                        \
-                                           count )                      \
+                                           count,                       \
+					   flags )                      \
 do {                                                                    \
     OMPI_REQUEST_INIT(&(request)->req_base.req_ompi, false);            \
     (request)->req_base.req_ompi.req_mpi_object.comm = comm;            \
@@ -132,14 +136,15 @@ do {                                                                    \
     request->req_base.req_comm = comm;                                  \
     request->req_base.req_datatype = datatype;                          \
     OBJ_RETAIN(comm);                                                   \
-    OBJ_RETAIN(datatype);                                               \
+    OMPI_DATATYPE_RETAIN(datatype);                                     \
                                                                         \
+    MCA_PML_CM_SWITCH_CUDA_CONVERTOR_OFF(flags, datatype, count);       \
     opal_convertor_copy_and_prepare_for_recv(                           \
         ompi_mpi_local_convertor,                                       \
         &(datatype->super),                                             \
         count,                                                          \
         addr,                                                           \
-        0,                                                              \
+        flags,                                                              \
         &(request)->req_base.req_convertor );                           \
 } while(0)
 #endif
@@ -153,6 +158,7 @@ do {                                                                    \
                                           datatype,                     \
                                           addr,                         \
                                           count,                        \
+					  flags,                        \
                                           persistent)                   \
 do {                                                                    \
     OMPI_REQUEST_INIT(&(request)->req_base.req_ompi, persistent);       \
@@ -166,19 +172,20 @@ do {                                                                    \
     request->req_addr = addr;                                           \
     request->req_count = count;                                         \
     OBJ_RETAIN(comm);                                                   \
-    OBJ_RETAIN(datatype);                                               \
+    OMPI_DATATYPE_RETAIN(datatype);                                     \
                                                                         \
     if( MPI_ANY_SOURCE == src ) {                                       \
         ompi_proc = ompi_proc_local_proc;                               \
     } else {                                                            \
         ompi_proc = ompi_comm_peer_lookup( comm, src );                 \
     }                                                                   \
+    MCA_PML_CM_SWITCH_CUDA_CONVERTOR_OFF(flags, datatype, count);       \
     opal_convertor_copy_and_prepare_for_recv(                           \
                                   ompi_proc->super.proc_convertor,      \
                                   &(datatype->super),                   \
                                   count,                                \
                                   addr,                                 \
-                                  0,                                    \
+                                  flags,                                \
                                   &(request)->req_base.req_convertor ); \
  } while(0)
 #else
@@ -190,6 +197,7 @@ do {                                                                    \
                                           datatype,                     \
                                           addr,                         \
                                           count,                        \
+					  flags,                        \
                                           persistent)                   \
 do {                                                                    \
     OMPI_REQUEST_INIT(&(request)->req_base.req_ompi, persistent);       \
@@ -203,14 +211,15 @@ do {                                                                    \
     request->req_addr = addr;                                           \
     request->req_count = count;                                         \
     OBJ_RETAIN(comm);                                                   \
-    OBJ_RETAIN(datatype);                                               \
+    OMPI_DATATYPE_RETAIN(datatype);                                     \
                                                                         \
+    MCA_PML_CM_SWITCH_CUDA_CONVERTOR_OFF(flags, datatype, count);       \
     opal_convertor_copy_and_prepare_for_recv(                           \
         ompi_mpi_local_convertor,                                       \
         &(datatype->super),                                             \
         count,                                                          \
         addr,                                                           \
-        0,                                                              \
+        flags,                                                              \
         &(request)->req_base.req_convertor );                           \
  } while(0)
 #endif
@@ -349,7 +358,7 @@ do {                                                                    \
 #define MCA_PML_CM_HVY_RECV_REQUEST_RETURN(recvreq)                     \
 {                                                                       \
     OBJ_RELEASE((recvreq)->req_base.req_comm);                          \
-    OBJ_RELEASE((recvreq)->req_base.req_datatype);                      \
+    OMPI_DATATYPE_RELEASE((recvreq)->req_base.req_datatype);            \
     OMPI_REQUEST_FINI(&(recvreq)->req_base.req_ompi);                   \
     opal_convertor_cleanup( &((recvreq)->req_base.req_convertor) );     \
     opal_free_list_return ( &mca_pml_base_recv_requests,                \
@@ -362,7 +371,7 @@ do {                                                                    \
 #define MCA_PML_CM_THIN_RECV_REQUEST_RETURN(recvreq)                    \
 {                                                                       \
     OBJ_RELEASE((recvreq)->req_base.req_comm);                          \
-    OBJ_RELEASE((recvreq)->req_base.req_datatype);                      \
+    OMPI_DATATYPE_RELEASE((recvreq)->req_base.req_datatype);            \
     OMPI_REQUEST_FINI(&(recvreq)->req_base.req_ompi);                   \
     opal_convertor_cleanup( &((recvreq)->req_base.req_convertor) );     \
     opal_free_list_return ( &mca_pml_base_recv_requests,                \

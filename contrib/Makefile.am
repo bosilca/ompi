@@ -9,12 +9,14 @@
 #                         University of Stuttgart.  All rights reserved.
 # Copyright (c) 2004-2005 The Regents of the University of California.
 #                         All rights reserved.
-# Copyright (c) 2009      Cisco Systems, Inc.  All rights reserved.
+# Copyright (c) 2009-2017 Cisco Systems, Inc.  All rights reserved.
 # Copyright (c) 2010      IBM Corporation.  All rights reserved.
 # Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
 # Copyright (c) 2013-2016 Los Alamos National Security, Inc.  All rights
 #                         reserved.
 # Copyright (c) 2013      Intel Corporation.  All rights reserved.
+# Copyright (c) 2017      Amazon.com, Inc. or its affiliates.
+#                         All Rights reserved.
 # $COPYRIGHT$
 #
 # Additional copyrights may follow
@@ -35,11 +37,10 @@ EXTRA_DIST = \
         completion/mpirun.sh \
         completion/mpirun.zsh \
 	dist/make_dist_tarball \
+	dist/make-authors.pl \
 	dist/linux/openmpi.spec \
 	dist/mofed/compile_debian_mlnx_example.in \
 	dist/mofed/debian \
-	dist/macosx-pkg/buildpackage.sh \
-	dist/macosx-pkg/ReadMe.rtf \
 	platform/optimized \
 	platform/redstorm \
 	platform/cray_xt3 \

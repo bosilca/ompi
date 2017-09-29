@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2011      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2011-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2012      Los Alamos National Security, LLC. All rights reserved
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
- * Copyright (c) 2015      Intel, Inc. All rights reserved
+ * Copyright (c) 2015-2017 Intel, Inc.  All rights reserved.
  *
  * $COPYRIGHT$
  *
@@ -20,7 +20,7 @@
 #include <ctype.h>
 
 #include "opal/class/opal_list.h"
-#include "opal/mca/hwloc/hwloc.h"
+#include "opal/mca/hwloc/hwloc-internal.h"
 #include "opal/util/argv.h"
 
 #include "orte/util/show_help.h"
@@ -118,7 +118,7 @@ static int allocate(orte_job_t *jdata, opal_list_t *nodes)
         /* check for topology */
         if (use_local_topology) {
             /* use our topology */
-            topo = opal_hwloc_topology;
+            t = (orte_topology_t*)opal_pointer_array_get_item(orte_node_topologies, 0);
         } else if (NULL != files) {
             if (0 != hwloc_topology_init(&topo)) {
                 orte_show_help("help-ras-simulator.txt",
@@ -135,7 +135,7 @@ static int allocate(orte_job_t *jdata, opal_list_t *nodes)
             /* since we are loading this from an external source, we have to
              * explicitly set a flag so hwloc sets things up correctly
              */
-            if (0 != hwloc_topology_set_flags(topo, HWLOC_TOPOLOGY_FLAG_IS_THISSYSTEM)) {
+            if (0 != opal_hwloc_base_topology_set_flags(topo, HWLOC_TOPOLOGY_FLAG_IS_THISSYSTEM, false)) {
                 orte_show_help("help-ras-simulator.txt",
                                "hwloc API fail", true,
                                __FILE__, __LINE__, "hwloc_topology_set_flags");
@@ -205,13 +205,6 @@ static int allocate(orte_job_t *jdata, opal_list_t *nodes)
                 hwloc_topology_destroy(topo);
                 goto error_silent;
             }
-            if (OPAL_SUCCESS != opal_hwloc_base_filter_cpus(topo)) {
-                orte_show_help("help-ras-simulator.txt",
-                               "hwloc API fail", true,
-                               __FILE__, __LINE__, "opal_hwloc_base_filter_cpus");
-                hwloc_topology_destroy(topo);
-                goto error_silent;
-            }
             /* remove the hostname from the topology. Unfortunately, hwloc
              * decided to add the source hostname to the "topology", thus
              * rendering it unusable as a pure topological description. So
@@ -257,16 +250,17 @@ static int allocate(orte_job_t *jdata, opal_list_t *nodes)
             if (NULL == max_slot_cnt || NULL == max_slot_cnt[n]) {
                 node->slots_max = 0;
             } else {
-                obj = hwloc_get_root_obj(topo);
-                node->slots_max = opal_hwloc_base_get_npus(topo, obj);
+                obj = hwloc_get_root_obj(t->topo);
+                node->slots_max = opal_hwloc_base_get_npus(t->topo, obj);
             }
             if (NULL == slot_cnt || NULL == slot_cnt[n]) {
                 node->slots = 0;
             } else {
-                obj = hwloc_get_root_obj(topo);
-                node->slots = opal_hwloc_base_get_npus(topo, obj);
+                obj = hwloc_get_root_obj(t->topo);
+                node->slots = opal_hwloc_base_get_npus(t->topo, obj);
             }
-            node->topology = topo;
+            OBJ_RETAIN(t);
+            node->topology = t;
             opal_output_verbose(1, orte_ras_base_framework.framework_output,
                                 "Created Node <%10s> [%3d : %3d]",
                                 node->name, node->slots, node->slots_max);

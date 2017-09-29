@@ -1,8 +1,9 @@
 /*
- * Copyright (c) 2011-2014 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2011-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2016      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  *
+ * Copyright (c) 2016      Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -10,7 +11,7 @@
  * $HEADER$
  *
  * When this component is used, this file is included in the rest of
- * the OPAL/ORTE/OMPI code base via opal/mca/hwloc/hwloc.h.  As such,
+ * the OPAL/ORTE/OMPI code base via opal/mca/hwloc/hwloc-internal.h.  As such,
  * this header represents the public interface to this static component.
  */
 
@@ -19,7 +20,7 @@
 
 BEGIN_C_DECLS
 
-#include <opal/include/opal_config.h>
+#include <opal_config.h>
 #include MCA_hwloc_external_header
 
 /* If the including file requested it, also include the hwloc verbs

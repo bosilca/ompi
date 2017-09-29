@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2015 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -14,6 +14,7 @@
  *                         reserved.
  * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -33,6 +34,15 @@
 #include "ompi/op/op.h"
 #include "ompi/mca/coll/base/coll_base_functions.h"
 #include "coll_base_topo.h"
+
+int mca_coll_base_reduce_local(const void *inbuf, void *inoutbuf, int count,
+                               struct ompi_datatype_t * dtype, struct ompi_op_t * op,
+                               mca_coll_base_module_t *module)
+{
+    /* XXX -- CONST -- do not cast away const -- update ompi/op/op.h */
+    ompi_op_reduce(op, (void *)inbuf, inoutbuf, count, dtype);
+    return OMPI_SUCCESS;
+}
 
 /**
  * This is a generic implementation of the reduce protocol. It used the tree
@@ -55,7 +65,7 @@ int ompi_coll_base_reduce_generic( const void* sendbuf, void* recvbuf, int origi
     char *inbuf[2] = {NULL, NULL}, *inbuf_free[2] = {NULL, NULL};
     char *accumbuf = NULL, *accumbuf_free = NULL;
     char *local_op_buffer = NULL, *sendtmpbuf = NULL;
-    ptrdiff_t extent, size, gap, segment_increment;
+    ptrdiff_t extent, size, gap = 0, segment_increment;
     ompi_request_t **sreq = NULL, *reqs[2] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL};
     int num_segments, line, ret, segindex, i, rank;
     int recvcount, prevcount, inbi;
@@ -99,7 +109,8 @@ int ompi_coll_base_reduce_generic( const void* sendbuf, void* recvbuf, int origi
 
         /* If this is a non-commutative operation we must copy
            sendbuf to the accumbuf, in order to simplfy the loops */
-        if (!ompi_op_is_commute(op)) {
+        
+        if (!ompi_op_is_commute(op) && MPI_IN_PLACE != sendbuf) {
             ompi_datatype_copy_content_same_ddt(datatype, original_count,
                                                 (char*)accumbuf,
                                                 (char*)sendtmpbuf);
@@ -168,8 +179,8 @@ int ompi_coll_base_reduce_generic( const void* sendbuf, void* recvbuf, int origi
                    if there are no requests reqs[inbi ^1] will be
                    MPI_REQUEST_NULL. */
                 /* wait on data from last child for previous segment */
-                ret = ompi_request_wait_all( 1, &reqs[inbi ^ 1],
-                                             MPI_STATUSES_IGNORE );
+                ret = ompi_request_wait(&reqs[inbi ^ 1],
+                                        MPI_STATUSES_IGNORE );
                 if (ret != MPI_SUCCESS) { line = __LINE__; goto error_hndl;  }
                 local_op_buffer = inbuf[inbi ^ 1];
                 if( i > 0 ) {
@@ -276,7 +287,7 @@ int ompi_coll_base_reduce_generic( const void* sendbuf, void* recvbuf, int origi
 
             int creq = 0;
 
-            sreq = coll_base_comm_get_reqs(module->base_data, max_outstanding_reqs);
+            sreq = ompi_coll_base_comm_get_reqs(module->base_data, max_outstanding_reqs);
             if (NULL == sreq) { line = __LINE__; ret = -1; goto error_hndl; }
 
             /* post first group of requests */
@@ -554,7 +565,7 @@ int ompi_coll_base_reduce_intra_in_order_binary( const void *sendbuf, void *recv
     use_this_sendbuf = (void *)sendbuf;
     use_this_recvbuf = recvbuf;
     if (io_root != root) {
-        ptrdiff_t dsize, gap;
+        ptrdiff_t dsize, gap = 0;
         char *tmpbuf;
 
         dsize = opal_datatype_span(&datatype->super, count, &gap);
@@ -638,7 +649,7 @@ ompi_coll_base_reduce_intra_basic_linear(const void *sbuf, void *rbuf, int count
                                          mca_coll_base_module_t *module)
 {
     int i, rank, err, size;
-    ptrdiff_t extent, dsize, gap;
+    ptrdiff_t extent, dsize, gap = 0;
     char *free_buffer = NULL;
     char *pml_buffer = NULL;
     char *inplace_temp_free = NULL;

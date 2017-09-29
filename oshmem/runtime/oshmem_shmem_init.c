@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2013      Mellanox Technologies, Inc.
  *                         All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015      Cisco Systems, Inc.  All rights reserved.
  * $COPYRIGHT$
@@ -16,9 +16,7 @@
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif  /* HAVE_SYS_TIME_H */
-#ifdef HAVE_PTHREAD_H
 #include <pthread.h>
-#endif
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -149,35 +147,37 @@ int oshmem_shmem_init(int argc, char **argv, int requested, int *provided)
         if (!ompi_mpi_initialized && !ompi_mpi_finalized) {
             ret = ompi_mpi_init(argc, argv, requested, provided);
         }
+
+        if (OSHMEM_SUCCESS != ret) {
+            return ret;
+        }
+
         PMPI_Comm_dup(MPI_COMM_WORLD, &oshmem_comm_world);
+        ret = _shmem_init(argc, argv, requested, provided);
 
-        if (OSHMEM_SUCCESS == ret) {
-            ret = _shmem_init(argc, argv, requested, provided);
+        if (OSHMEM_SUCCESS != ret) {
+            return ret;
+        }
+        oshmem_shmem_initialized = true;
+
+        if (OSHMEM_SUCCESS != shmem_lock_init()) {
+            SHMEM_API_ERROR( "shmem_lock_init() failed");
+            return OSHMEM_ERROR;
         }
 
-        if (OSHMEM_SUCCESS == ret) {
-            oshmem_shmem_initialized = true;
+        /* this is a collective op, implies barrier */
+        MCA_MEMHEAP_CALL(get_all_mkeys());
 
-            if (OSHMEM_SUCCESS != shmem_lock_init()) {
-                SHMEM_API_ERROR( "shmem_lock_init() failed");
-                return OSHMEM_ERROR;
-            }
-
-            /* this is a collective op, implies barrier */
-            MCA_MEMHEAP_CALL(get_all_mkeys());
-
-            oshmem_shmem_preconnect_all();
+        oshmem_shmem_preconnect_all();
 #if OSHMEM_OPAL_THREAD_ENABLE
-            pthread_t thread_id;
-            int perr;
-            perr = pthread_create(&thread_id, NULL, &shmem_opal_thread, NULL);
-            if (perr != 0)
-            {
-                SHMEM_API_ERROR("cannot creat opal thread for SHMEM");
-                return OSHMEM_ERROR;
-            }
-#endif
+        pthread_t thread_id;
+        int perr;
+        perr = pthread_create(&thread_id, NULL, &shmem_opal_thread, NULL);
+        if (0 != perr) {
+            SHMEM_API_ERROR("cannot create opal thread for SHMEM");
+            return OSHMEM_ERROR;
         }
+#endif
     }
 #ifdef SIGUSR1
     signal(SIGUSR1,sighandler__SIGUSR1);

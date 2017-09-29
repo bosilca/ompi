@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2013 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -22,6 +22,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2014-2015 Intel, Inc. All rights reserved.
  * Copyright (c) 2015      Mellanox Technologies. All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -86,7 +87,7 @@ static int ompi_comm_copy_topo (ompi_communicator_t *oldcomm,
 
 /* idup with local group and info. the local group support is provided to support ompi_comm_set_nb */
 static int ompi_comm_idup_internal (ompi_communicator_t *comm, ompi_group_t *group, ompi_group_t *remote_group,
-                                    ompi_info_t *info, ompi_communicator_t **newcomm, ompi_request_t **req);
+                                    opal_info_t *info, ompi_communicator_t **newcomm, ompi_request_t **req);
 
 
 /**********************************************************************/
@@ -157,6 +158,10 @@ int ompi_comm_set_nb ( ompi_communicator_t **ncomm,
 
     /* ompi_comm_allocate */
     newcomm = OBJ_NEW(ompi_communicator_t);
+    if (NULL == newcomm) {
+        return OMPI_ERR_OUT_OF_RESOURCE;
+    }
+    newcomm->super.s_info = NULL;
     /* fill in the inscribing hyper-cube dimensions */
     newcomm->c_cube_dim = opal_cube_dim(local_size);
     newcomm->c_id_available   = MPI_UNDEFINED;
@@ -292,10 +297,10 @@ int ompi_comm_create ( ompi_communicator_t *comm, ompi_group_t *group,
             goto exit;
         }
 
-        rc = comm->c_coll.coll_allgather ( &(group->grp_my_rank),
+        rc = comm->c_coll->coll_allgather ( &(group->grp_my_rank),
                                            1, MPI_INT, allranks,
                                            1, MPI_INT, comm,
-                                           comm->c_coll.coll_allgather_module);
+                                           comm->c_coll->coll_allgather_module);
         if ( OMPI_SUCCESS != rc ) {
             goto exit;
         }
@@ -349,11 +354,6 @@ int ompi_comm_create ( ompi_communicator_t *comm, ompi_group_t *group,
                          remote_group);            /* remote group */
 
     if ( OMPI_SUCCESS != rc ) {
-        goto exit;
-    }
-
-    if ( NULL == newcomm ) {
-        rc =  MPI_ERR_INTERN;
         goto exit;
     }
 
@@ -434,7 +434,7 @@ int ompi_comm_split( ompi_communicator_t* comm, int color, int key,
     if ( inter ) {
         allgatherfct = (ompi_comm_allgatherfct *)ompi_comm_allgather_emulate_intra;
     } else {
-        allgatherfct = (ompi_comm_allgatherfct *)comm->c_coll.coll_allgather;
+        allgatherfct = (ompi_comm_allgatherfct *)comm->c_coll->coll_allgather;
     }
 
     results  = (int*) malloc ( 2 * size * sizeof(int));
@@ -442,7 +442,7 @@ int ompi_comm_split( ompi_communicator_t* comm, int color, int key,
         return OMPI_ERR_OUT_OF_RESOURCE;
     }
 
-    rc = allgatherfct( myinfo, 2, MPI_INT, results, 2, MPI_INT, comm, comm->c_coll.coll_allgather_module );
+    rc = allgatherfct( myinfo, 2, MPI_INT, results, 2, MPI_INT, comm, comm->c_coll->coll_allgather_module );
     if ( OMPI_SUCCESS != rc ) {
         goto exit;
     }
@@ -503,9 +503,9 @@ int ompi_comm_split( ompi_communicator_t* comm, int color, int key,
         }
 
         /* this is an allgather on an inter-communicator */
-        rc = comm->c_coll.coll_allgather( myinfo, 2, MPI_INT, rresults, 2,
+        rc = comm->c_coll->coll_allgather( myinfo, 2, MPI_INT, rresults, 2,
                                           MPI_INT, comm,
-                                          comm->c_coll.coll_allgather_module);
+                                          comm->c_coll->coll_allgather_module);
         if ( OMPI_SUCCESS != rc ) {
             goto exit;
         }
@@ -578,10 +578,6 @@ int ompi_comm_split( ompi_communicator_t* comm, int color, int key,
                          local_group,       /* local group */
                          remote_group);     /* remote group */
 
-    if ( NULL == newcomp ) {
-        rc =  MPI_ERR_INTERN;
-        goto exit;
-    }
     if ( OMPI_SUCCESS != rc  ) {
         goto exit;
     }
@@ -767,8 +763,8 @@ static int ompi_comm_split_verify (ompi_communicator_t *comm, int split_type, in
     results[rank * 2] = split_type;
     results[rank * 2 + 1] = key;
 
-    rc = comm->c_coll.coll_allgather (MPI_IN_PLACE, 2, MPI_INT, results, 2, MPI_INT, comm,
-                                      comm->c_coll.coll_allgather_module);
+    rc = comm->c_coll->coll_allgather (MPI_IN_PLACE, 2, MPI_INT, results, 2, MPI_INT, comm,
+                                      comm->c_coll->coll_allgather_module);
     if (OMPI_SUCCESS != rc) {
         free (results);
         return rc;
@@ -787,7 +783,7 @@ static int ompi_comm_split_verify (ompi_communicator_t *comm, int split_type, in
 }
 
 int ompi_comm_split_type (ompi_communicator_t *comm, int split_type, int key,
-                          ompi_info_t *info, ompi_communicator_t **newcomm)
+                          opal_info_t *info, ompi_communicator_t **newcomm)
 {
     bool need_split = false, no_reorder = false, no_undefined = false;
     ompi_communicator_t *newcomp = MPI_COMM_NULL;
@@ -810,8 +806,8 @@ int ompi_comm_split_type (ompi_communicator_t *comm, int split_type, int key,
     tmp[2] = key;
     tmp[3] = -key;
 
-    rc = comm->c_coll.coll_allreduce (MPI_IN_PLACE, &tmp, 4, MPI_INT, MPI_MAX, comm,
-                                      comm->c_coll.coll_allreduce_module);
+    rc = comm->c_coll->coll_allreduce (MPI_IN_PLACE, &tmp, 4, MPI_INT, MPI_MAX, comm,
+                                      comm->c_coll->coll_allreduce_module);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
         return rc;
     }
@@ -822,16 +818,16 @@ int ompi_comm_split_type (ompi_communicator_t *comm, int split_type, int key,
         /* at least one rank supplied a different split type check if our split_type is ok */
         ok = (MPI_UNDEFINED == split_type) || global_split_type == split_type;
 
-        rc = comm->c_coll.coll_allreduce (MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, comm,
-                                          comm->c_coll.coll_allgather_module);
+        rc = comm->c_coll->coll_allreduce (MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, comm,
+                                          comm->c_coll->coll_allreduce_module);
         if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
             return rc;
         }
 
         if (inter) {
             /* need an extra allreduce to ensure that all ranks have the same result */
-            rc = comm->c_coll.coll_allreduce (MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, comm,
-                                              comm->c_coll.coll_allgather_module);
+            rc = comm->c_coll->coll_allreduce (MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, comm,
+                                              comm->c_coll->coll_allreduce_module);
             if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
                 return rc;
             }
@@ -917,6 +913,12 @@ int ompi_comm_split_type (ompi_communicator_t *comm, int split_type, int key,
             break;
         }
 
+        // Copy info if there is one.
+        newcomp->super.s_info = OBJ_NEW(opal_info_t);
+        if (info) {
+            opal_info_dup(info, &(newcomp->super.s_info));
+        }
+
         /* Activate the communicator and init coll-component */
         rc = ompi_comm_activate (&newcomp, comm, NULL, NULL, NULL, false, mode);
         if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
@@ -972,7 +974,7 @@ int ompi_comm_dup ( ompi_communicator_t * comm, ompi_communicator_t **newcomm )
 /**********************************************************************/
 /**********************************************************************/
 /**********************************************************************/
-int ompi_comm_dup_with_info ( ompi_communicator_t * comm, ompi_info_t *info, ompi_communicator_t **newcomm )
+int ompi_comm_dup_with_info ( ompi_communicator_t * comm, opal_info_t *info, ompi_communicator_t **newcomm )
 {
     ompi_communicator_t *newcomp = NULL;
     ompi_group_t *remote_group = NULL;
@@ -996,11 +998,7 @@ int ompi_comm_dup_with_info ( ompi_communicator_t * comm, ompi_info_t *info, omp
                           true,                                   /* copy the topo */
                           comm->c_local_group,                    /* local group */
                           remote_group );                         /* remote group */
-    if ( NULL == newcomp ) {
-        rc =  MPI_ERR_INTERN;
-        return rc;
-    }
-    if ( MPI_SUCCESS != rc) {
+    if ( OMPI_SUCCESS != rc) {
         return rc;
     }
 
@@ -1013,6 +1011,12 @@ int ompi_comm_dup_with_info ( ompi_communicator_t * comm, ompi_info_t *info, omp
     /* Set name for debugging purposes */
     snprintf(newcomp->c_name, MPI_MAX_OBJECT_NAME, "MPI COMMUNICATOR %d DUP FROM %d",
              newcomp->c_contextid, comm->c_contextid );
+
+    // Copy info if there is one.
+    newcomp->super.s_info = OBJ_NEW(opal_info_t);
+    if (info) {
+        opal_info_dup(info, &(newcomp->super.s_info));
+    }
 
     /* activate communicator and init coll-module */
     rc = ompi_comm_activate (&newcomp, comm, NULL, NULL, NULL, false, mode);
@@ -1042,14 +1046,14 @@ int ompi_comm_idup (ompi_communicator_t *comm, ompi_communicator_t **newcomm, om
     return ompi_comm_idup_with_info (comm, NULL, newcomm, req);
 }
 
-int ompi_comm_idup_with_info (ompi_communicator_t *comm, ompi_info_t *info, ompi_communicator_t **newcomm, ompi_request_t **req)
+int ompi_comm_idup_with_info (ompi_communicator_t *comm, opal_info_t *info, ompi_communicator_t **newcomm, ompi_request_t **req)
 {
     return ompi_comm_idup_internal (comm, comm->c_local_group, comm->c_remote_group, info, newcomm, req);
 }
 
 /* NTH: we need a way to idup with a smaller local group so this function takes a local group */
 static int ompi_comm_idup_internal (ompi_communicator_t *comm, ompi_group_t *group, ompi_group_t *remote_group,
-                                    ompi_info_t *info, ompi_communicator_t **newcomm, ompi_request_t **req)
+                                    opal_info_t *info, ompi_communicator_t **newcomm, ompi_request_t **req)
 {
     ompi_comm_idup_with_info_context_t *context;
     ompi_comm_request_t *request;
@@ -1089,9 +1093,18 @@ static int ompi_comm_idup_internal (ompi_communicator_t *comm, ompi_group_t *gro
                             group,                                  /* local group */
                             remote_group,                           /* remote group */
                             subreq);                                /* new subrequest */
-    if (NULL == context->newcomp) {
+    if (OMPI_SUCCESS != rc) {
         ompi_comm_request_return (request);
         return rc;
+    }
+
+    // Copy info if there is one.
+    {
+        ompi_communicator_t *newcomp = context->newcomp;
+        newcomp->super.s_info = OBJ_NEW(opal_info_t);
+        if (info) {
+            opal_info_dup(info, &(newcomp->super.s_info));
+        }
     }
 
     ompi_comm_request_schedule_append (request, ompi_comm_idup_getcid, subreq, subreq[0] ? 1 : 0);
@@ -1187,11 +1200,7 @@ int ompi_comm_create_group (ompi_communicator_t *comm, ompi_group_t *group, int 
                           true,                                   /* copy the topo */
                           group,                                  /* local group */
                           NULL);                                  /* remote group */
-    if ( NULL == newcomp ) {
-        rc =  MPI_ERR_INTERN;
-        return rc;
-    }
-    if ( MPI_SUCCESS != rc) {
+    if ( OMPI_SUCCESS != rc) {
         return rc;
     }
 
@@ -1471,6 +1480,10 @@ int ompi_comm_free( ompi_communicator_t **comm )
         ompi_mpi_comm_parent = &ompi_mpi_comm_null.comm;
     }
 
+    if (NULL != ((*comm)->super.s_info)) {
+        OBJ_RELEASE((*comm)->super.s_info);
+    }
+
     /* Release the communicator */
     if ( OMPI_COMM_IS_DYNAMIC (*comm) ) {
         ompi_comm_num_dyncomm --;
@@ -1575,9 +1588,9 @@ ompi_proc_t **ompi_comm_get_rprocs ( ompi_communicator_t *local_comm,
     }
 
     /* broadcast buffer length to all processes in local_comm */
-    rc = local_comm->c_coll.coll_bcast( &rlen, 1, MPI_INT,
+    rc = local_comm->c_coll->coll_bcast( &rlen, 1, MPI_INT,
                                         local_leader, local_comm,
-                                        local_comm->c_coll.coll_bcast_module );
+                                        local_comm->c_coll->coll_bcast_module );
     if ( OMPI_SUCCESS != rc ) {
         goto err_exit;
     }
@@ -1607,9 +1620,9 @@ ompi_proc_t **ompi_comm_get_rprocs ( ompi_communicator_t *local_comm,
     }
 
     /* broadcast name list to all proceses in local_comm */
-    rc = local_comm->c_coll.coll_bcast( recvbuf, rlen, MPI_BYTE,
+    rc = local_comm->c_coll->coll_bcast( recvbuf, rlen, MPI_BYTE,
                                         local_leader, local_comm,
-                                        local_comm->c_coll.coll_bcast_module);
+                                        local_comm->c_coll->coll_bcast_module);
     if ( OMPI_SUCCESS != rc ) {
         goto err_exit;
     }
@@ -1741,10 +1754,10 @@ int ompi_comm_determine_first ( ompi_communicator_t *intercomm, int high )
         scount = 1;
     }
 
-    rc = intercomm->c_coll.coll_allgatherv(&high, scount, MPI_INT,
+    rc = intercomm->c_coll->coll_allgatherv(&high, scount, MPI_INT,
                                            &rhigh, rcounts, rdisps,
                                            MPI_INT, intercomm,
-                                           intercomm->c_coll.coll_allgatherv_module);
+                                           intercomm->c_coll->coll_allgatherv_module);
     if ( NULL != rdisps ) {
         free ( rdisps );
     }
@@ -1768,8 +1781,8 @@ int ompi_comm_determine_first ( ompi_communicator_t *intercomm, int high )
         theirproc = ompi_group_peer_lookup(intercomm->c_remote_group,0);
 
         mask = OMPI_RTE_CMP_JOBID | OMPI_RTE_CMP_VPID;
-        rc = ompi_rte_compare_name_fields(mask, (const orte_process_name_t*)&(ourproc->super.proc_name),
-                                                (const orte_process_name_t*)&(theirproc->super.proc_name));
+        rc = ompi_rte_compare_name_fields(mask, (const ompi_process_name_t*)&(ourproc->super.proc_name),
+                                                (const ompi_process_name_t*)&(theirproc->super.proc_name));
         if ( 0 > rc ) {
             flag = true;
         }

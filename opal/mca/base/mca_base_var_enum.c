@@ -11,8 +11,11 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2008-2013 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2012-2015 Los Alamos National Security, LLC. All rights
+ * Copyright (c) 2012-2017 Los Alamos National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2017      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -23,6 +26,7 @@
 #include "opal_config.h"
 
 #include "opal/mca/base/mca_base_var_enum.h"
+#include "opal/mca/base/mca_base_vari.h"
 #include "opal/mca/base/base.h"
 #include "opal/util/argv.h"
 
@@ -37,7 +41,7 @@ OBJ_CLASS_INSTANCE(mca_base_var_enum_t, opal_object_t, mca_base_var_enum_constru
 
 static void mca_base_var_enum_flag_constructor (mca_base_var_enum_flag_t *enumerator);
 static void mca_base_var_enum_flag_destructor (mca_base_var_enum_flag_t *enumerator);
-OBJ_CLASS_INSTANCE(mca_base_var_enum_flag_t, opal_object_t, mca_base_var_enum_flag_constructor,
+static OBJ_CLASS_INSTANCE(mca_base_var_enum_flag_t, opal_object_t, mca_base_var_enum_flag_constructor,
                    mca_base_var_enum_flag_destructor);
 
 static int enum_dump (mca_base_var_enum_t *self, char **out);
@@ -67,7 +71,7 @@ static int mca_base_var_enum_bool_vfs (mca_base_var_enum_t *self, const char *st
                                        int *value)
 {
     char *tmp;
-    int v;
+    long v;
 
     /* skip whitespace */
     string_value += strspn (string_value, " \t\n\v\f\r");
@@ -75,10 +79,12 @@ static int mca_base_var_enum_bool_vfs (mca_base_var_enum_t *self, const char *st
     v = strtol (string_value, &tmp, 10);
     if (*tmp != '\0') {
         if (0 == strcmp (string_value, "true") || 0 == strcmp (string_value, "t") ||
-            0 == strcmp (string_value, "enabled") || 0 == strcmp (string_value, "yes")) {
+            0 == strcmp (string_value, "enabled") || 0 == strcmp (string_value, "yes") ||
+            0 == strcmp (string_value, "y")) {
             v = 1;
         } else if (0 == strcmp (string_value, "false") || 0 == strcmp (string_value, "f") ||
-                   0 == strcmp (string_value, "disabled") || 0 == strcmp (string_value, "no")) {
+                   0 == strcmp (string_value, "disabled") || 0 == strcmp (string_value, "no") ||
+                   0 == strcmp (string_value, "n")) {
             v = 0;
         } else {
             return OPAL_ERR_VALUE_OUT_OF_BOUNDS;
@@ -102,7 +108,7 @@ static int mca_base_var_enum_bool_sfv (mca_base_var_enum_t *self, const int valu
 
 static int mca_base_var_enum_bool_dump (mca_base_var_enum_t *self, char **out)
 {
-    *out = strdup ("0: f|false|disabled|no, 1: t|true|enabled|yes");
+    *out = strdup ("0: f|false|disabled|no|n, 1: t|true|enabled|yes|y");
     return *out ? OPAL_SUCCESS : OPAL_ERR_OUT_OF_RESOURCE;
 }
 
@@ -115,6 +121,98 @@ mca_base_var_enum_t mca_base_var_enum_bool = {
     .value_from_string = mca_base_var_enum_bool_vfs,
     .string_from_value = mca_base_var_enum_bool_sfv,
     .dump      = mca_base_var_enum_bool_dump
+};
+
+static int mca_base_var_enum_auto_bool_get_count (mca_base_var_enum_t *enumerator, int *count)
+{
+    *count = 3;
+    return OPAL_SUCCESS;
+}
+
+static int mca_base_var_enum_auto_bool_get_value (mca_base_var_enum_t *self, int index,
+                                                  int *value, const char **string_value)
+{
+    const int values[3] = {0, 1, -1};
+    const char *strings[3] = {"false", "true", "auto"};
+
+    if (2 < index) {
+        return OPAL_ERR_VALUE_OUT_OF_BOUNDS;
+    }
+
+    *value = values[index];
+    *string_value = strings[index];
+
+    return OPAL_SUCCESS;
+}
+
+static int mca_base_var_enum_auto_bool_vfs (mca_base_var_enum_t *self, const char *string_value,
+                                            int *value)
+{
+    char *tmp;
+    long v;
+
+    /* skip whitespace */
+    string_value += strspn (string_value, " \t\n\v\f\r");
+
+    v = strtol (string_value, &tmp, 10);
+    if (*tmp != '\0') {
+        if (0 == strcasecmp (string_value, "true") || 0 == strcasecmp (string_value, "t") ||
+            0 == strcasecmp (string_value, "enabled") || 0 == strcasecmp (string_value, "yes") ||
+            0 == strcasecmp (string_value, "y")) {
+            v = 1;
+        } else if (0 == strcasecmp (string_value, "false") || 0 == strcasecmp (string_value, "f") ||
+                   0 == strcasecmp (string_value, "disabled") || 0 == strcasecmp (string_value, "no") ||
+                   0 == strcasecmp (string_value, "n")) {
+            v = 0;
+        } else if (0 == strcasecmp (string_value, "auto")) {
+            v = -1;
+        } else {
+            return OPAL_ERR_VALUE_OUT_OF_BOUNDS;
+        }
+    }
+
+    if (v > 1) {
+        *value = 1;
+    } else if (v < -1) {
+        *value = -1;
+    } else {
+        *value = (int) v;
+    }
+
+    return OPAL_SUCCESS;
+}
+
+static int mca_base_var_enum_auto_bool_sfv (mca_base_var_enum_t *self, const int value,
+                                            char **string_value)
+{
+    if (string_value) {
+        if (value < 0) {
+            *string_value = strdup ("auto");
+        } else if (value > 0) {
+            *string_value = strdup ("true");
+        } else {
+            *string_value = strdup ("false");
+        }
+    }
+
+    return OPAL_SUCCESS;
+}
+
+static int mca_base_var_enum_auto_bool_dump (mca_base_var_enum_t *self, char **out)
+{
+    *out = strdup ("-1: auto, 0: f|false|disabled|no|n, 1: t|true|enabled|yes|y");
+    return *out ? OPAL_SUCCESS : OPAL_ERR_OUT_OF_RESOURCE;
+}
+
+mca_base_var_enum_t mca_base_var_enum_auto_bool = {
+    .super     = OPAL_OBJ_STATIC_INIT(opal_object_t),
+    .enum_is_static = true,
+    .enum_name = "auto_boolean",
+    .get_count = mca_base_var_enum_auto_bool_get_count,
+    .get_value = mca_base_var_enum_auto_bool_get_value,
+    .value_from_string = mca_base_var_enum_auto_bool_vfs,
+    .string_from_value = mca_base_var_enum_auto_bool_sfv,
+    .dump      = mca_base_var_enum_auto_bool_dump
 };
 
 /* verbosity enumerator */
@@ -171,7 +269,9 @@ static int mca_base_var_enum_verbose_sfv (mca_base_var_enum_t *self, const int v
 
     for (int i = 0 ; verbose_values[i].string ; ++i) {
         if (verbose_values[i].value == value) {
-            *string_value = strdup (verbose_values[i].string);
+            if (string_value) {
+                *string_value = strdup (verbose_values[i].string);
+            }
             return OPAL_SUCCESS;
         }
     }
@@ -615,6 +715,7 @@ static void mca_base_var_enum_flag_constructor (mca_base_var_enum_flag_t *enumer
     enumerator->super.string_from_value = enum_string_from_value_flag;
     enumerator->super.dump = enum_dump_flag;
     enumerator->super.enum_is_static = false;
+    enumerator->super.enum_name = NULL;
 }
 
 static void mca_base_var_enum_flag_destructor (mca_base_var_enum_flag_t *enumerator)
@@ -626,4 +727,32 @@ static void mca_base_var_enum_flag_destructor (mca_base_var_enum_flag_t *enumera
         }
         free (enumerator->enum_flags);
     }
+    if (NULL != enumerator->super.enum_name) {
+        free (enumerator->super.enum_name);
+    }
+}
+
+int mca_base_var_enum_register(const char *project_name, const char *framework_name,
+                               const char *component_name, const char *enum_name,
+                               void *storage)
+{
+    int group_index;
+
+    /* Developer error. Storage can not be NULL */
+    assert (NULL != storage);
+
+    /* Create a new parameter entry */
+    group_index = mca_base_var_group_register (project_name, framework_name, component_name,
+                                               NULL);
+    if (-1 > group_index) {
+        return group_index;
+    }
+
+    if (0 <= group_index) {
+        mca_base_var_group_add_enum (group_index, storage);
+    }
+
+    return OPAL_SUCCESS;
+
+    /* All done */
 }

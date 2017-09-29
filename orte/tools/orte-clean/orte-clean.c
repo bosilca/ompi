@@ -16,7 +16,8 @@
  * Copyright (c) 2011-2013 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
- * Copyright (c) 2015      Intel, Inc. All rights reserved.
+ * Copyright (c) 2015-2017 Intel, Inc. All rights reserved.
+ * Copyright (c) 2017      UT-Battelle, LLC. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -127,6 +128,7 @@ main(int argc, char *argv[])
 #if OPAL_ENABLE_FT_CR == 1
     char *tmp_env_var;
 #endif
+    char *legacy;
 
     /* This is needed so we can print the help message */
     if (ORTE_SUCCESS != (ret = opal_init_util(&argc, &argv))) {
@@ -172,6 +174,18 @@ main(int argc, char *argv[])
                 orte_process_info.top_session_dir);
     }
     opal_os_dirpath_destroy(orte_process_info.top_session_dir, true, NULL);
+
+    /* also get rid of any legacy session directories */
+    asprintf(&legacy, "%s/openmpi-sessions-%d@%s_0",
+             orte_process_info.tmpdir_base,
+             (int)geteuid(), orte_process_info.nodename);
+    opal_os_dirpath_destroy(legacy, true, NULL);
+    free(legacy);
+
+    /* and finally get rid of any lingering pmix-related artifacts */
+    asprintf(&legacy, "rm -rf %s/pmix*", orte_process_info.tmpdir_base);
+    system(legacy);
+    free(legacy);
 
     /* now kill any lingering procs, if we can */
     kill_procs();
@@ -275,12 +289,10 @@ void kill_procs(void) {
      * This is the command that is used to get the information about
      * all the processes that are running.  The output looks like the
      * following:
-     * COMMAND    PID     USER
-     * tcsh     12556    rolfv
-     * ps       14424    rolfv
+     * COMMAND    PID     UID
+     * tcsh     12556    1000
+     * ps       14424    1000
      * etc.
-     * Currently, we do not make use of the USER field, but we may later
-     * on so we grab it also.
      */
 
     /*
@@ -301,7 +313,7 @@ void kill_procs(void) {
      */
     ortedpid = getppid();
 
-    /* get the name of the user */
+    /* get the userid of the user */
     uid = getuid();
     asprintf(&this_user, "%d", uid);
 
@@ -322,8 +334,7 @@ void kill_procs(void) {
     psfile = popen(command, "r");
     /*
      * Read the first line of the output.  We just throw it away
-     * as it is the header consisting of the words COMMAND, PID and
-     * USER.
+     * as it is the header consisting of the words COMMAND, PID and UID.
      */
     if (NULL == (inputline = orte_getline(psfile))) {
         free(this_user);
@@ -347,7 +358,7 @@ void kill_procs(void) {
         /* If the user is not us, and the user is not root, then skip
          * further checking.  If the user is root, then continue on as
          * we want root to kill off everybody. */
-        if ((0 != strcmp(user, this_user)) && (0 != strcmp("root", this_user))) {
+        if ((0 != strcmp(user, this_user)) && (0 != strcmp("0", this_user))) {
             /* not us */
             free(inputline);
             continue;
@@ -371,11 +382,13 @@ void kill_procs(void) {
          * proc is sometimes reported that way
          */
         if (0 == strncmp("orted", procname, strlen("orted")) ||
-            0 == strncmp("(orted)", procname, strlen("(orted)"))) {
+            0 == strncmp("(orted)", procname, strlen("(orted)")) ||
+            0 == strncmp("orte-dvm", procname, strlen("orte-dvm")) ||
+            0 == strncmp("(orte-dvm)", procname, strlen("(orte-dvm)"))) {
             if (procpid != ortedpid) {
                 if (orte_clean_globals.verbose) {
                     fprintf(stderr, "orte-clean: found potential rogue orted process"
-                            " (pid=%d,user=%s), sending SIGKILL...\n",
+                            " (pid=%d,uid=%s), sending SIGKILL...\n",
                             procpid, user);
                 }
                 /*
@@ -397,7 +410,7 @@ void kill_procs(void) {
             if (procpid != ortedpid) {
                 if (orte_clean_globals.verbose) {
                     fprintf(stderr, "orte-clean: found potential rogue orterun process"
-                            " (pid=%d,user=%s), sending SIGKILL...\n",
+                            " (pid=%d,uid=%s), sending SIGKILL...\n",
                             procpid, user);
 
                 }
@@ -415,7 +428,7 @@ void kill_procs(void) {
             }
         }
         free(inputline);
-	free(procname);
+        free(procname);
     }
     free(this_user);
     pclose(psfile);

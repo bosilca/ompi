@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2007 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2012 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2008 High Performance Computing Center Stuttgart,
@@ -11,10 +11,11 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2007      Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2012-2013 Los Alamos National Security, LLC.  All rights
+ * Copyright (c) 2012-2017 Los Alamos National Security, LLC.  All rights
  *                         reserved.
  * Copyright (c) 2014-2015 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -31,7 +32,8 @@
 #include "ompi/errhandler/errhandler.h"
 #include "ompi/datatype/ompi_datatype.h"
 #include "ompi/memchecker.h"
-#include "ompi/communicator/comm_helpers.h"
+#include "ompi/mca/topo/topo.h"
+#include "ompi/mca/topo/base/base.h"
 
 #if OMPI_BUILD_MPI_PROFILING
 #if OPAL_HAVE_WEAK_SYMBOLS
@@ -49,7 +51,7 @@ int MPI_Neighbor_alltoallw(const void *sendbuf, const int sendcounts[], const MP
                            const MPI_Datatype recvtypes[], MPI_Comm comm)
 {
     int i, err;
-    int indegree, outdegree, weighted;
+    int indegree, outdegree;
 
     MEMCHECKER(
         ptrdiff_t recv_ext;
@@ -57,7 +59,7 @@ int MPI_Neighbor_alltoallw(const void *sendbuf, const int sendcounts[], const MP
 
         memchecker_comm(comm);
 
-        err = ompi_comm_neighbors_count(comm, &indegree, &outdegree, &weighted);
+        err = mca_topo_base_neighbor_count (comm, &indegree, &outdegree);
         if (MPI_SUCCESS == err) {
             if (MPI_IN_PLACE != sendbuf) {
                 for ( i = 0; i < outdegree; i++ ) {
@@ -98,7 +100,7 @@ int MPI_Neighbor_alltoallw(const void *sendbuf, const int sendcounts[], const MP
             return OMPI_ERRHANDLER_INVOKE(comm, MPI_ERR_ARG, FUNC_NAME);
         }
 
-        err = ompi_comm_neighbors_count(comm, &indegree, &outdegree, &weighted);
+        err = mca_topo_base_neighbor_count (comm, &indegree, &outdegree);
         OMPI_ERRHANDLER_CHECK(err, comm, err, FUNC_NAME);
         for (i = 0; i < outdegree; ++i) {
             OMPI_CHECK_DATATYPE_FOR_SEND(err, sendtypes[i], sendcounts[i]);
@@ -108,14 +110,36 @@ int MPI_Neighbor_alltoallw(const void *sendbuf, const int sendcounts[], const MP
             OMPI_CHECK_DATATYPE_FOR_RECV(err, recvtypes[i], recvcounts[i]);
             OMPI_ERRHANDLER_CHECK(err, comm, err, FUNC_NAME);
         }
+
+        if( OMPI_COMM_IS_CART(comm) ) {
+            const mca_topo_base_comm_cart_2_2_0_t *cart = comm->c_topo->mtc.cart;
+            if( 0 > cart->ndims ) {
+                return OMPI_ERRHANDLER_INVOKE(comm, MPI_ERR_ARG, FUNC_NAME);
+            }
+        }
+        else if( OMPI_COMM_IS_GRAPH(comm) ) {
+            int degree;
+            mca_topo_base_graph_neighbors_count(comm, ompi_comm_rank(comm), &degree);
+            if( 0 > degree ) {
+                return OMPI_ERRHANDLER_INVOKE(comm, MPI_ERR_ARG, FUNC_NAME);
+            }
+        }
+        else if( OMPI_COMM_IS_DIST_GRAPH(comm) ) {
+            const mca_topo_base_comm_dist_graph_2_2_0_t *dist_graph = comm->c_topo->mtc.dist_graph;
+            indegree  = dist_graph->indegree;
+            outdegree = dist_graph->outdegree;
+            if( indegree <  0 || outdegree <  0 ) {
+                return OMPI_ERRHANDLER_INVOKE(comm, MPI_ERR_ARG, FUNC_NAME);
+            }
+        }
     }
 
     OPAL_CR_ENTER_LIBRARY();
 
     /* Invoke the coll component to perform the back-end operation */
-    err = comm->c_coll.coll_neighbor_alltoallw(sendbuf, sendcounts, sdispls, sendtypes,
+    err = comm->c_coll->coll_neighbor_alltoallw(sendbuf, sendcounts, sdispls, sendtypes,
                                                recvbuf, recvcounts, rdispls, recvtypes,
-                                               comm, comm->c_coll.coll_neighbor_alltoallw_module);
+                                               comm, comm->c_coll->coll_neighbor_alltoallw_module);
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);
 }
 

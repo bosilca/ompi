@@ -12,7 +12,7 @@
  * Copyright (c) 2006      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2007-2012 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2014      Intel Corporation.  All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -63,6 +63,7 @@
 #include "opal/util/basename.h"
 
 #include "orte/util/name_fns.h"
+#include "orte/util/threads.h"
 #include "orte/runtime/orte_globals.h"
 #include "orte/runtime/orte_wait.h"
 #include "orte/mca/errmgr/errmgr.h"
@@ -171,7 +172,6 @@ static void launch_daemons(int fd, short args, void *cbdata)
     char **env = NULL;
     char *var;
     char **argv = NULL;
-    char **nodeargv;
     int argc = 0;
     int rc;
     orte_std_cntr_t i;
@@ -180,12 +180,13 @@ static void launch_daemons(int fd, short args, void *cbdata)
     tm_task_id *tm_task_ids = NULL;
     bool failed_launch = true;
     mode_t current_umask;
-    char *nodelist;
     char* vpid_string;
     orte_job_t *daemons, *jdata;
     orte_state_caddy_t *state = (orte_state_caddy_t*)cbdata;
     int32_t launchid, *ldptr;
     char *prefix_dir = NULL;
+
+    ORTE_ACQUIRE_OBJECT(state);
 
     jdata = state->jdata;
 
@@ -260,29 +261,9 @@ static void launch_daemons(int fd, short args, void *cbdata)
     /* add the daemon command (as specified by user) */
     orte_plm_base_setup_orted_cmd(&argc, &argv);
 
-    /* create a list of nodes in this launch */
-    nodeargv = NULL;
-    for (i = 0; i < map->nodes->size; i++) {
-        if (NULL == (node = (orte_node_t*)opal_pointer_array_get_item(map->nodes, i))) {
-            continue;
-        }
-
-        /* if this daemon already exists, don't launch it! */
-        if (ORTE_FLAG_TEST(node, ORTE_NODE_FLAG_DAEMON_LAUNCHED)) {
-            continue;
-        }
-
-        /* add to list */
-        opal_argv_append_nosize(&nodeargv, node->name);
-    }
-    nodelist = opal_argv_join(nodeargv, ',');
-    opal_argv_free(nodeargv);
-
     /* Add basic orted command line options */
     orte_plm_base_orted_append_basic_args(&argc, &argv, "tm",
-                                          &proc_vpid_index,
-                                          nodelist);
-    free(nodelist);
+                                          &proc_vpid_index);
 
     if (0 < opal_output_get_verbosity(orte_plm_base_framework.framework_output)) {
         param = opal_argv_join(argv, ' ');
@@ -425,7 +406,7 @@ static void launch_daemons(int fd, short args, void *cbdata)
                          "%s plm:tm:launch: finished spawning orteds",
                          ORTE_NAME_PRINT(ORTE_PROC_MY_NAME)));
 
- cleanup:
+  cleanup:
     /* cleanup */
     OBJ_RELEASE(state);
 
@@ -443,6 +424,8 @@ static void poll_spawns(int fd, short args, void *cbdata)
     int local_err;
     tm_event_t event;
 
+    ORTE_ACQUIRE_OBJECT(state);
+
     /* TM poll for all the spawns */
     for (i = 0; i < launched; ++i) {
         rc = tm_poll(TM_NULL_EVENT, &event, 1, &local_err);
@@ -457,7 +440,7 @@ static void poll_spawns(int fd, short args, void *cbdata)
     }
     failed_launch = false;
 
- cleanup:
+  cleanup:
     /* cleanup */
     OBJ_RELEASE(state);
 

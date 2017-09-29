@@ -1,10 +1,14 @@
 /* -*- Mode: C; c-basic-offset:4 ; indent-tabs-mode:nil -*- */
 /*
- * Copyright (c) 2011-2013 Sandia National Laboratories.  All rights reserved.
+ * Copyright (c) 2011-2017 Sandia National Laboratories.  All rights reserved.
  * Copyright (c) 2015      Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      The University of Tennessee and The University
+ *                         of Tennessee Research Foundation.  All rights
+ *                         reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -27,10 +31,10 @@ static int component_register(void);
 static int component_init(bool enable_progress_threads, bool enable_mpi_threads);
 static int component_finalize(void);
 static int component_query(struct ompi_win_t *win, void **base, size_t size, int disp_unit,
-                           struct ompi_communicator_t *comm, struct ompi_info_t *info,
+                           struct ompi_communicator_t *comm, struct opal_info_t *info,
                            int flavor);
 static int component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit,
-                            struct ompi_communicator_t *comm, struct ompi_info_t *info,
+                            struct ompi_communicator_t *comm, struct opal_info_t *info,
                             int flavor, int *model);
 
 
@@ -105,14 +109,14 @@ ompi_osc_portals4_module_t ompi_osc_portals4_module_template = {
    looks in the info structure passed by the user, then through mca
    parameters. */
 static bool
-check_config_value_bool(char *key, ompi_info_t *info)
+check_config_value_bool(char *key, opal_info_t *info)
 {
     char *value_string;
     int value_len, ret, flag, param;
     const bool *flag_value;
     bool result;
 
-    ret = ompi_info_get_valuelen(info, key, &value_len, &flag);
+    ret = opal_info_get_valuelen(info, key, &value_len, &flag);
     if (OMPI_SUCCESS != ret) goto info_not_found;
     if (flag == 0) goto info_not_found;
     value_len++;
@@ -120,13 +124,13 @@ check_config_value_bool(char *key, ompi_info_t *info)
     value_string = (char*)malloc(sizeof(char) * value_len + 1); /* Should malloc 1 char for NUL-termination */
     if (NULL == value_string) goto info_not_found;
 
-    ret = ompi_info_get(info, key, value_len, value_string, &flag);
+    ret = opal_info_get(info, key, value_len, value_string, &flag);
     if (OMPI_SUCCESS != ret) {
         free(value_string);
         goto info_not_found;
     }
     assert(flag != 0);
-    ret = ompi_info_value_to_bool(value_string, &result);
+    ret = opal_info_value_to_bool(value_string, &result);
     free(value_string);
     if (OMPI_SUCCESS != ret) goto info_not_found;
     return result;
@@ -143,14 +147,14 @@ check_config_value_bool(char *key, ompi_info_t *info)
 
 
 static bool
-check_config_value_equal(char *key, ompi_info_t *info, char *value)
+check_config_value_equal(char *key, opal_info_t *info, char *value)
 {
     char *value_string;
     int value_len, ret, flag, param;
     const bool *flag_value;
     bool result = false;
 
-    ret = ompi_info_get_valuelen(info, key, &value_len, &flag);
+    ret = opal_info_get_valuelen(info, key, &value_len, &flag);
     if (OMPI_SUCCESS != ret) goto info_not_found;
     if (flag == 0) goto info_not_found;
     value_len++;
@@ -158,7 +162,7 @@ check_config_value_equal(char *key, ompi_info_t *info, char *value)
     value_string = (char*)malloc(sizeof(char) * value_len + 1); /* Should malloc 1 char for NUL-termination */
     if (NULL == value_string) goto info_not_found;
 
-    ret = ompi_info_get(info, key, value_len, value_string, &flag);
+    ret = opal_info_get(info, key, value_len, value_string, &flag);
     if (OMPI_SUCCESS != ret) {
         free(value_string);
         goto info_not_found;
@@ -229,9 +233,7 @@ process:
             opal_atomic_add_size_t(&req->super.req_status._ucount, ev.mlength);
             ops = opal_atomic_add_32(&req->ops_committed, 1);
             if (ops == req->ops_expected) {
-                OPAL_THREAD_LOCK(&ompi_request_lock);
                 ompi_request_complete(&req->super, true);
-                OPAL_THREAD_UNLOCK(&ompi_request_lock);
             }
         }
     }
@@ -381,7 +383,7 @@ component_finalize(void)
 
 static int
 component_query(struct ompi_win_t *win, void **base, size_t size, int disp_unit,
-                struct ompi_communicator_t *comm, struct ompi_info_t *info,
+                struct ompi_communicator_t *comm, struct opal_info_t *info,
                 int flavor)
 {
     int ret;
@@ -402,7 +404,7 @@ component_query(struct ompi_win_t *win, void **base, size_t size, int disp_unit,
 
 static int
 component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit,
-                 struct ompi_communicator_t *comm, struct ompi_info_t *info,
+                 struct ompi_communicator_t *comm, struct opal_info_t *info,
                  int flavor, int *model)
 {
     ompi_osc_portals4_module_t *module = NULL;
@@ -445,9 +447,9 @@ component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit
     /* share everyone's displacement units. Only do an allgather if
        strictly necessary, since it requires O(p) state. */
     tmp = disp_unit;
-    ret = module->comm->c_coll.coll_bcast(&tmp, 1, MPI_INT, 0,
+    ret = module->comm->c_coll->coll_bcast(&tmp, 1, MPI_INT, 0,
                                           module->comm,
-                                          module->comm->c_coll.coll_bcast_module);
+                                          module->comm->c_coll->coll_bcast_module);
     if (OMPI_SUCCESS != ret) {
         opal_output_verbose(1, ompi_osc_base_framework.framework_output,
                             "%s:%d: MPI_Bcast failed: %d\n",
@@ -455,8 +457,8 @@ component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit
         goto error;
     }
     tmp = (tmp == disp_unit) ? 1 : 0;
-    ret = module->comm->c_coll.coll_allreduce(MPI_IN_PLACE, &tmp, 1, MPI_INT, MPI_LAND,
-                                              module->comm, module->comm->c_coll.coll_allreduce_module);
+    ret = module->comm->c_coll->coll_allreduce(MPI_IN_PLACE, &tmp, 1, MPI_INT, MPI_LAND,
+                                              module->comm, module->comm->c_coll->coll_allreduce_module);
     if (OMPI_SUCCESS != ret) goto error;
     if (tmp == 1) {
         module->disp_unit = disp_unit;
@@ -464,10 +466,10 @@ component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit
     } else {
         module->disp_unit = -1;
         module->disp_units = malloc(sizeof(int) * ompi_comm_size(module->comm));
-        ret = module->comm->c_coll.coll_allgather(&disp_unit, 1, MPI_INT,
+        ret = module->comm->c_coll->coll_allgather(&disp_unit, 1, MPI_INT,
                                                   module->disp_units, 1, MPI_INT,
                                                   module->comm,
-                                                  module->comm->c_coll.coll_allgather_module);
+                                                  module->comm->c_coll->coll_allgather_module);
         if (OMPI_SUCCESS != ret) goto error;
     }
 
@@ -507,6 +509,11 @@ component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit
                             __FILE__, __LINE__, ret);
         goto error;
     }
+
+    module->origin_iovec_list = NULL;
+    module->origin_iovec_md_h = PTL_INVALID_HANDLE;
+    module->result_iovec_list = NULL;
+    module->result_iovec_md_h = PTL_INVALID_HANDLE;
 
     if (MPI_WIN_FLAVOR_DYNAMIC == flavor) {
         me.start = 0;
@@ -587,7 +594,7 @@ component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit
 
     module->passive_target_access_epoch = false;
 
-#if OPAL_ASSEMBLY_ARCH == OPAL_AMD64 || OPAL_ASSEMBLY_ARCH == OPAL_IA32
+#if OPAL_ASSEMBLY_ARCH == OPAL_X86_64 || OPAL_ASSEMBLY_ARCH == OPAL_IA32
     *model = MPI_WIN_UNIFIED;
 #else
     *model = MPI_WIN_SEPARATE;
@@ -605,8 +612,8 @@ component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit
     }
     OPAL_THREAD_UNLOCK(&mca_osc_portals4_component.lock);
 
-    module->comm->c_coll.coll_barrier(module->comm,
-                                      module->comm->c_coll.coll_barrier_module);
+    module->comm->c_coll->coll_barrier(module->comm,
+                                      module->comm->c_coll->coll_barrier_module);
 
     return OMPI_SUCCESS;
 
@@ -645,13 +652,21 @@ ompi_osc_portals4_free(struct ompi_win_t *win)
     int ret = OMPI_SUCCESS;
 
     /* synchronize */
-    module->comm->c_coll.coll_barrier(module->comm,
-                                      module->comm->c_coll.coll_barrier_module);
+    module->comm->c_coll->coll_barrier(module->comm,
+                                      module->comm->c_coll->coll_barrier_module);
 
     /* cleanup */
     PtlMEUnlink(module->control_me_h);
     PtlMEUnlink(module->data_me_h);
     PtlMDRelease(module->md_h);
+    if (module->origin_iovec_md_h != PTL_INVALID_HANDLE) {
+        PtlMDRelease(module->origin_iovec_md_h);
+        free(module->origin_iovec_list);
+    }
+    if (module->result_iovec_md_h != PTL_INVALID_HANDLE) {
+        PtlMDRelease(module->result_iovec_md_h);
+        free(module->result_iovec_list);
+    }
     PtlMDRelease(module->req_md_h);
     PtlCTFree(module->ct_h);
     if (NULL != module->disp_units) free(module->disp_units);
@@ -670,31 +685,31 @@ ompi_osc_portals4_free(struct ompi_win_t *win)
 
 
 int
-ompi_osc_portals4_set_info(struct ompi_win_t *win, struct ompi_info_t *info)
+ompi_osc_portals4_set_info(struct ompi_win_t *win, struct opal_info_t *info)
 {
     ompi_osc_portals4_module_t *module =
         (ompi_osc_portals4_module_t*) win->w_osc_module;
 
     /* enforce collectiveness... */
-    return module->comm->c_coll.coll_barrier(module->comm,
-                                             module->comm->c_coll.coll_barrier_module);
+    return module->comm->c_coll->coll_barrier(module->comm,
+                                             module->comm->c_coll->coll_barrier_module);
 }
 
 
 int
-ompi_osc_portals4_get_info(struct ompi_win_t *win, struct ompi_info_t **info_used)
+ompi_osc_portals4_get_info(struct ompi_win_t *win, struct opal_info_t **info_used)
 {
     ompi_osc_portals4_module_t *module =
         (ompi_osc_portals4_module_t*) win->w_osc_module;
 
-    ompi_info_t *info = OBJ_NEW(ompi_info_t);
+    opal_info_t *info = OBJ_NEW(opal_info_t);
     if (NULL == info) return OMPI_ERR_TEMP_OUT_OF_RESOURCE;
 
-    ompi_info_set(info, "no_locks",  (module->state.lock == LOCK_ILLEGAL) ? "true" : "false");
+    opal_info_set(info, "no_locks",  (module->state.lock == LOCK_ILLEGAL) ? "true" : "false");
     if (module->atomic_max < mca_osc_portals4_component.matching_atomic_max) {
-        ompi_info_set(info, "accumulate_ordering", "none");
+        opal_info_set(info, "accumulate_ordering", "none");
     } else {
-        ompi_info_set(info, "accumulate_ordering", "rar,war,raw,waw");
+        opal_info_set(info, "accumulate_ordering", "rar,war,raw,waw");
     }
 
     *info_used = info;

@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2007 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -15,6 +15,7 @@
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016      University of Houston. All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -44,7 +45,7 @@ opal_pointer_array_t ompi_file_f_to_c_table = {{0}};
 /*
  * MPI_FILE_NULL (_addr flavor is for F03 bindings)
  */
-ompi_predefined_file_t  ompi_mpi_file_null = {{{0}}};
+ompi_predefined_file_t  ompi_mpi_file_null = {{{{0}}}};
 ompi_predefined_file_t  *ompi_mpi_file_null_addr = &ompi_mpi_file_null;
 
 
@@ -59,7 +60,7 @@ static void file_destructor(ompi_file_t *obj);
  * Class instance for ompi_file_t
  */
 OBJ_CLASS_INSTANCE(ompi_file_t,
-                   opal_object_t,
+                   opal_infosubscriber_t,
                    file_constructor,
                    file_destructor);
 
@@ -73,7 +74,7 @@ int ompi_file_init(void)
 
     OBJ_CONSTRUCT(&ompi_file_f_to_c_table, opal_pointer_array_t);
     if( OPAL_SUCCESS != opal_pointer_array_init(&ompi_file_f_to_c_table, 0,
-                                                OMPI_FORTRAN_HANDLE_MAX, 64) ) {
+                                                OMPI_FORTRAN_HANDLE_MAX, 16) ) {
         return OMPI_ERROR;
     }
 
@@ -97,7 +98,7 @@ int ompi_file_init(void)
  * Back end to MPI_FILE_OPEN
  */
 int ompi_file_open(struct ompi_communicator_t *comm, const char *filename,
-                   int amode, struct ompi_info_t *info, ompi_file_t **fh)
+                   int amode, struct opal_info_t *info, ompi_file_t **fh)
 {
     int ret;
     ompi_file_t *file;
@@ -113,17 +114,10 @@ int ompi_file_open(struct ompi_communicator_t *comm, const char *filename,
     file->f_comm = comm;
     OBJ_RETAIN(comm);
 
-    if (MPI_INFO_NULL != info) {
-        if(NULL == file->f_info) {
-            file->f_info = OBJ_NEW(ompi_info_t);
-        }
-        if (OMPI_SUCCESS != (ret = ompi_info_dup(info, &file->f_info))) {
-            OBJ_RELEASE(file);
-            return ret;
-        }
-    } else {
-        file->f_info = MPI_INFO_NULL;
-        OBJ_RETAIN(MPI_INFO_NULL);
+    /* Copy the info for the info layer */
+    file->super.s_info = OBJ_NEW(opal_info_t);
+    if (info) {
+        opal_info_dup(info, &(file->super.s_info));
     }
 
     file->f_amode = amode;
@@ -236,7 +230,6 @@ static void file_constructor(ompi_file_t *file)
     file->f_comm = NULL;
     file->f_filename = NULL;
     file->f_amode = 0;
-    file->f_info = NULL;
 
     /* Initialize flags */
 
@@ -316,10 +309,10 @@ static void file_destructor(ompi_file_t *file)
 #endif
     }
 
-    if (NULL != file->f_info) {
-        OBJ_RELEASE(file->f_info);
+    if (NULL != file->super.s_info) {
+        OBJ_RELEASE(file->super.s_info);
 #if OPAL_ENABLE_DEBUG
-        file->f_info = NULL;
+        file->super.s_info = NULL;
 #endif
     }
 

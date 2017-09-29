@@ -45,11 +45,11 @@ struct mca_pml_ob1_send_request_t {
     mca_pml_base_send_request_t req_send;
     mca_bml_base_endpoint_t* req_endpoint;
     opal_ptr_t req_recv;
-    int32_t req_state;
-    int32_t req_lock;
-    bool req_throttle_sends;
-    size_t req_pipeline_depth;
-    size_t req_bytes_delivered;
+    int32_t  req_state;
+    int32_t  req_lock;
+    bool     req_throttle_sends;
+    int32_t  req_pipeline_depth;
+    size_t   req_bytes_delivered;
     uint32_t req_rdma_cnt;
     mca_pml_ob1_send_pending_t req_pending;
     opal_mutex_t req_send_range_lock;
@@ -99,6 +99,7 @@ add_request_to_send_pending(mca_pml_ob1_send_request_t* sendreq,
         opal_list_prepend(&mca_pml_ob1.send_pending, item);
 
     OPAL_THREAD_UNLOCK(&mca_pml_ob1.lock);
+    mca_pml_ob1_enable_progress(1);
 }
 
 static inline mca_pml_ob1_send_request_t*

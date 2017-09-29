@@ -2,7 +2,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2011 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -12,6 +12,7 @@
  * Copyright (c) 2008-2014 University of Houston. All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -42,7 +43,7 @@ int
 mca_fs_ufs_file_open (struct ompi_communicator_t *comm,
 		      const char* filename,
 		      int access_mode,
-		      struct ompi_info_t *info,
+		      struct opal_info_t *info,
 		      mca_io_ompio_file_t *fh)
 {
     int amode;
@@ -71,15 +72,17 @@ mca_fs_ufs_file_open (struct ompi_communicator_t *comm,
 
     if ( 0 == rank ) {
 	/* MODE_CREATE and MODE_EXCL can only be set by one process */
-	if ( access_mode & MPI_MODE_CREATE )
-	    amode = amode | O_CREAT;
-	if (access_mode & MPI_MODE_EXCL)
-	    amode = amode | O_EXCL;
+        if ( !(fh->f_flags & OMPIO_SHAREDFP_IS_SET)) {
+            if ( access_mode & MPI_MODE_CREATE )
+                amode = amode | O_CREAT;
+            if (access_mode & MPI_MODE_EXCL)
+                amode = amode | O_EXCL;
+        }
 	fh->fd = open (filename, amode, perm);
 	ret = fh->fd;
     }
 
-    comm->c_coll.coll_bcast ( &ret, 1, MPI_INT, 0, comm, comm->c_coll.coll_bcast_module);
+    comm->c_coll->coll_bcast ( &ret, 1, MPI_INT, 0, comm, comm->c_coll->coll_bcast_module);
     if ( -1 == ret ) {
 	fh->fd = ret;
 	return OMPI_ERROR;

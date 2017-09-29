@@ -14,6 +14,8 @@
  * Copyright (c) 2010-2016 Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2011-2012 University of Houston. All rights reserved.
+ * Copyright (c) 2016-2017 Intel, Inc. All rights reserved.
+ * Copyright (c) 2017 IBM Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -49,6 +51,7 @@
 #include "opal/mca/installdirs/installdirs.h"
 
 #include "opal/runtime/opal_info_support.h"
+#include "opal/mca/base/mca_base_component_repository.h"
 
 const char *opal_info_path_prefix = "prefix";
 const char *opal_info_path_bindir = "bindir";
@@ -108,6 +111,9 @@ OBJ_CLASS_INSTANCE(opal_info_component_map_t,
                    component_map_construct,
                    component_map_destruct);
 
+static void opal_info_show_failed_component(const mca_base_component_repository_item_t* ri,
+                                            const char *error_msg);
+
 int opal_info_init(int argc, char **argv,
                    opal_cmd_line_t *opal_info_cmd_line)
 {
@@ -156,6 +162,8 @@ int opal_info_init(int argc, char **argv,
                             "Show only variables with at most this level (1-9)");
     opal_cmd_line_make_opt3(opal_info_cmd_line, 's', NULL, "selected-only", 0,
                             "Show only variables from selected components");
+    opal_cmd_line_make_opt3(opal_info_cmd_line, '\0', NULL, "show-failed", 0,
+                            "Show the components that failed to load along with the reason why they failed.");
 
     /* set our threading level */
     opal_set_using_threads(false);
@@ -222,6 +230,10 @@ int opal_info_init(int argc, char **argv,
         opal_info_register_flags = MCA_BASE_REGISTER_DEFAULT;
     }
 
+    if( opal_cmd_line_is_taken(opal_info_cmd_line, "show-failed") ) {
+        mca_base_component_track_load_errors = true;
+    }
+
     return OPAL_SUCCESS;
 }
 
@@ -244,6 +256,7 @@ static int info_register_framework (mca_base_framework_t *framework, opal_pointe
         map = OBJ_NEW(opal_info_component_map_t);
         map->type = strdup(framework->framework_name);
         map->components = &framework->framework_components;
+        map->failed_components = &framework->framework_failed_components;
         opal_pointer_array_add(component_map, map);
     }
 
@@ -580,7 +593,7 @@ void opal_info_do_type(opal_cmd_line_t *opal_info_cmd_line)
             if (OPAL_SUCCESS != ret) {
                 continue;
             }
-            if (0 == strcmp(type, var_type_names[var->mbv_type]) && (var->mbv_info_lvl <= max_level)) {
+            if (0 == strcmp(type, ompi_var_type_names[var->mbv_type]) && (var->mbv_info_lvl <= max_level)) {
                 ret = mca_base_var_dump(var->mbv_index, &strings, !opal_info_pretty ? MCA_BASE_VAR_DUMP_PARSABLE : MCA_BASE_VAR_DUMP_READABLE);
                 if (OPAL_SUCCESS != ret) {
                     continue;
@@ -626,12 +639,12 @@ static void opal_info_show_mca_group_params(const mca_base_var_group_t *group, m
         /* read the selection parameter */
         var_id = mca_base_var_find (group->group_project, group->group_framework, NULL, NULL);
         if (0 <= var_id) {
-            const mca_base_var_storage_t *value;
+            const mca_base_var_storage_t *value=NULL;
             char **requested_components;
             bool include_mode;
 
             mca_base_var_get_value (var_id, &value, NULL, NULL);
-            if (NULL != value->stringval && '\0' != value->stringval[0]) {
+            if (NULL != value && NULL != value->stringval && '\0' != value->stringval[0]) {
                 mca_base_component_parse_requested (value->stringval, &include_mode, &requested_components);
 
                 for (i = 0, requested = !include_mode ; requested_components[i] ; ++i) {
@@ -659,7 +672,7 @@ static void opal_info_show_mca_group_params(const mca_base_var_group_t *group, m
         }
 
         if (opal_info_pretty && curr_group != group) {
-            asprintf(&message, "MCA%s %s%s", requested ? "" : " (disabled)",
+            asprintf(&message, "MCA%s %s%s", requested ? "" : " (-)",
                      group->group_framework,
                      component_msg ? component_msg : "");
             opal_info_out(message, message, "---------------------------------------------------");
@@ -674,7 +687,7 @@ static void opal_info_show_mca_group_params(const mca_base_var_group_t *group, m
 
         for (j = 0 ; strings[j] ; ++j) {
             if (0 == j && opal_info_pretty) {
-                asprintf (&message, "MCA%s %s%s", requested ? "" : " (disabled)",
+                asprintf (&message, "MCA%s %s%s", requested ? "" : " (-)",
                           group->group_framework,
                           component_msg ? component_msg : "");
                 opal_info_out(message, message, strings[j]);
@@ -705,7 +718,7 @@ static void opal_info_show_mca_group_params(const mca_base_var_group_t *group, m
         }
 
         if (opal_info_pretty && curr_group != group) {
-            asprintf(&message, "MCA%s %s%s", requested ? "" : " (disabled)",
+            asprintf(&message, "MCA%s %s%s", requested ? "" : " (-)",
                      group->group_framework,
                      component_msg ? component_msg : "");
             opal_info_out(message, message, "---------------------------------------------------");
@@ -720,7 +733,7 @@ static void opal_info_show_mca_group_params(const mca_base_var_group_t *group, m
 
         for (j = 0 ; strings[j] ; ++j) {
             if (0 == j && opal_info_pretty) {
-                asprintf (&message, "MCA%s %s%s", requested ? "" : " (disabled)",
+                asprintf (&message, "MCA%s %s%s", requested ? "" : " (-)",
                           group->group_framework,
                           component_msg ? component_msg : "");
                 opal_info_out(message, message, strings[j]);
@@ -1011,6 +1024,7 @@ void opal_info_show_component_version(opal_pointer_array_t *mca_types,
     bool want_all_types = false;
     bool found;
     mca_base_component_list_item_t *cli;
+    mca_base_failed_component_t *cli_failed;
     int j;
     char *pos;
     opal_info_component_map_t *map;
@@ -1056,6 +1070,15 @@ void opal_info_show_component_version(opal_pointer_array_t *mca_types,
                 }
             }
 
+            /* found it! */
+            OPAL_LIST_FOREACH(cli_failed, map->failed_components, mca_base_failed_component_t) {
+                mca_base_component_repository_item_t *ri = cli_failed->comp;
+                if (want_all_components ||
+                    0 == strcmp(component_name, ri->ri_name) ) {
+                    opal_info_show_failed_component(ri, cli_failed->error_msg);
+                }
+            }
+
             if (!want_all_types) {
                 break;
             }
@@ -1063,6 +1086,30 @@ void opal_info_show_component_version(opal_pointer_array_t *mca_types,
     }
 }
 
+
+static void opal_info_show_failed_component(const mca_base_component_repository_item_t* ri,
+                                            const char *error_msg)
+{
+    char *message, *content;
+
+    if (opal_info_pretty) {
+        asprintf(&message, "MCA %s", ri->ri_type);
+        asprintf(&content, "%s (failed to load) %s", ri->ri_name, error_msg);
+
+        opal_info_out(message, NULL, content);
+
+        free(message);
+        free(content);
+    } else {
+        asprintf(&message, "mca:%s:%s:failed", ri->ri_type, ri->ri_name);
+        asprintf(&content, "%s", error_msg);
+
+        opal_info_out(NULL, message, content);
+
+        free(message);
+        free(content);
+    }
+}
 
 /*
  * Given a component, display its relevant version(s)

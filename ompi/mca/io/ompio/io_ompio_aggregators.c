@@ -3,18 +3,19 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2013 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2008-2016 University of Houston. All rights reserved.
+ * Copyright (c) 2008-2017 University of Houston. All rights reserved.
  * Copyright (c) 2011-2015 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2012-2013 Inria.  All rights reserved.
- * Copyright (c) 2015-2016 Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -46,41 +47,148 @@
 **
 ** The first group functions determines the number of aggregators based on various characteristics
 ** 
-** 1. simple_grouping:aA simple heuristic based on the amount of data written and size of 
-**    of the temporary buffer used by aggregator processes
+** 1. simple_grouping: A heuristic based on a cost model
 ** 2. fview_based_grouping: analysis the fileview to detect regular patterns
 ** 3. cart_based_grouping: uses a cartesian communicator to derive certain (probable) properties
 **    of the access pattern
 */
 
+
+static double cost_calc (int P, int P_agg, size_t Data_proc, size_t coll_buffer, int dim );
+#define DIM1 1
+#define DIM2 2
+
 int mca_io_ompio_simple_grouping(mca_io_ompio_file_t *fh,
-                                 int *num_groups,
+                                 int *num_groups_out,
                                  mca_io_ompio_contg *contg_groups)
 {
-    size_t stripe_size = (size_t) fh->f_stripe_size;
     int group_size  = 0;
     int k=0, p=0, g=0;
     int total_procs = 0; 
+    int num_groups=1;
 
-    if ( 0 < fh->f_stripe_size ) {
-        stripe_size = OMPIO_DEFAULT_STRIPE_SIZE;
-    }
+    double time=0.0, time_prev=0.0, dtime=0.0, dtime_abs=0.0, dtime_diff=0.0, dtime_prev=0.0;
+    double dtime_threshold=0.0;
 
-    if ( 0 != fh->f_cc_size && stripe_size > fh->f_cc_size ) {
-        group_size  = (((int)stripe_size/(int)fh->f_cc_size) > fh->f_size ) ? fh->f_size : ((int)stripe_size/(int)fh->f_cc_size);
-        *num_groups = fh->f_size / group_size;
+    /* This is the threshold for absolute improvement. It is not 
+    ** exposed as an MCA parameter to avoid overwhelming users. It is 
+    ** mostly relevant for smaller process counts and data volumes. 
+    */
+    double time_threshold=0.001; 
+
+    int incr=1, mode=1;
+    int P_a, P_a_prev;
+
+    /* The aggregator selection algorithm is based on the formulas described
+    ** in: Shweta Jha, Edgar Gabriel, 'Performance Models for Communication in
+    ** Collective I/O operations', Proceedings of the 17th IEEE/ACM Symposium
+    ** on Cluster, Cloud and Grid Computing, Workshop on Theoretical
+    ** Approaches to Performance Evaluation, Modeling and Simulation, 2017.
+    **
+    ** The current implementation is based on the 1-D and 2-D models derived for the even
+    ** file partitioning strategy in the paper. Note, that the formulas currently only model
+    ** the communication aspect of collective I/O operations. There are two extensions in this
+    ** implementation: 
+    ** 
+    ** 1. Since the resulting formula has an asymptotic behavior w.r.t. the
+    ** no. of aggregators, this version determines the no. of aggregators to
+    ** be used iteratively and stops increasing the no. of aggregators if the
+    ** benefits of increasing the aggregators is below a certain threshold
+    ** value relative to the last number tested. The aggresivnes of cutting of
+    ** the increasie in the number of aggregators is controlled by the new mca
+    ** parameter mca_io_ompio_aggregator_cutoff_threshold.  Lower values for
+    ** this parameter will lead to higher number of aggregators (useful e.g
+    ** for PVFS2 and GPFS file systems), while higher number will lead to
+    ** lower no. of aggregators (useful for regular UNIX or NFS file systems).
+    **
+    ** 2. The algorithm further caps the maximum no. of aggregators used to not exceed
+    ** (no. of processes / mca_io_ompio_max_aggregators_ratio), i.e. a higher value
+    ** for mca_io_ompio_max_aggregators will decrease the maximum number of aggregators
+    ** allowed for the given no. of processes.
+    */
+    dtime_threshold = (double) mca_io_ompio_aggregators_cutoff_threshold / 100.0;
+
+    /* Determine whether to use the formula for 1-D or 2-D data decomposition. Anything
+    ** that is not 1-D is assumed to be 2-D in this version
+    */ 
+    mode = ( fh->f_cc_size == fh->f_view_size ) ? 1 : 2;
+
+    /* Determine the increment size when searching the optimal
+    ** no. of aggregators 
+    */
+    if ( fh->f_size < 16 ) {
+	incr = 2;
     }
-    else if ( fh->f_cc_size <= OMPIO_CONTG_FACTOR * stripe_size) {
-        *num_groups = fh->f_size/OMPIO_CONTG_FACTOR > 0 ? (fh->f_size/OMPIO_CONTG_FACTOR) : 1 ;
-        group_size  = OMPIO_CONTG_FACTOR;
-    } 
+    else if (fh->f_size < 128 ) {
+	incr = 4;
+    }
+    else if ( fh->f_size < 4096 ) {
+	incr = 16;
+    }
     else {
-        *num_groups = fh->f_size;
-        group_size  = 1;
+	incr = 32;
     }
 
-    for ( k=0, p=0; p<*num_groups; p++ ) {
-        if ( p == (*num_groups - 1) ) {
+    P_a = 1;
+    time_prev = cost_calc ( fh->f_size, P_a, fh->f_view_size, (size_t) fh->f_bytes_per_agg, mode );
+    P_a_prev = P_a;
+    for ( P_a = incr; P_a <= fh->f_size; P_a += incr ) {
+	time = cost_calc ( fh->f_size, P_a, fh->f_view_size, (size_t) fh->f_bytes_per_agg, mode );
+	dtime_abs = (time_prev - time);
+	dtime = dtime_abs / time_prev;
+	dtime_diff = ( P_a == incr ) ? dtime : (dtime_prev - dtime);
+#ifdef OMPIO_DEBUG
+	if ( 0 == fh->f_rank  ){
+	    printf(" d_p = %ld P_a = %d time = %lf dtime = %lf dtime_abs =%lf dtime_diff=%lf\n", 
+		   fh->f_view_size, P_a, time, dtime, dtime_abs, dtime_diff );
+	}
+#endif
+	if ( dtime_diff < dtime_threshold ) {
+	    /* The relative improvement compared to the last number
+	    ** of aggregators was below a certain threshold. This is typically
+	    ** the dominating factor for large data volumes and larger process
+	    ** counts 
+	    */
+#ifdef OMPIO_DEBUG
+	    if ( 0 == fh->f_rank ) {
+		printf("dtime_diff below threshold\n");
+	    }
+#endif
+	    break;
+	}
+	if ( dtime_abs < time_threshold ) {
+	    /* The absolute improvement compared to the last number 
+	    ** of aggregators was below a given threshold. This is typically
+	    ** important for small data valomes and smallers process counts
+	    */
+#ifdef OMPIO_DEBUG
+	    if ( 0 == fh->f_rank ) {
+		printf("dtime_abs below threshold\n");
+	    }
+#endif
+	    break;
+	}
+	time_prev = time;
+	dtime_prev = dtime;
+	P_a_prev = P_a;	
+    }
+    num_groups = P_a_prev;
+#ifdef OMPIO_DEBUG
+    printf(" For P=%d d_p=%ld b_c=%d threshold=%f chosen P_a = %d \n", 
+	   fh->f_size, fh->f_view_size, fh->f_bytes_per_agg, dtime_threshold, P_a_prev);
+#endif
+    
+    /* Cap the maximum number of aggregators.*/
+    if ( num_groups > (fh->f_size/mca_io_ompio_max_aggregators_ratio)) {
+	num_groups = (fh->f_size/mca_io_ompio_max_aggregators_ratio);
+    }
+    if ( 1 >= num_groups ) {
+	num_groups = 1;
+    }
+    group_size = fh->f_size / num_groups;
+
+    for ( k=0, p=0; p<num_groups; p++ ) {
+        if ( p == (num_groups - 1) ) {
             contg_groups[p].procs_per_contg_group = fh->f_size - total_procs;
         }
         else {
@@ -92,6 +200,8 @@ int mca_io_ompio_simple_grouping(mca_io_ompio_file_t *fh,
             k++;
         }
     }
+
+    *num_groups_out = num_groups;
     return OMPI_SUCCESS;
 }
 
@@ -133,14 +243,14 @@ int mca_io_ompio_fview_based_grouping(mca_io_ompio_file_t *fh,
     }
     
     //Allgather start offsets across processes in a group on aggregator
-    ret = fh->f_comm->c_coll.coll_allgather (start_offset_len,
+    ret = fh->f_comm->c_coll->coll_allgather (start_offset_len,
                                              3,
                                              OMPI_OFFSET_DATATYPE,
                                              start_offsets_lens,
                                              3,
                                              OMPI_OFFSET_DATATYPE,
                                              fh->f_comm,
-                                             fh->f_comm->c_coll.coll_allgather_module);
+                                             fh->f_comm->c_coll->coll_allgather_module);
     if ( OMPI_SUCCESS != ret ) {
         goto exit;
     }
@@ -192,19 +302,26 @@ exit:
     return ret;
 }
 
-int mca_io_ompio_cart_based_grouping(mca_io_ompio_file_t *ompio_fh)
+int mca_io_ompio_cart_based_grouping(mca_io_ompio_file_t *ompio_fh, 
+                                     int *num_groups,
+                                     mca_io_ompio_contg *contg_groups)
 {
     int k = 0;
-    int j = 0;
-    int n = 0;
+    int g=0;
     int ret = OMPI_SUCCESS, tmp_rank = 0;
-    int coords_tmp[2] = { 0 };
+    int *coords_tmp = NULL;
 
     mca_io_ompio_cart_topo_components cart_topo;
     memset (&cart_topo, 0, sizeof(mca_io_ompio_cart_topo_components)); 
 
     ret = ompio_fh->f_comm->c_topo->topo.cart.cartdim_get(ompio_fh->f_comm, &cart_topo.ndims);
-    if (OMPI_SUCCESS != ret ) {
+    if (OMPI_SUCCESS != ret  ) {
+        goto exit;
+    }
+
+    if (cart_topo.ndims < 2 ) {
+        /* We shouldn't be here, this routine only works for more than 1 dimension */
+        ret = MPI_ERR_INTERN;
         goto exit;
     }
 
@@ -227,6 +344,13 @@ int mca_io_ompio_cart_based_grouping(mca_io_ompio_file_t *ompio_fh)
         goto exit;
     }
 
+    coords_tmp  = (int*)malloc (cart_topo.ndims * sizeof(int));
+    if (NULL == coords_tmp) {
+        opal_output (1, "OUT OF MEMORY\n");
+        ret = OMPI_ERR_OUT_OF_RESOURCE;
+        goto exit;
+    }
+
     ret = ompio_fh->f_comm->c_topo->topo.cart.cart_get(ompio_fh->f_comm,
                                                        cart_topo.ndims,
                                                        cart_topo.dims,
@@ -237,55 +361,50 @@ int mca_io_ompio_cart_based_grouping(mca_io_ompio_file_t *ompio_fh)
         goto exit;
     }
 
-    ompio_fh->f_init_procs_per_group = cart_topo.dims[1]; //number of elements per row
-    ompio_fh->f_init_num_aggrs = cart_topo.dims[0];  //number of rows
-
-    //Make an initial list of potential aggregators
-    ompio_fh->f_init_aggr_list = (int *) malloc (ompio_fh->f_init_num_aggrs * sizeof(int));
-    if (NULL == ompio_fh->f_init_aggr_list) {
-        opal_output (1, "OUT OF MEMORY\n");
-        ret = OMPI_ERR_OUT_OF_RESOURCE;
-        goto exit;
-    }
+    *num_groups = cart_topo.dims[0];  //number of rows    
 
     for(k = 0; k < cart_topo.dims[0]; k++){
+        int done = 0;
+        int index = cart_topo.ndims-1;
+
+        memset ( coords_tmp, 0, cart_topo.ndims * sizeof(int));
+        contg_groups[k].procs_per_contg_group = (ompio_fh->f_size / cart_topo.dims[0]);
         coords_tmp[0] = k;
-        coords_tmp[1] = k * cart_topo.dims[1];
+
         ret = ompio_fh->f_comm->c_topo->topo.cart.cart_rank (ompio_fh->f_comm,coords_tmp,&tmp_rank);
         if ( OMPI_SUCCESS != ret ) {
             opal_output (1, "mca_io_ompio_cart_based_grouping: Error in cart_rank\n");
             goto exit;
         }
-        ompio_fh->f_init_aggr_list[k] = tmp_rank;
-    }
+        contg_groups[k].procs_in_contg_group[0] = tmp_rank;
 
-    //Initial Grouping
-    ompio_fh->f_init_procs_in_group = (int*)malloc (ompio_fh->f_init_procs_per_group * sizeof(int));
-    if (NULL == ompio_fh->f_init_procs_in_group) {
-        opal_output (1, "OUT OF MEMORY\n");
-        free (ompio_fh->f_init_aggr_list );
-        ompio_fh->f_init_aggr_list=NULL;
-        ret = OMPI_ERR_OUT_OF_RESOURCE;
-        goto exit;
-    }
+        for ( g=1; g< contg_groups[k].procs_per_contg_group; g++ ) {
+            done = 0;
+            index = cart_topo.ndims-1;
+  
+            while ( ! done ) { 
+                coords_tmp[index]++;
+                if ( coords_tmp[index] ==cart_topo.dims[index] ) {
+                    coords_tmp[index]=0;
+                    index--;
+                }
+                else {
+                    done = 1;
+                }
+                if ( index == 0 ) {
+                    done = 1;
+                }
+            }
 
-    for (j=0 ; j< ompio_fh->f_size ; j++) {
-        ompio_fh->f_comm->c_topo->topo.cart.cart_coords (ompio_fh->f_comm, j, cart_topo.ndims, coords_tmp);
-	if (coords_tmp[0]  == cart_topo.coords[0]) {
-           if ((coords_tmp[1]/ompio_fh->f_init_procs_per_group) ==
-	       (cart_topo.coords[1]/ompio_fh->f_init_procs_per_group)) {
-	       ompio_fh->f_init_procs_in_group[n] = j;
-	       n++;
-	   }
+           ret = ompio_fh->f_comm->c_topo->topo.cart.cart_rank (ompio_fh->f_comm,coords_tmp,&tmp_rank);
+           if ( OMPI_SUCCESS != ret ) {
+             opal_output (1, "mca_io_ompio_cart_based_grouping: Error in cart_rank\n");
+             goto exit;
+           }
+           contg_groups[k].procs_in_contg_group[g] = tmp_rank;
         }
     }
 
-    /*print original group */
-    /*printf("RANK%d Initial distribution \n",ompio_fh->f_rank);
-    for(k = 0; k < ompio_fh->f_init_procs_per_group; k++){
-       printf("%d,", ompio_fh->f_init_procs_in_group[k]);
-    }
-    printf("\n");*/
 
 exit:
     if (NULL != cart_topo.dims) {
@@ -299,6 +418,10 @@ exit:
     if (NULL != cart_topo.coords) {
        free (cart_topo.coords);
        cart_topo.coords = NULL;
+    }
+    if (NULL != coords_tmp) {
+       free (coords_tmp);
+       coords_tmp = NULL;
     }
 
     return ret;
@@ -315,6 +438,9 @@ int mca_io_ompio_finalize_initial_grouping(mca_io_ompio_file_t *fh,
     int y = 0;
 
     fh->f_init_num_aggrs = num_groups;
+    if (NULL != fh->f_init_aggr_list) {
+        free(fh->f_init_aggr_list);
+    }
     fh->f_init_aggr_list = (int*)malloc (fh->f_init_num_aggrs * sizeof(int));
     if (NULL == fh->f_init_aggr_list) {
         opal_output (1, "OUT OF MEMORY\n");
@@ -325,6 +451,9 @@ int mca_io_ompio_finalize_initial_grouping(mca_io_ompio_file_t *fh,
         for( y = 0; y < contg_groups[z].procs_per_contg_group; y++){
             if ( fh->f_rank == contg_groups[z].procs_in_contg_group[y] ) {
                 fh->f_init_procs_per_group = contg_groups[z].procs_per_contg_group;
+                if (NULL != fh->f_init_procs_in_group) {
+                    free(fh->f_init_procs_in_group);
+                }
                 fh->f_init_procs_in_group = (int*)malloc (fh->f_init_procs_per_group * sizeof(int));
                 if (NULL == fh->f_init_procs_in_group) {
                     opal_output (1, "OUT OF MEMORY\n");
@@ -393,6 +522,9 @@ int mca_io_ompio_set_aggregator_props (struct mca_io_ompio_file_t *fh,
     /* Forced number of aggregators
     ** calculate the offset at which each group of processes will start 
     */
+    if ( num_aggregators > fh->f_size ) {
+	num_aggregators = fh->f_size;
+    }
     procs_per_group = ceil ((float)fh->f_size/num_aggregators);
 
     /* calculate the number of processes in the local group */
@@ -487,13 +619,13 @@ int mca_io_ompio_create_groups(mca_io_ompio_file_t *fh,
     if(fh->f_rank == fh->f_procs_in_group[fh->f_aggregator_index]){
 	   final_aggr = 1;
     }
-    ret = fh->f_comm->c_coll.coll_allreduce (&final_aggr,
+    ret = fh->f_comm->c_coll->coll_allreduce (&final_aggr,
                                              &final_num_aggrs,
                                              1,
                                              MPI_INT,
                                              MPI_SUM,
                                              fh->f_comm,
-                                             fh->f_comm->c_coll.coll_allreduce_module);
+                                             fh->f_comm->c_coll->coll_allreduce_module);
     if ( OMPI_SUCCESS != ret ) {
         opal_output (1, "mca_io_ompio_create_groups: error in allreduce\n");
     }
@@ -902,7 +1034,7 @@ int mca_io_ompio_merge_groups(mca_io_ompio_file_t *fh,
 
     //merge_aggrs[0] is considered the new aggregator
     //New aggregator collects group sizes of the groups to be merged
-    ret = fcoll_base_coll_allgather_array (&fh->f_init_procs_per_group,
+    ret = ompi_fcoll_base_coll_allgather_array (&fh->f_init_procs_per_group,
                                            1,
                                            MPI_INT,
                                            sizes_old_group,
@@ -938,7 +1070,7 @@ int mca_io_ompio_merge_groups(mca_io_ompio_file_t *fh,
     //New aggregator also collects the grouping distribution
     //This is the actual merge
     //use allgatherv array
-    ret = fcoll_base_coll_allgatherv_array (fh->f_init_procs_in_group,
+    ret = ompi_fcoll_base_coll_allgatherv_array (fh->f_init_procs_in_group,
                                             fh->f_init_procs_per_group,
                                             MPI_INT,
                                             fh->f_procs_in_group,
@@ -1121,7 +1253,7 @@ int mca_io_ompio_prepare_to_group(mca_io_ompio_file_t *fh,
     }
 
     //Gather start offsets across processes in a group on aggregator
-    ret = fcoll_base_coll_allgather_array (start_offset_len,
+    ret = ompi_fcoll_base_coll_allgather_array (start_offset_len,
                                            3,
                                            OMPI_OFFSET_DATATYPE,
                                            start_offsets_lens_tmp,
@@ -1132,7 +1264,7 @@ int mca_io_ompio_prepare_to_group(mca_io_ompio_file_t *fh,
                                            fh->f_init_procs_per_group,
                                            fh->f_comm);
     if ( OMPI_SUCCESS != ret ) {
-        opal_output (1, "mca_io_ompio_prepare_to_grou[: error in fcoll_base_coll_allgather_array\n");
+        opal_output (1, "mca_io_ompio_prepare_to_grou[: error in ompi_fcoll_base_coll_allgather_array\n");
         goto exit;
     }
     end_offsets_tmp = (OMPI_MPI_OFFSET_TYPE* )malloc (fh->f_init_procs_per_group * sizeof(OMPI_MPI_OFFSET_TYPE));
@@ -1172,7 +1304,7 @@ int mca_io_ompio_prepare_to_group(mca_io_ompio_file_t *fh,
         goto exit;
     }
     //Communicate bytes per group between all aggregators
-    ret = fcoll_base_coll_allgather_array (bytes_per_group,
+    ret = ompi_fcoll_base_coll_allgather_array (bytes_per_group,
                                            1,
                                            OMPI_OFFSET_DATATYPE,
                                            aggr_bytes_per_group_tmp,
@@ -1183,7 +1315,7 @@ int mca_io_ompio_prepare_to_group(mca_io_ompio_file_t *fh,
                                            fh->f_init_num_aggrs,
                                            fh->f_comm);
     if ( OMPI_SUCCESS != ret ) {
-        opal_output (1, "mca_io_ompio_prepare_to_grou[: error in fcoll_base_coll_allgather_array 2\n");
+        opal_output (1, "mca_io_ompio_prepare_to_grou[: error in ompi_fcoll_base_coll_allgather_array 2\n");
         free(decision_list_tmp);
         goto exit;
     }
@@ -1257,7 +1389,7 @@ int mca_io_ompio_prepare_to_group(mca_io_ompio_file_t *fh,
     *decision_list = &decision_list_tmp[0];
     }
     //Communicate flag to all group members
-    ret = fcoll_base_coll_bcast_array (ompio_grouping_flag,
+    ret = ompi_fcoll_base_coll_bcast_array (ompio_grouping_flag,
                                        1,
                                        MPI_INT,
                                        0,
@@ -1266,17 +1398,86 @@ int mca_io_ompio_prepare_to_group(mca_io_ompio_file_t *fh,
                                        fh->f_comm);   
 
 exit:
-    if (NULL != aggr_bytes_per_group_tmp) {
-        free(aggr_bytes_per_group_tmp);
-    }
-    if (NULL != start_offsets_lens_tmp) {
-        free(start_offsets_lens_tmp);
-    }
-    if (NULL != end_offsets_tmp) {
-        free(end_offsets_tmp);
-    }
+    /* Do not free aggr_bytes_per_group_tmp, 
+    ** start_offsets_lens_tmp, and end_offsets_tmp
+    ** here. The memory is released in the layer above.
+    */
+
 
     return ret;
 }
 
+/*
+** This is the actual formula of the cost function from the paper.
+** One change made here is to use floating point values for
+** all parameters, since the ceil() function leads to sometimes
+** unexpected jumps in the execution time. Using float leads to 
+** more consistent predictions for the no. of aggregators.
+*/
+static double cost_calc (int P, int P_a, size_t d_p, size_t b_c, int dim )
+{
+    float  n_as=1.0, m_s=1.0, n_s=1.0;
+    float  n_ar=1.0;
+    double t_send, t_recv, t_tot;
 
+    /* LogGP parameters based on DDR InfiniBand values */
+    double L=.00000184;
+    double o=.00000149;
+    double g=.0000119;
+    double G=.00000000067;
+    
+    long file_domain = (P * d_p) / P_a;
+    float n_r = (float)file_domain/(float) b_c;
+    
+    switch (dim) {
+	case DIM1:
+	{
+	    if( d_p > b_c ){
+		//printf("case 1\n");
+		n_ar = 1;
+		n_as = 1;
+		m_s = b_c;
+		n_s = (float)d_p/(float)b_c;
+	    }
+	    else {
+		n_ar = (float)b_c/(float)d_p;
+		n_as = 1;
+		m_s = d_p;
+		n_s = 1;
+	    }
+	    break;
+	}	  
+	case DIM2:
+	{
+	    int P_x, P_y, c;
+	    
+	    P_x = P_y = (int) sqrt(P);
+	    c = (float) P_a / (float)P_x;
+	    
+	    n_ar = (float) P_y;
+	    n_as = (float) c;
+	    if ( d_p > (P_a*b_c/P )) {
+		m_s = fmin(b_c / P_y, d_p);
+	    }
+	    else {
+		m_s = fmin(d_p * P_x / P_a, d_p);
+	    }
+	    break;	  
+	}
+	default :
+	    printf("stop putting random values\n");
+	    break;
+    } 
+    
+    n_s = (float) d_p / (float)(n_as * m_s);
+    
+    if( m_s < 33554432) {
+	g = .00000108;
+    }	
+    t_send = n_s * (L + 2 * o + (n_as -1) * g + (m_s - 1) * n_as * G);
+    t_recv=  n_r * (L + 2 * o + (n_ar -1) * g + (m_s - 1) * n_ar * G);;
+    t_tot = t_send + t_recv;
+    
+    return t_tot;
+}
+    

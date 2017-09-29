@@ -14,7 +14,8 @@
  *                         reserved.
  * Copyright (c) 2008      Institut National de Recherche en Informatique
  *                         et Automatique. All rights reserved.
- * Copyright (c) 2014      Intel Corporation.  All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -66,6 +67,7 @@
 #include "orte/mca/errmgr/errmgr.h"
 #include "orte/mca/rmaps/rmaps.h"
 #include "orte/mca/state/state.h"
+#include "orte/util/threads.h"
 
 #include "orte/mca/plm/plm.h"
 #include "orte/mca/plm/base/base.h"
@@ -160,7 +162,6 @@ static void launch_daemons(int fd, short args, void *cbdata)
     int rc;
     char** env = NULL;
     char **nodelist_argv;
-    char *nodelist;
     int nodelist_argc;
     char *vpid_string;
     int i;
@@ -172,7 +173,10 @@ static void launch_daemons(int fd, short args, void *cbdata)
     orte_std_cntr_t nnode;
     orte_job_t *daemons;
     orte_state_caddy_t *state = (orte_state_caddy_t*)cbdata;
-    orte_job_t *jdata = state->jdata;
+    orte_job_t *jdata;
+
+    ORTE_ACQUIRE_OBJECT(state);
+    jdata  = state->jdata;
 
     /* start by setting up the virtual machine */
     daemons = orte_get_job_data_object(ORTE_PROC_MY_NAME->jobid);
@@ -243,7 +247,6 @@ static void launch_daemons(int fd, short args, void *cbdata)
          */
         opal_argv_append(&nodelist_argc, &nodelist_argv, node->name);
     }
-    nodelist = opal_argv_join(nodelist_argv, ',');
 
     /*
      * start building argv array
@@ -258,12 +261,11 @@ static void launch_daemons(int fd, short args, void *cbdata)
     /* add the daemon command (as specified by user) */
     orte_plm_base_setup_orted_cmd(&argc, &argv);
 
+
     /* Add basic orted command line options */
     orte_plm_base_orted_append_basic_args(&argc, &argv,
                                           "lsf",
-                                          &proc_vpid_index,
-                                          nodelist);
-    free(nodelist);
+                                          &proc_vpid_index);
 
     /* tell the new daemons the base of the name list so they can compute
      * their own name on the other end
@@ -341,9 +343,14 @@ static void launch_daemons(int fd, short args, void *cbdata)
      * orterun can do the rest of its stuff. Instead, we'll catch any
      * failures and deal with them elsewhere
      */
-    if (lsb_launch(nodelist_argv, argv, LSF_DJOB_REPLACE_ENV | LSF_DJOB_NOWAIT, env) < 0) {
+    if ( (rc = lsb_launch(nodelist_argv, argv, LSF_DJOB_REPLACE_ENV | LSF_DJOB_NOWAIT, env)) < 0) {
         ORTE_ERROR_LOG(ORTE_ERR_FAILED_TO_START);
-        opal_output(0, "lsb_launch failed: %d", rc);
+        char *flattened_nodelist = NULL;
+        flattened_nodelist = opal_argv_join(nodelist_argv, '\n');
+        orte_show_help("help-plm-lsf.txt", "lsb_launch-failed",
+                       true, rc, lsberrno, lsb_sysmsg(),
+                       opal_argv_count(nodelist_argv), flattened_nodelist);
+        free(flattened_nodelist);
         rc = ORTE_ERR_FAILED_TO_START;
         orte_wait_enable();  /* re-enable our SIGCHLD handler */
         goto cleanup;

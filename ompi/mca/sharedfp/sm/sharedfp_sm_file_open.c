@@ -2,18 +2,19 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2005 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2013-2016 University of Houston. All rights reserved.
+ * Copyright (c) 2013-2017 University of Houston. All rights reserved.
  * Copyright (c) 2013      Intel, Inc. All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -35,6 +36,8 @@
 
 #include "mpi.h"
 #include "ompi/constants.h"
+#include "ompi/group/group.h"
+#include "ompi/proc/proc.h"
 #include "ompi/mca/sharedfp/sharedfp.h"
 #include "ompi/mca/sharedfp/base/base.h"
 
@@ -46,7 +49,7 @@
 int mca_sharedfp_sm_file_open (struct ompi_communicator_t *comm,
                                const char* filename,
                                int amode,
-                               struct ompi_info_t *info,
+                               struct opal_info_t *info,
                                mca_io_ompio_file_t *fh)
 {
     int err = OMPI_SUCCESS;
@@ -55,11 +58,13 @@ int mca_sharedfp_sm_file_open (struct ompi_communicator_t *comm,
     mca_io_ompio_file_t * shfileHandle, *ompio_fh;
     char * filename_basename;
     char * sm_filename;
+    int sm_filename_length;
     struct mca_sharedfp_sm_offset * sm_offset_ptr;
     struct mca_sharedfp_sm_offset sm_offset;
     mca_io_ompio_data_t *data;
     int sm_fd;
     int rank;
+    uint32_t comm_cid;
 
     /*----------------------------------------------------*/
     /*Open the same file again without shared file pointer*/
@@ -84,7 +89,7 @@ int mca_sharedfp_sm_file_open (struct ompi_communicator_t *comm,
                                      ompio_fh->f_etype,
                                      ompio_fh->f_orig_filetype,
                                      ompio_fh->f_datarep,
-                                     MPI_INFO_NULL);
+                                     &(MPI_INFO_NULL->super));
 
     /*Memory is allocated here for the sh structure*/
     if ( mca_sharedfp_sm_verbose ) {
@@ -127,20 +132,21 @@ int mca_sharedfp_sm_file_open (struct ompi_communicator_t *comm,
     /* the shared memory segment is identified opening a file
     ** and then mapping it to memory
     ** For sharedfp we also want to put the file backed shared memory into the tmp directory
-    ** TODO: properly name the file so that different jobs can run on the same system w/o
-    **      overwriting each other, e.g.  orte_process_info.proc_session_dir
     */
-    /*sprintf(sm_filename,"%s%s",filename,".sm");*/
-    filename_basename = basename((void *)filename);
-    sm_filename = (char*) malloc( sizeof(char) * (strlen(filename_basename)+64) );
+    filename_basename = basename(filename);
+    /* format is "%s/%s_cid-%d.sm", see below */
+    sm_filename_length = strlen(ompi_process_info.job_session_dir) + 1 + strlen(filename_basename) + 5 + (3*sizeof(uint32_t)+1) + 4;
+    sm_filename = (char*) malloc( sizeof(char) * sm_filename_length);
     if (NULL == sm_filename) {
+        opal_output(0, "mca_sharedfp_sm_file_open: Error, unable to malloc sm_filename\n");
         free(sm_data);
         free(sh);
         free(shfileHandle);
         return OMPI_ERR_OUT_OF_RESOURCE;
     }
-    sprintf(sm_filename,"/tmp/OMPIO_sharedfp_sm_%s%s",filename_basename,".sm");
 
+    comm_cid = ompi_comm_get_cid(comm);
+    sprintf(sm_filename, "%s/%s_cid-%d.sm", ompi_process_info.job_session_dir, filename_basename, comm_cid);
     /* open shared memory file, initialize to 0, map into memory */
     sm_fd = open(sm_filename, O_RDWR | O_CREAT,
                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -161,7 +167,7 @@ int mca_sharedfp_sm_file_open (struct ompi_communicator_t *comm,
         memset ( &sm_offset, 0, sizeof (struct mca_sharedfp_sm_offset ));
         write ( sm_fd, &sm_offset, sizeof(struct mca_sharedfp_sm_offset));
     }
-    comm->c_coll.coll_barrier (comm, comm->c_coll.coll_barrier_module );
+    comm->c_coll->coll_barrier (comm, comm->c_coll->coll_barrier_module );
 
     /*the file has been written to, now we can map*/
     sm_offset_ptr = mmap(NULL, sizeof(struct mca_sharedfp_sm_offset), PROT_READ | PROT_WRITE,
@@ -223,7 +229,7 @@ int mca_sharedfp_sm_file_open (struct ompi_communicator_t *comm,
         err = OMPI_ERROR;
     }
 
-    comm->c_coll.coll_barrier (comm, comm->c_coll.coll_barrier_module );
+    comm->c_coll->coll_barrier (comm, comm->c_coll->coll_barrier_module );
 
     return err;
 }
@@ -249,7 +255,7 @@ int mca_sharedfp_sm_file_close (mca_io_ompio_file_t *fh)
      * all processes are ready to release the
      * shared file pointer resources
      */
-    sh->comm->c_coll.coll_barrier (sh->comm, sh->comm->c_coll.coll_barrier_module );
+    sh->comm->c_coll->coll_barrier (sh->comm, sh->comm->c_coll->coll_barrier_module );
 
     file_data = (sm_data*)(sh->selected_module_data);
     if (file_data)  {

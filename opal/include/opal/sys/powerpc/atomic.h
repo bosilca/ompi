@@ -10,7 +10,7 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2010      IBM Corporation.  All rights reserved.
+ * Copyright (c) 2010-2017 IBM Corporation.  All rights reserved.
  * Copyright (c) 2015-2016 Los Alamos National Security, LLC. All rights
  *                         reserved.
  * $COPYRIGHT$
@@ -29,10 +29,8 @@
 
 #define MB()  __asm__ __volatile__ ("sync" : : : "memory")
 #define RMB() __asm__ __volatile__ ("lwsync" : : : "memory")
-#define WMB() __asm__ __volatile__ ("eieio" : : : "memory")
+#define WMB() __asm__ __volatile__ ("lwsync" : : : "memory")
 #define ISYNC() __asm__ __volatile__ ("isync" : : : "memory")
-#define SMP_SYNC  "sync \n\t"
-#define SMP_ISYNC "\n\tisync"
 
 
 /**********************************************************************
@@ -230,6 +228,7 @@ static inline int32_t opal_atomic_swap_32(volatile int32_t *addr, int32_t newval
 #if (OPAL_ASSEMBLY_ARCH == OPAL_POWERPC64)
 
 #if  OPAL_GCC_INLINE_ASSEMBLY
+
 static inline int64_t opal_atomic_add_64 (volatile int64_t* v, int64_t inc)
 {
    int64_t t;
@@ -239,7 +238,7 @@ static inline int64_t opal_atomic_add_64 (volatile int64_t* v, int64_t inc)
                         "     stdcx.  %0, 0, %3    \n\t"
                         "     bne-    1b           \n\t"
                         : "=&r" (t), "=m" (*v)
-                        : "r" (OPAL_ASM_VALUE64(inc)), "r" OPAL_ASM_ADDR(v)
+                        : "r" (OPAL_ASM_VALUE64(inc)), "r" OPAL_ASM_ADDR(v), "m" (*v)
                         : "cc");
 
    return t;
@@ -256,7 +255,7 @@ static inline int64_t opal_atomic_sub_64 (volatile int64_t* v, int64_t dec)
                         "     stdcx.  %0,0,%3      \n\t"
                         "     bne-    1b           \n\t"
                         : "=&r" (t), "=m" (*v)
-                        : "r" (OPAL_ASM_VALUE64(dec)), "r" OPAL_ASM_ADDR(v)
+                        : "r" (OPAL_ASM_VALUE64(dec)), "r" OPAL_ASM_ADDR(v), "m" (*v)
                         : "cc");
 
    return t;
@@ -275,7 +274,7 @@ static inline int opal_atomic_cmpset_64(volatile int64_t *addr,
                          "   bne-    1b         \n\t"
                          "2:"
                          : "=&r" (ret), "=m" (*addr)
-                         : "r" (addr), "r" (OPAL_ASM_VALUE64(oldval)), "r" (OPAL_ASM_VALUE64(newval))
+                         : "r" (addr), "r" (OPAL_ASM_VALUE64(oldval)), "r" (OPAL_ASM_VALUE64(newval)), "m" (*addr)
                          : "cc", "memory");
 
    return (ret == oldval);

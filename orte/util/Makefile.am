@@ -11,7 +11,7 @@
 #                         All rights reserved.
 # Copyright (c) 2008      Sun Microsystems, Inc.  All rights reserved.
 # Copyright (c) 2014      Cisco Systems, Inc.  All rights reserved.
-# Copyright (c) 2014-2016 Intel, Inc. All rights reserved.
+# Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
 # Copyright (c) 2016      Research Organization for Information Science
 #                         and Technology (RIST). All rights reserved.
 # $COPYRIGHT$
@@ -43,14 +43,14 @@ AM_LFLAGS = -Porte_util_hostfile_
 LEX_OUTPUT_ROOT = lex.orte_util_hostfile_
 
 headers += \
-	util/name_fns.h \
+        util/name_fns.h \
         util/proc_info.h \
         util/session_dir.h \
         util/show_help.h \
         util/error_strings.h \
-	util/context_fns.h \
-	util/parse_options.h \
-	util/pre_condition_transports.h \
+        util/context_fns.h \
+        util/parse_options.h \
+        util/pre_condition_transports.h \
         util/hnp_contact.h \
         util/hostfile/hostfile.h \
         util/hostfile/hostfile_lex.h \
@@ -59,7 +59,9 @@ headers += \
         util/nidmap.h \
         util/regex.h \
         util/attr.h \
-        util/listener.h
+        util/listener.h \
+        util/compress.h \
+        util/threads.h
 
 lib@ORTE_LIB_PREFIX@open_rte_la_SOURCES += \
         util/error_strings.c \
@@ -67,9 +69,9 @@ lib@ORTE_LIB_PREFIX@open_rte_la_SOURCES += \
         util/proc_info.c \
         util/session_dir.c \
         util/show_help.c \
-	util/context_fns.c \
-	util/parse_options.c \
-	util/pre_condition_transports.c \
+        util/context_fns.c \
+        util/parse_options.c \
+        util/pre_condition_transports.c \
         util/hnp_contact.c \
         util/hostfile/hostfile_lex.l \
         util/hostfile/hostfile.c \
@@ -78,7 +80,8 @@ lib@ORTE_LIB_PREFIX@open_rte_la_SOURCES += \
         util/nidmap.c \
         util/regex.c \
         util/attr.c \
-        util/listener.c
+        util/listener.c \
+        util/compress.c
 
 # Remove the generated man pages
 distclean-local:

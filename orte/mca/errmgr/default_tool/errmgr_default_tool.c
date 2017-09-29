@@ -9,7 +9,7 @@
  *                         reserved.
  * Copyright (c) 2011-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2013      Intel, Inc. All rights reserved.
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -31,6 +31,7 @@
 #include "orte/util/error_strings.h"
 #include "orte/util/name_fns.h"
 #include "orte/util/show_help.h"
+#include "orte/util/threads.h"
 #include "orte/runtime/orte_globals.h"
 #include "orte/mca/rml/rml.h"
 #include "orte/mca/odls/odls_types.h"
@@ -54,17 +55,11 @@ static int abort_peers(orte_process_name_t *procs,
  * HNP module
  ******************/
 orte_errmgr_base_module_t orte_errmgr_default_tool_module = {
-    init,
-    finalize,
-    orte_errmgr_base_log,
-    orte_errmgr_base_abort,
-    abort_peers,
-    NULL,
-    NULL,
-    NULL,
-    orte_errmgr_base_register_migration_warning,
-    orte_errmgr_base_register_error_callback,
-    orte_errmgr_base_execute_error_callbacks
+    .init= init,
+    .finalize = finalize,
+    .logfn = orte_errmgr_base_log,
+    .abort = orte_errmgr_base_abort,
+    .abort_peers = abort_peers
 };
 
 static void proc_errors(int fd, short args, void *cbdata);
@@ -89,6 +84,8 @@ static void proc_errors(int fd, short args, void *cbdata)
 {
     orte_state_caddy_t *caddy = (orte_state_caddy_t*)cbdata;
 
+    ORTE_ACQUIRE_OBJECT(caddy);
+
     OPAL_OUTPUT_VERBOSE((1, orte_errmgr_base_framework.framework_output,
                          "%s errmgr:default_tool: proc %s state %s",
                          ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
@@ -103,8 +100,15 @@ static void proc_errors(int fd, short args, void *cbdata)
         return;
     }
 
-    /* all errors require abort */
-    orte_errmgr_base_abort(ORTE_ERROR_DEFAULT_EXIT_CODE, NULL);
+    /* if we lost our lifeline, then just stop the event loop
+     * so the main program can cleanly terminate */
+    if (ORTE_PROC_STATE_LIFELINE_LOST == caddy->proc_state) {
+        ORTE_POST_OBJECT(caddy);
+        orte_event_base_active = false;
+    } else {
+        /* all other errors require abort */
+        orte_errmgr_base_abort(ORTE_ERROR_DEFAULT_EXIT_CODE, NULL);
+    }
 
     OBJ_RELEASE(caddy);
 }

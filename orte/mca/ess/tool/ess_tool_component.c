@@ -12,7 +12,7 @@
  *                         All rights reserved.
  * Copyright (c) 2015      Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2015      Intel, Inc. All rights reserved
+ * Copyright (c) 2015-2017 Intel, Inc. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -63,19 +63,65 @@ orte_ess_tool_component_t mca_ess_tool_component = {
             MCA_BASE_METADATA_PARAM_CHECKPOINT
         },
     },
-    .async = false
+    .async = false,
+    .system_server_first = false,
+    .system_server_only = false,
+    .wait_to_connect = 0,
+    .num_retries = 0,
+    .pid = 0
 };
 
 static int tool_component_register(void)
 {
     mca_base_component_t *c = &mca_ess_tool_component.super.base_version;
 
-    mca_ess_tool_component.async = false;
     (void) mca_base_component_var_register (c, "async_progress", "Setup an async progress thread",
                                             MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
                                             OPAL_INFO_LVL_2,
                                             MCA_BASE_VAR_SCOPE_READONLY,
                                             &mca_ess_tool_component.async);
+
+    (void) mca_base_component_var_register (c, "do_not_connect",
+                                            "Do not connect to a PMIx server",
+                                            MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
+                                            OPAL_INFO_LVL_2,
+                                            MCA_BASE_VAR_SCOPE_READONLY,
+                                            &mca_ess_tool_component.do_not_connect);
+
+    (void) mca_base_component_var_register (c, "system_server_first",
+                                            "Look for a system PMIx server first",
+                                            MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
+                                            OPAL_INFO_LVL_2,
+                                            MCA_BASE_VAR_SCOPE_READONLY,
+                                            &mca_ess_tool_component.system_server_first);
+
+    (void) mca_base_component_var_register (c, "system_server_only",
+                                            "Only connect to a system server (and not an mpirun)",
+                                            MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
+                                            OPAL_INFO_LVL_2,
+                                            MCA_BASE_VAR_SCOPE_READONLY,
+                                            &mca_ess_tool_component.system_server_only);
+
+    (void) mca_base_component_var_register (c, "wait_to_connect",
+                                            "Time in seconds to wait before retrying connection to server",
+                                            MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                            OPAL_INFO_LVL_2,
+                                            MCA_BASE_VAR_SCOPE_READONLY,
+                                            &mca_ess_tool_component.wait_to_connect);
+
+    (void) mca_base_component_var_register (c, "num_retries",
+                                            "Number of times to retry connecting to server",
+                                            MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                            OPAL_INFO_LVL_2,
+                                            MCA_BASE_VAR_SCOPE_READONLY,
+                                            &mca_ess_tool_component.num_retries);
+
+    (void) mca_base_component_var_register (c, "server_pid",
+                                            "PID of the server to which we are to connect",
+                                            MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                            OPAL_INFO_LVL_2,
+                                            MCA_BASE_VAR_SCOPE_READONLY,
+                                            &mca_ess_tool_component.pid);
     return ORTE_SUCCESS;
 }
 
@@ -111,4 +157,3 @@ orte_ess_tool_component_close(void)
 {
     return ORTE_SUCCESS;
 }
-

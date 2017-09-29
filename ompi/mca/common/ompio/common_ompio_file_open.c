@@ -2,17 +2,18 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2005 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2008-2016 University of Houston. All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2008-2017 University of Houston. All rights reserved.
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -43,7 +44,7 @@
 int mca_common_ompio_file_open (ompi_communicator_t *comm,
                               const char *filename,
                               int amode,
-                              ompi_info_t *info,
+                              opal_info_t *info,
                               mca_io_ompio_file_t *ompio_fh, bool use_sharedfp)
 {
     int ret = OMPI_SUCCESS;
@@ -82,7 +83,6 @@ int mca_common_ompio_file_open (ompi_communicator_t *comm,
 	/* No need to duplicate the communicator if the file_open is called
 	   from the sharedfp component, since the comm used as an input
 	   is already a dup of the user level comm. */
-	ompio_fh->f_flags |= OMPIO_SHAREDFP_IS_SET;
 	ompio_fh->f_comm = comm;
     }
 
@@ -129,11 +129,6 @@ int mca_common_ompio_file_open (ompi_communicator_t *comm,
         goto fn_fail;
     }
 
-    if (OMPI_SUCCESS != (ret = mca_fcoll_base_file_select (ompio_fh,
-                                                           NULL))) {
-        opal_output(1, "mca_fcoll_base_file_select() failed\n");
-        goto fn_fail;
-    }
 
     ompio_fh->f_sharedfp_component = NULL; /*component*/
     ompio_fh->f_sharedfp           = NULL; /*module*/
@@ -149,22 +144,36 @@ int mca_common_ompio_file_open (ompi_communicator_t *comm,
 	    ** function will return an error code.
 	    */
 	}
+    }
+    else {
+	ompio_fh->f_flags |= OMPIO_SHAREDFP_IS_SET;
+    }
 
-	/* open the file once more for the shared file pointer if required.
-	** Per default, the shared file pointer specific actions are however
-	** only performed on first access of the shared file pointer, except
-	** for the addproc sharedfp component.
-	**
-	** Lazy open does not work for the addproc sharedfp
-	** component since it starts by spawning a process using MPI_Comm_spawn.
-	** For this, the first operation has to be collective which we can
-	** not guarantuee outside of the MPI_File_open operation.
-	*/
+    ret = ompio_fh->f_fs->fs_file_open (comm,
+					filename,
+					amode,
+					info,
+					ompio_fh);
+
+    if ( OMPI_SUCCESS != ret ) {
+	ret = MPI_ERR_FILE;
+        goto fn_fail;
+    }
+
+    if (OMPI_SUCCESS != (ret = mca_fcoll_base_file_select (ompio_fh,
+                                                           NULL))) {
+        opal_output(1, "mca_fcoll_base_file_select() failed\n");
+        goto fn_fail;
+    }
+
+
+    if ( true == use_sharedfp ) {
+	/* open the file once more for the shared file pointer if required.           
+        ** Can be disabled by the user if no shared file pointer operations
+        ** are used by his application.	
+        */
 	if ( NULL != ompio_fh->f_sharedfp &&
-	     true == use_sharedfp &&
-	     (!mca_io_ompio_sharedfp_lazy_open ||
-	      !strcmp (ompio_fh->f_sharedfp_component->mca_component_name,
-		       "addproc")               )) {
+	     !mca_io_ompio_sharedfp_lazy_open ) {
 	    ret = ompio_fh->f_sharedfp->sharedfp_file_open(comm,
 							   filename,
 							   amode,
@@ -177,37 +186,30 @@ int mca_common_ompio_file_open (ompi_communicator_t *comm,
 	}
     }
 
-     /*Determine topology information if set*/
-    if (ompio_fh->f_comm->c_flags & OMPI_COMM_CART){
-        ret = mca_io_ompio_cart_based_grouping(ompio_fh);
-	if(OMPI_SUCCESS != ret ){
-	    ret = MPI_ERR_FILE;
-	}
-    }
-
-    ret = ompio_fh->f_fs->fs_file_open (comm,
-					filename,
-					amode,
-					info,
-					ompio_fh);
-
-
-
-
-    if ( OMPI_SUCCESS != ret ) {
-	ret = MPI_ERR_FILE;
-        goto fn_fail;
-    }
-
 
     /* If file has been opened in the append mode, move the internal
        file pointer of OMPIO to the very end of the file. */
     if ( ompio_fh->f_amode & MPI_MODE_APPEND ) {
         OMPI_MPI_OFFSET_TYPE current_size;
+        mca_sharedfp_base_module_t * shared_fp_base_module;
 
         ompio_fh->f_fs->fs_file_get_size( ompio_fh,
                                           &current_size);
         mca_common_ompio_set_explicit_offset (ompio_fh, current_size);
+        if ( true == use_sharedfp ) {
+            if ( NULL != ompio_fh->f_sharedfp &&
+                 !mca_io_ompio_sharedfp_lazy_open  ) {                
+                shared_fp_base_module = ompio_fh->f_sharedfp;
+                ret = shared_fp_base_module->sharedfp_seek(ompio_fh,current_size, MPI_SEEK_SET);
+                if ( MPI_SUCCESS != ret  ) {
+                    opal_output(1, "mca_common_ompio_file_open: Could not adjust position of "
+                                "shared file pointer with MPI_MODE_APPEND\n");
+                    ret = MPI_ERR_OTHER;
+                    goto fn_fail;
+                }
+            }
+        }
+
     }
 
 
@@ -228,7 +230,7 @@ int mca_common_ompio_file_close (mca_io_ompio_file_t *ompio_fh)
     int delete_flag = 0;
     char name[256];
 
-    ret = ompio_fh->f_comm->c_coll.coll_barrier ( ompio_fh->f_comm, ompio_fh->f_comm->c_coll.coll_barrier_module);
+    ret = ompio_fh->f_comm->c_coll->coll_barrier ( ompio_fh->f_comm, ompio_fh->f_comm->c_coll->coll_barrier_module);
     if ( OMPI_SUCCESS != ret ) {
         /* Not sure what to do */
         opal_output (1,"mca_common_ompio_file_close: error in Barrier \n");
@@ -273,7 +275,7 @@ int mca_common_ompio_file_close (mca_io_ompio_file_t *ompio_fh)
 	ret = ompio_fh->f_fs->fs_file_close (ompio_fh);
     }
     if ( delete_flag && 0 == ompio_fh->f_rank ) {
-        mca_io_ompio_file_delete ( ompio_fh->f_filename, MPI_INFO_NULL );
+        mca_io_ompio_file_delete ( ompio_fh->f_filename, &(MPI_INFO_NULL->super) );
     }
 
     if ( NULL != ompio_fh->f_fs ) {
@@ -295,6 +297,10 @@ int mca_common_ompio_file_close (mca_io_ompio_file_t *ompio_fh)
         ompio_fh->f_io_array = NULL;
     }
 
+    if (NULL != ompio_fh->f_init_aggr_list) {
+        free (ompio_fh->f_init_aggr_list);
+        ompio_fh->f_init_aggr_list = NULL;
+    }
     if (NULL != ompio_fh->f_init_procs_in_group) {
         free (ompio_fh->f_init_procs_in_group);
         ompio_fh->f_init_procs_in_group = NULL;
@@ -346,7 +352,7 @@ int mca_common_ompio_file_close (mca_io_ompio_file_t *ompio_fh)
     }
 
 
-    if (MPI_COMM_NULL != ompio_fh->f_comm && (ompio_fh->f_flags & OMPIO_SHAREDFP_IS_SET) )  {
+    if (MPI_COMM_NULL != ompio_fh->f_comm && !(ompio_fh->f_flags & OMPIO_SHAREDFP_IS_SET) )  {
         ompi_comm_free (&ompio_fh->f_comm);
     }
 
@@ -388,7 +394,7 @@ int mca_common_ompio_set_file_defaults (mca_io_ompio_file_t *fh)
    if (NULL != fh) {
         ompi_datatype_t *types[2];
         int blocklen[2] = {1, 1};
-        OPAL_PTRDIFF_TYPE d[2], base;
+        ptrdiff_t d[2], base;
         int i;
 
         fh->f_io_array = NULL;
@@ -415,7 +421,7 @@ int mca_common_ompio_set_file_defaults (mca_io_ompio_file_t *fh)
 
         /* Default file View */
         fh->f_iov_type = MPI_DATATYPE_NULL;
-        fh->f_stripe_size = mca_io_ompio_bytes_per_agg;
+        fh->f_stripe_size = 0;
 	/*Decoded iovec of the file-view*/
 	fh->f_decoded_iov = NULL;
         fh->f_etype = NULL;
@@ -434,8 +440,8 @@ int mca_common_ompio_set_file_defaults (mca_io_ompio_file_t *fh)
 	types[0] = &ompi_mpi_long.dt;
         types[1] = &ompi_mpi_long.dt;
 
-        d[0] = (OPAL_PTRDIFF_TYPE) fh->f_decoded_iov;
-        d[1] = (OPAL_PTRDIFF_TYPE) &fh->f_decoded_iov[0].iov_len;
+        d[0] = (ptrdiff_t) fh->f_decoded_iov;
+        d[1] = (ptrdiff_t) &fh->f_decoded_iov[0].iov_len;
 
         base = d[0];
         for (i=0 ; i<2 ; i++) {

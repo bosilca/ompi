@@ -10,10 +10,11 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2007-2010 Oracle and/or its affiliates.  All rights reserved.
- * Copyright (c) 2007-2012 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2007-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2011-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2013-2016 Intel, Inc. All rights reserved
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -43,7 +44,7 @@
 #include "opal/class/opal_ring_buffer.h"
 #include "opal/threads/threads.h"
 #include "opal/mca/event/event.h"
-#include "opal/mca/hwloc/hwloc.h"
+#include "opal/mca/hwloc/hwloc-internal.h"
 #include "opal/mca/hwloc/base/base.h"
 
 #include "orte/mca/plm/plm_types.h"
@@ -71,6 +72,10 @@ ORTE_DECLSPEC extern bool orte_event_base_active; /* instantiated in orte/runtim
 ORTE_DECLSPEC extern bool orte_proc_is_bound;  /* instantiated in orte/runtime/orte_init.c */
 ORTE_DECLSPEC extern int orte_progress_thread_debug;  /* instantiated in orte/runtime/orte_init.c */
 
+ORTE_DECLSPEC extern char *orte_mgmt_transport;
+ORTE_DECLSPEC extern char *orte_coll_transport;
+ORTE_DECLSPEC extern int orte_mgmt_conduit;
+ORTE_DECLSPEC extern int orte_coll_conduit;
 
 /**
  * Global indicating where this process was bound to at launch (will
@@ -211,6 +216,15 @@ struct orte_proc_t;
 struct orte_job_map_t;
 /************/
 
+/* define an object for storing node topologies */
+typedef struct {
+    opal_object_t super;
+    hwloc_topology_t topo;
+    char *sig;
+} orte_topology_t;
+ORTE_DECLSPEC OBJ_CLASS_DECLARATION(orte_topology_t);
+
+
 /**
 * Information about a specific application to be launched in the RTE.
  */
@@ -288,7 +302,7 @@ typedef struct {
         may want to allow up to four processes but no more. */
     orte_std_cntr_t slots_max;
     /* system topology for this node */
-    hwloc_topology_t topology;
+    orte_topology_t *topology;
     /* flags */
     orte_node_flags_t flags;
     /* list of orte_attribute_t */
@@ -401,14 +415,6 @@ struct orte_proc_t {
 typedef struct orte_proc_t orte_proc_t;
 ORTE_DECLSPEC OBJ_CLASS_DECLARATION(orte_proc_t);
 
-/* define an object for storing node topologies */
-typedef struct {
-    opal_object_t super;
-    hwloc_topology_t topo;
-    char *sig;
-} orte_topology_t;
-ORTE_DECLSPEC OBJ_CLASS_DECLARATION(orte_topology_t);
-
 /**
  * Get a job data object
  * We cannot just reference a job data object with its jobid as
@@ -450,11 +456,14 @@ ORTE_DECLSPEC extern char *orte_basename;
 ORTE_DECLSPEC extern bool orte_coprocessors_detected;
 ORTE_DECLSPEC extern opal_hash_table_t *orte_coprocessors;
 ORTE_DECLSPEC extern char *orte_topo_signature;
+ORTE_DECLSPEC extern bool orte_no_vm;
+ORTE_DECLSPEC extern char *orte_data_server_uri;
 
 /* ORTE OOB port flags */
 ORTE_DECLSPEC extern bool orte_static_ports;
 ORTE_DECLSPEC extern char *orte_oob_static_ports;
 ORTE_DECLSPEC extern bool orte_standalone_operation;
+ORTE_DECLSPEC extern bool orte_fwd_mpirun_port;
 
 /* nodename flags */
 ORTE_DECLSPEC extern bool orte_keep_fqdn_hostnames;
@@ -462,14 +471,11 @@ ORTE_DECLSPEC extern bool orte_have_fqdn_allocation;
 ORTE_DECLSPEC extern bool orte_show_resolved_nodenames;
 ORTE_DECLSPEC extern bool orte_retain_aliases;
 ORTE_DECLSPEC extern int orte_use_hostname_alias;
+ORTE_DECLSPEC extern int orte_hostname_cutoff;
 
 /* debug flags */
 ORTE_DECLSPEC extern int orted_debug_failure;
 ORTE_DECLSPEC extern int orted_debug_failure_delay;
-
-/* homegeneity flags */
-ORTE_DECLSPEC extern bool orte_hetero_apps;
-ORTE_DECLSPEC extern bool orte_hetero_nodes;
 
 ORTE_DECLSPEC extern bool orte_never_launched;
 ORTE_DECLSPEC extern bool orte_devel_level_output;
@@ -486,6 +492,8 @@ ORTE_DECLSPEC extern bool orte_display_allocation;
 ORTE_DECLSPEC extern bool orte_display_devel_allocation;
 ORTE_DECLSPEC extern bool orte_soft_locations;
 ORTE_DECLSPEC extern bool orte_hnp_connected;
+ORTE_DECLSPEC extern bool orte_nidmap_communicated;
+ORTE_DECLSPEC extern bool orte_node_info_communicated;
 
 /* launch agents */
 ORTE_DECLSPEC extern char *orte_launch_agent;
@@ -560,12 +568,9 @@ ORTE_DECLSPEC extern int orte_stat_history_size;
 /* envars to forward */
 ORTE_DECLSPEC extern char **orte_forwarded_envars;
 
-/* map-reduce mode */
-ORTE_DECLSPEC extern bool orte_map_reduce;
-ORTE_DECLSPEC extern bool orte_staged_execution;
-
 /* map stddiag output to stderr so it isn't forwarded to mpirun */
 ORTE_DECLSPEC extern bool orte_map_stddiag_to_stderr;
+ORTE_DECLSPEC extern bool orte_map_stddiag_to_stdout;
 
 /* maximum size of virtual machine - used to subdivide allocation */
 ORTE_DECLSPEC extern int orte_max_vm_size;
@@ -578,8 +583,8 @@ ORTE_DECLSPEC extern char *orte_base_user_debugger;
  */
 ORTE_DECLSPEC extern char *orte_daemon_cores;
 
-/* cutoff for collective modex */
-ORTE_DECLSPEC extern uint32_t orte_direct_modex_cutoff;
+/* Max time to wait for stack straces to return */
+ORTE_DECLSPEC extern int orte_stack_trace_wait_timeout;
 
 END_C_DECLS
 

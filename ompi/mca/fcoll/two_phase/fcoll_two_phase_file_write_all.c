@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2005 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -11,7 +11,7 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2008-2014 University of Houston. All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015-2016 Los Alamos National Security, LLC. All rights
  *                         reserved.
@@ -27,6 +27,7 @@
 
 #include "mpi.h"
 #include "ompi/constants.h"
+#include "ompi/communicator/communicator.h"
 #include "ompi/mca/fcoll/fcoll.h"
 #include "ompi/mca/io/ompio/io_ompio.h"
 #include "ompi/mca/io/io.h"
@@ -190,7 +191,7 @@ mca_fcoll_two_phase_file_write_all (mca_io_ompio_file_t *fh,
 	    goto exit;
 	}
 
-	send_buf_addr = (OPAL_PTRDIFF_TYPE)buf;
+	send_buf_addr = (ptrdiff_t)buf;
 	if ( 0 < iov_count ) {
 	    decoded_iov = (struct iovec *)malloc
 		(iov_count * sizeof(struct iovec));
@@ -201,13 +202,13 @@ mca_fcoll_two_phase_file_write_all (mca_io_ompio_file_t *fh,
 	}
 	for (ti = 0; ti < iov_count; ti ++){
 	    decoded_iov[ti].iov_base = (IOVBASE_TYPE *)(
-		(OPAL_PTRDIFF_TYPE)temp_iov[ti].iov_base -
+		(ptrdiff_t)temp_iov[ti].iov_base -
 		send_buf_addr);
 	    decoded_iov[ti].iov_len =
 		temp_iov[ti].iov_len ;
 #if DEBUG_ON
 	    printf("d_offset[%d]: %ld, d_len[%d]: %ld\n",
-		   ti, (OPAL_PTRDIFF_TYPE)decoded_iov[ti].iov_base,
+		   ti, (ptrdiff_t)decoded_iov[ti].iov_base,
 		   ti, decoded_iov[ti].iov_len);
 #endif
 	}
@@ -235,8 +236,9 @@ mca_fcoll_two_phase_file_write_all (mca_io_ompio_file_t *fh,
     }
 
     if (two_phase_num_io_procs > fh->f_size){
-	two_phase_num_io_procs = fh->f_size;
+        two_phase_num_io_procs = fh->f_size;
     }
+
 
 #if DEBUG_ON
     printf("Number of aggregators : %ld\n", two_phase_num_io_procs);
@@ -248,10 +250,16 @@ mca_fcoll_two_phase_file_write_all (mca_io_ompio_file_t *fh,
         goto exit;
     }
 
-    for (i =0; i< two_phase_num_io_procs; i++){
-	aggregator_list[i] = i * fh->f_size / two_phase_num_io_procs;
+    if ( OMPI_COMM_IS_MAPBY_NODE (&ompi_mpi_comm_world.comm) ) {
+        for (i =0; i< two_phase_num_io_procs; i++){
+            aggregator_list[i] = i;
+        }
     }
-
+    else {
+        for (i =0; i< two_phase_num_io_procs; i++){
+            aggregator_list[i] = i * fh->f_size / two_phase_num_io_procs;
+        }
+    }        
 
     ret = fh->f_generate_current_file_view ((struct mca_io_ompio_file_t*)fh,
 					    max_data,
@@ -264,13 +272,13 @@ mca_fcoll_two_phase_file_write_all (mca_io_ompio_file_t *fh,
     }
 
     long_max_data = (long) max_data;
-    ret = fh->f_comm->c_coll.coll_allreduce (&long_max_data,
+    ret = fh->f_comm->c_coll->coll_allreduce (&long_max_data,
 					     &long_total_bytes,
 					     1,
 					     MPI_LONG,
 					     MPI_SUM,
 					     fh->f_comm,
-					     fh->f_comm->c_coll.coll_allreduce_module);
+					     fh->f_comm->c_coll->coll_allreduce_module);
 
     if ( OMPI_SUCCESS != ret ) {
 	goto exit;
@@ -392,28 +400,28 @@ mca_fcoll_two_phase_file_write_all (mca_io_ompio_file_t *fh,
     }
 
 
-    ret = fh->f_comm->c_coll.coll_allgather(&start_offset,
+    ret = fh->f_comm->c_coll->coll_allgather(&start_offset,
 					    1,
 					    OMPI_OFFSET_DATATYPE,
 					    start_offsets,
 					    1,
 					    OMPI_OFFSET_DATATYPE,
 					    fh->f_comm,
-					    fh->f_comm->c_coll.coll_allgather_module);
+					    fh->f_comm->c_coll->coll_allgather_module);
 
     if ( OMPI_SUCCESS != ret ){
 	goto exit;
     }
 
 
-    ret = fh->f_comm->c_coll.coll_allgather(&end_offset,
+    ret = fh->f_comm->c_coll->coll_allgather(&end_offset,
 					    1,
 					    OMPI_OFFSET_DATATYPE,
 					    end_offsets,
 					    1,
 					    OMPI_OFFSET_DATATYPE,
 					    fh->f_comm,
-					    fh->f_comm->c_coll.coll_allgather_module);
+					    fh->f_comm->c_coll->coll_allgather_module);
 
 
     if ( OMPI_SUCCESS != ret ){
@@ -642,13 +650,13 @@ static int two_phase_exch_and_write(mca_io_ompio_file_t *fh,
 	ntimes = 0;
     }
 
-    fh->f_comm->c_coll.coll_allreduce (&ntimes,
+    fh->f_comm->c_coll->coll_allreduce (&ntimes,
 				       &max_ntimes,
 				       1,
 				       MPI_INT,
 				       MPI_MAX,
 				       fh->f_comm,
-				       fh->f_comm->c_coll.coll_allreduce_module);
+				       fh->f_comm->c_coll->coll_allreduce_module);
 
     if (ntimes){
 	write_buf = (char *) malloc (two_phase_cycle_buffer_size);
@@ -945,14 +953,14 @@ static int two_phase_exchage_data(mca_io_ompio_file_t *fh,
 #if OMPIO_FCOLL_WANT_TIME_BREAKDOWN
     start_comm_time = MPI_Wtime();
 #endif
-    ret = fh->f_comm->c_coll.coll_alltoall (recv_size,
+    ret = fh->f_comm->c_coll->coll_alltoall (recv_size,
 					    1,
 					    MPI_INT,
 					    send_size,
 					    1,
 					    MPI_INT,
 					    fh->f_comm,
-					    fh->f_comm->c_coll.coll_alltoall_module);
+					    fh->f_comm->c_coll->coll_alltoall_module);
 
     if ( OMPI_SUCCESS != ret ){
 	return ret;

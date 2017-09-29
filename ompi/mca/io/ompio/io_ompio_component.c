@@ -10,11 +10,12 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2008-2015 University of Houston. All rights reserved.
+ * Copyright (c) 2008-2017 University of Houston. All rights reserved.
  * Copyright (c) 2015      Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -29,14 +30,17 @@
 #include "opal/threads/mutex.h"
 #include "opal/mca/base/base.h"
 #include "ompi/mca/io/io.h"
+#include "ompi/mca/fs/base/base.h"
 #include "io_ompio.h"
 
-int mca_io_ompio_cycle_buffer_size = -1;
+int mca_io_ompio_cycle_buffer_size = OMPIO_DEFAULT_CYCLE_BUF_SIZE;
 int mca_io_ompio_bytes_per_agg = OMPIO_PREALLOC_MAX_BUF_SIZE;
 int mca_io_ompio_num_aggregators = -1;
 int mca_io_ompio_record_offset_info = 0;
 int mca_io_ompio_coll_timing_info = 0;
-int mca_io_ompio_sharedfp_lazy_open = 1;
+int mca_io_ompio_sharedfp_lazy_open = 0;
+int mca_io_ompio_max_aggregators_ratio=8;
+int mca_io_ompio_aggregators_cutoff_threshold=3;
 
 int mca_io_ompio_grouping_option=5;
 
@@ -55,11 +59,11 @@ file_query (struct ompi_file_t *file,
 static int file_unquery(struct ompi_file_t *file,
                         struct mca_io_base_file_t *private_data);
 
-static int delete_query(const char *filename, struct ompi_info_t *info,
+static int delete_query(const char *filename, struct opal_info_t *info,
                         struct mca_io_base_delete_t **private_data,
                         bool *usable, int *priorty);
 
-static int delete_select(const char *filename, struct ompi_info_t *info,
+static int delete_select(const char *filename, struct opal_info_t *info,
                          struct mca_io_base_delete_t *private_data);
 
 static int register_datarep(const char *,
@@ -165,7 +169,7 @@ static int register_component(void)
                                            MCA_BASE_VAR_SCOPE_READONLY,
                                            &mca_io_ompio_coll_timing_info);
 
-    mca_io_ompio_cycle_buffer_size = -1;
+    mca_io_ompio_cycle_buffer_size = OMPIO_DEFAULT_CYCLE_BUF_SIZE;
     (void) mca_base_component_var_register(&mca_io_ompio_component.io_version,
                                            "cycle_buffer_size",
                                            "Data size issued by individual reads/writes per call",
@@ -193,7 +197,7 @@ static int register_component(void)
                                            &mca_io_ompio_num_aggregators);
 
 
-    mca_io_ompio_sharedfp_lazy_open = 1;
+    mca_io_ompio_sharedfp_lazy_open = 0;
     (void) mca_base_component_var_register(&mca_io_ompio_component.io_version,
                                            "sharedfp_lazy_open",
                                            "lazy allocation of internal shared file pointer structures",
@@ -213,6 +217,31 @@ static int register_component(void)
                                            OPAL_INFO_LVL_9,
                                            MCA_BASE_VAR_SCOPE_READONLY,
                                            &mca_io_ompio_grouping_option);
+
+    mca_io_ompio_max_aggregators_ratio = 8;
+    (void) mca_base_component_var_register(&mca_io_ompio_component.io_version,
+                                           "max_aggregators_ratio",
+                                           "Maximum number of processes that can be an aggregator expressed as "
+                                           "the ratio to the number of process used to open the file"
+                                           " i.e 1 out of n processes can be an aggregator, with n being specified"
+                                           " by this mca parameter.",
+                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                           OPAL_INFO_LVL_9,
+                                           MCA_BASE_VAR_SCOPE_READONLY,
+                                           &mca_io_ompio_max_aggregators_ratio);
+
+
+    mca_io_ompio_aggregators_cutoff_threshold=3;
+    (void) mca_base_component_var_register(&mca_io_ompio_component.io_version,
+                                           "aggregators_cutoff_threshold",
+                                           "Relativ cutoff threshold for incrementing the number of aggregators "
+                                           "in the simple aggregator selection algorithm (5). Lower value "
+                                           "for this parameter will lead to higher no. of aggregators.",
+                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                           OPAL_INFO_LVL_9,
+                                           MCA_BASE_VAR_SCOPE_READONLY,
+                                           &mca_io_ompio_aggregators_cutoff_threshold);
+
 
     return OMPI_SUCCESS;
 }
@@ -257,8 +286,38 @@ file_query(struct ompi_file_t *file,
            int *priority)
 {
     mca_io_ompio_data_t *data;
+    char *tmp;
+    int rank;
+    int is_lustre=0; //false
 
-    *priority = priority_param;
+    tmp = strchr (file->f_filename, ':');
+    rank = ompi_comm_rank ( file->f_comm);
+    if (!tmp) {
+        if ( 0 == rank) {
+            if (LUSTRE == mca_fs_base_get_fstype(file->f_filename)) {
+                is_lustre = 1; //true
+            }
+        }
+        
+        file->f_comm->c_coll->coll_bcast (&is_lustre,
+                                          1,
+                                          MPI_INT,
+                                          0,
+                                          file->f_comm,
+                                          file->f_comm->c_coll->coll_bcast_module);
+    }
+    else {
+        if (!strncasecmp(file->f_filename, "lustre:", 7) ) {
+            is_lustre = 1;
+        }
+    }
+
+    if (is_lustre) {
+        *priority = 1;
+    }
+    else {
+        *priority = priority_param;
+    }
 
     /* Allocate a space for this module to hang private data (e.g.,
        the OMPIO file handle) */
@@ -290,7 +349,7 @@ static int file_unquery(struct ompi_file_t *file,
 }
 
 
-static int delete_query(const char *filename, struct ompi_info_t *info,
+static int delete_query(const char *filename, struct opal_info_t *info,
                         struct mca_io_base_delete_t **private_data,
                         bool *usable, int *priority)
 {
@@ -301,7 +360,7 @@ static int delete_query(const char *filename, struct ompi_info_t *info,
     return OMPI_SUCCESS;
 }
 
-static int delete_select(const char *filename, struct ompi_info_t *info,
+static int delete_select(const char *filename, struct opal_info_t *info,
                          struct mca_io_base_delete_t *private_data)
 {
     int ret;

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2014-2016 Intel, Inc. All rights reserved
- * Copyright (c) 2014      Research Organization for Information Science
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2014-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
@@ -173,6 +173,8 @@ const char *orte_attr_key_to_str(orte_attribute_key_t key)
 
         case ORTE_NODE_USERNAME:
             return "NODE-USERNAME";
+        case ORTE_NODE_PORT:
+            return "NODE-PORT";
         case ORTE_NODE_LAUNCH_ID:
             return "NODE-LAUNCHID";
         case ORTE_NODE_HOSTID:
@@ -252,8 +254,8 @@ const char *orte_attr_key_to_str(orte_attribute_key_t key)
             return "JOB-LAUNCHED-DAEMONS";
         case ORTE_JOB_REPORT_BINDINGS:
             return "JOB-REPORT-BINDINGS";
-        case ORTE_JOB_SLOT_LIST:
-            return "JOB-SLOT-LIST";
+        case ORTE_JOB_CPU_LIST:
+            return "JOB-CPU-LIST";
         case ORTE_JOB_NOTIFICATIONS:
             return "JOB-NOTIFICATIONS";
         case ORTE_JOB_ROOM_NUM:
@@ -282,6 +284,12 @@ const char *orte_attr_key_to_str(orte_attribute_key_t key)
             return "ORTE_JOB_NOTIFY_COMPLETION";
         case ORTE_JOB_TRANSPORT_KEY:
             return "ORTE_JOB_TRANSPORT_KEY";
+        case ORTE_JOB_INFO_CACHE:
+            return "ORTE_JOB_INFO_CACHE";
+        case ORTE_JOB_FULLY_DESCRIBED:
+            return "ORTE_JOB_FULLY_DESCRIBED";
+        case ORTE_JOB_SILENT_TERMINATION:
+            return "ORTE_JOB_SILENT_TERMINATION";
 
         case ORTE_PROC_NOBARRIER:
             return "PROC-NOBARRIER";
@@ -330,7 +338,8 @@ const char *orte_attr_key_to_str(orte_attribute_key_t key)
             return "RML-DESIRED-PROVIDERS";
         case ORTE_RML_PROTOCOL_ATTRIB:
             return "RML-DESIRED-PROTOCOLS";
-
+        case ORTE_RML_ROUTED_ATTRIB:
+            return "RML-DESIRED-ROUTED-MODULES";
         default:
             return "UNKNOWN-KEY";
         }
@@ -492,8 +501,8 @@ static int orte_attr_unload(orte_attribute_t *kv,
         return OPAL_ERR_TYPE_MISMATCH;
     }
     if (NULL == data  ||
-        (NULL == *data && OPAL_STRING != type && OPAL_BYTE_OBJECT != type &&
-         OPAL_BUFFER != type && OPAL_PTR != type)) {
+        (OPAL_STRING != type && OPAL_BYTE_OBJECT != type &&
+         OPAL_BUFFER != type && OPAL_PTR != type && NULL == *data)) {
         assert(0);
         OPAL_ERROR_LOG(OPAL_ERR_BAD_PARAM);
         return OPAL_ERR_BAD_PARAM;

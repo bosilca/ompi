@@ -13,10 +13,10 @@
  *                         All rights reserved.
  * Copyright (c) 2009      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2011      Oak Ridge National Labs.  All rights reserved.
- * Copyright (c) 2013-2015 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2013-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2014      Mellanox Technologies, Inc.
  *                         All rights reserved.
- * Copyright (c) 2014      Research Organization for Information Science
+ * Copyright (c) 2014-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
@@ -37,6 +37,8 @@
 
 #include "orte/mca/errmgr/errmgr.h"
 #include "orte/util/name_fns.h"
+#include "orte/util/show_help.h"
+#include "orte/util/threads.h"
 #include "orte/runtime/orte_globals.h"
 #include "orte/mca/grpcomm/grpcomm.h"
 #include "orte/mca/rml/rml.h"
@@ -57,6 +59,8 @@ static void pmix_server_release(int status, opal_buffer_t *buf, void *cbdata)
     char *data = NULL;
     int32_t ndata = 0;
     int rc = OPAL_SUCCESS;
+
+    ORTE_ACQUIRE_OBJECT(cd);
 
     /* unload the buffer */
     if (NULL != buf) {
@@ -116,8 +120,10 @@ int pmix_server_fencenb_fn(opal_list_t *procs, opal_list_t *info,
     /* pass along any data that was collected locally */
     if (ORTE_SUCCESS != (rc = orte_grpcomm.allgather(cd->sig, buf, pmix_server_release, cd))) {
         ORTE_ERROR_LOG(rc);
+        OBJ_RELEASE(buf);
         return rc;
     }
+    OBJ_RELEASE(buf);
     return ORTE_SUCCESS;
 }
 
@@ -131,6 +137,8 @@ static void dmodex_req(int sd, short args, void *cbdata)
     opal_buffer_t *buf;
     uint8_t *data=NULL;
     int32_t sz=0;
+
+    ORTE_ACQUIRE_OBJECT(rq);
 
     /* a race condition exists here because of the thread-shift - it is
      * possible that data for the specified proc arrived while we were
@@ -146,6 +154,10 @@ static void dmodex_req(int sd, short args, void *cbdata)
         return;
     }
 
+    /* adjust the timeout to reflect the size of the job as it can take some
+     * amount of time to start the job */
+    ORTE_ADJUST_TIMEOUT(req);
+
     /* has anyone already requested data for this target? If so,
      * then the data is already on its way */
     for (rnum=0; rnum < orte_pmix_server_globals.reqs.num_rooms; rnum++) {
@@ -158,7 +170,7 @@ static void dmodex_req(int sd, short args, void *cbdata)
             /* save the request in the hotel until the
              * data is returned */
             if (OPAL_SUCCESS != (rc = opal_hotel_checkin(&orte_pmix_server_globals.reqs, req, &req->room_num))) {
-                ORTE_ERROR_LOG(rc);
+                orte_show_help("help-orted.txt", "noroom", true, req->operation, orte_pmix_server_globals.num_rooms);
                 /* can't just return as that would cause the requestor
                  * to hang, so instead execute the callback */
                 goto callback;
@@ -174,7 +186,7 @@ static void dmodex_req(int sd, short args, void *cbdata)
          * that we don't know about yet. In this case, just
          * record the request and we will process it later */
         if (OPAL_SUCCESS != (rc = opal_hotel_checkin(&orte_pmix_server_globals.reqs, req, &req->room_num))) {
-            ORTE_ERROR_LOG(rc);
+            orte_show_help("help-orted.txt", "noroom", true, req->operation, orte_pmix_server_globals.num_rooms);
             /* can't just return as that would cause the requestor
              * to hang, so instead execute the callback */
             goto callback;
@@ -203,7 +215,7 @@ static void dmodex_req(int sd, short args, void *cbdata)
     /* track the request so we know the function and cbdata
      * to callback upon completion */
     if (OPAL_SUCCESS != (rc = opal_hotel_checkin(&orte_pmix_server_globals.reqs, req, &req->room_num))) {
-        ORTE_ERROR_LOG(rc);
+        orte_show_help("help-orted.txt", "noroom", true, req->operation, orte_pmix_server_globals.num_rooms);
         goto callback;
     }
 
@@ -230,7 +242,8 @@ static void dmodex_req(int sd, short args, void *cbdata)
     }
 
     /* send it to the host daemon */
-    if (ORTE_SUCCESS != (rc = orte_rml.send_buffer_nb(&dmn->name, buf, ORTE_RML_TAG_DIRECT_MODEX,
+    if (ORTE_SUCCESS != (rc = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                                      &dmn->name, buf, ORTE_RML_TAG_DIRECT_MODEX,
                                                       orte_rml_send_callback, NULL))) {
         ORTE_ERROR_LOG(rc);
         opal_hotel_checkout(&orte_pmix_server_globals.reqs, req->room_num);

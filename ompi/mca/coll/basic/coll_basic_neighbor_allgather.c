@@ -14,6 +14,7 @@
  *                         reserved.
  * Copyright (c) 2014-2015 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -48,9 +49,11 @@ mca_coll_basic_neighbor_allgather_cart(const void *sbuf, int scount,
     ptrdiff_t lb, extent;
     int rc = MPI_SUCCESS, dim, nreqs;
 
+    if( 0 == cart->ndims ) return OMPI_SUCCESS;
+
     ompi_datatype_get_extent(rdtype, &lb, &extent);
 
-    reqs = preqs = coll_base_comm_get_reqs( module->base_data, 4 * cart->ndims );
+    reqs = preqs = ompi_coll_base_comm_get_reqs( module->base_data, 4 * cart->ndims );
     if( NULL == reqs ) { return OMPI_ERR_OUT_OF_RESOURCE; }
 
     /* The ordering is defined as -1 then +1 in each dimension in
@@ -129,6 +132,7 @@ mca_coll_basic_neighbor_allgather_graph(const void *sbuf, int scount,
     int rc = MPI_SUCCESS, neighbor;
 
     mca_topo_base_graph_neighbors_count (comm, rank, &degree);
+    if( 0 == degree) return OMPI_SUCCESS;
 
     edges = graph->edges;
     if (rank > 0) {
@@ -136,7 +140,7 @@ mca_coll_basic_neighbor_allgather_graph(const void *sbuf, int scount,
     }
 
     ompi_datatype_get_extent(rdtype, &lb, &extent);
-    reqs = preqs = coll_base_comm_get_reqs( module->base_data, 2 * degree);
+    reqs = preqs = ompi_coll_base_comm_get_reqs( module->base_data, 2 * degree);
     if( NULL == reqs ) { return OMPI_ERR_OUT_OF_RESOURCE; }
 
     for (neighbor = 0; neighbor < degree ; ++neighbor) {
@@ -181,12 +185,13 @@ mca_coll_basic_neighbor_allgather_dist_graph(const void *sbuf, int scount,
 
     indegree = dist_graph->indegree;
     outdegree = dist_graph->outdegree;
+    if( 0 == (indegree + outdegree) ) return OMPI_SUCCESS;
 
     inedges = dist_graph->in;
     outedges = dist_graph->out;
 
     ompi_datatype_get_extent(rdtype, &lb, &extent);
-    reqs = preqs = coll_base_comm_get_reqs( module->base_data, indegree + outdegree);
+    reqs = preqs = ompi_coll_base_comm_get_reqs( module->base_data, indegree + outdegree);
     if( NULL == reqs ) { return OMPI_ERR_OUT_OF_RESOURCE; }
 
     for (neighbor = 0; neighbor < indegree ; ++neighbor) {

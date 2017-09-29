@@ -13,9 +13,9 @@
  * Copyright (c) 2007-2012 Los Alamos National Security, LLC.  All rights
  *                         reserved.
  * Copyright (c) 2008-2009 Sun Microsystems, Inc.  All rights reserved.
- * Copyright (c) 2011      IBM Corporation.  All rights reserved.
- * Copyright (c) 2014-2015 Intel Corporation.  All rights reserved.
- * Copyright (c) 2015-2016 Research Organization for Information Science
+ * Copyright (c) 2011-2017 IBM Corporation.  All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
@@ -80,12 +80,14 @@
 #include "orte/util/name_fns.h"
 #include "orte/util/nidmap.h"
 #include "orte/util/proc_info.h"
+#include "orte/util/threads.h"
 
 #include "orte/mca/rml/rml.h"
 #include "orte/mca/rml/rml_types.h"
 #include "orte/mca/ess/ess.h"
 #include "orte/mca/ess/base/base.h"
 #include "orte/mca/errmgr/errmgr.h"
+#include "orte/mca/grpcomm/base/base.h"
 #include "orte/mca/rmaps/rmaps.h"
 #include "orte/mca/routed/routed.h"
 #include "orte/mca/rml/base/rml_contact.h"
@@ -261,6 +263,7 @@ static void rsh_wait_daemon(orte_proc_t *daemon, void* cbdata)
 {
     orte_job_t *jdata;
     orte_plm_rsh_caddy_t *caddy=(orte_plm_rsh_caddy_t*)cbdata;
+    char *rtmod;
 
     if (orte_orteds_term_ordered || orte_abnormal_term_ordered) {
         /* ignore any such report - it will occur if we left the
@@ -270,8 +273,8 @@ static void rsh_wait_daemon(orte_proc_t *daemon, void* cbdata)
         return;
     }
 
-    if (! WIFEXITED(daemon->exit_code) ||
-        ! WEXITSTATUS(daemon->exit_code) == 0) { /* if abnormal exit */
+    if (!WIFEXITED(daemon->exit_code) ||
+        WEXITSTATUS(daemon->exit_code) != 0) { /* if abnormal exit */
         /* if we are not the HNP, send a message to the HNP alerting it
          * to the failure
          */
@@ -284,7 +287,8 @@ static void rsh_wait_daemon(orte_proc_t *daemon, void* cbdata)
             buf = OBJ_NEW(opal_buffer_t);
             opal_dss.pack(buf, &(daemon->name.vpid), 1, ORTE_VPID);
             opal_dss.pack(buf, &daemon->exit_code, 1, OPAL_INT);
-            orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, buf,
+            orte_rml.send_buffer_nb(orte_coll_conduit,
+                                    ORTE_PROC_MY_HNP, buf,
                                     ORTE_RML_TAG_REPORT_REMOTE_LAUNCH,
                                     orte_rml_send_callback, NULL);
             /* note that this daemon failed */
@@ -305,7 +309,8 @@ static void rsh_wait_daemon(orte_proc_t *daemon, void* cbdata)
             /* remove it from the routing table to ensure num_routes
              * returns the correct value
              */
-            orte_routed.route_lost(&daemon->name);
+            rtmod = orte_rml.get_routed(orte_coll_conduit);
+            orte_routed.route_lost(rtmod, &daemon->name);
             /* report that the daemon has failed so we can exit */
             ORTE_ACTIVATE_PROC_STATE(&daemon->name, ORTE_PROC_STATE_FAILED_TO_START);
         }
@@ -608,8 +613,7 @@ static int setup_launch(int *argcptr, char ***argvptr,
      */
     orte_plm_base_orted_append_basic_args(&argc, &argv,
                                           "env",
-                                          proc_vpid_index,
-                                          NULL);
+                                          proc_vpid_index);
 
     /* ensure that only the ssh plm is selected on the remote daemon */
     opal_argv_append_nosize(&argv, "-"OPAL_MCA_CMD_LINE_ID);
@@ -776,12 +780,12 @@ static int remote_spawn(opal_buffer_t *launch)
     int rc=ORTE_SUCCESS;
     bool failed_launch = true;
     orte_std_cntr_t n;
-    opal_byte_object_t *bo;
     orte_process_name_t target;
     orte_plm_rsh_caddy_t *caddy;
     orte_job_t *daemons;
     opal_list_t coll;
     orte_namelist_t *child;
+    char *rtmod;
 
     OPAL_OUTPUT_VERBOSE((1, orte_plm_base_framework.framework_output,
                          "%s plm:rsh: remote spawn called",
@@ -797,24 +801,10 @@ static int remote_spawn(opal_buffer_t *launch)
         goto cleanup;
     }
 
-    /* extract the byte object holding the nidmap */
-    n=1;
-    if (ORTE_SUCCESS != (rc = opal_dss.unpack(launch, &bo, &n, OPAL_BYTE_OBJECT))) {
-        ORTE_ERROR_LOG(rc);
-        goto cleanup;
-    }
-    /* update our nidmap - this will free data in the byte object */
-    if (ORTE_SUCCESS != (rc = orte_util_decode_daemon_nodemap(bo))) {
-        ORTE_ERROR_LOG(rc);
-        goto cleanup;
-    }
-
-    /* ensure the routing plan is updated */
-    orte_routed.update_routing_plan();
-
     /* get the updated routing list */
+    rtmod = orte_rml.get_routed(orte_coll_conduit);
     OBJ_CONSTRUCT(&coll, opal_list_t);
-    orte_routed.get_routing_list(&coll);
+    orte_routed.get_routing_list(rtmod, &coll);
 
     /* if I have no children, just return */
     if (0 == opal_list_get_size(&coll)) {
@@ -828,7 +818,8 @@ static int remote_spawn(opal_buffer_t *launch)
     }
 
     /* setup the launch */
-    if (ORTE_SUCCESS != (rc = setup_launch(&argc, &argv, orte_process_info.nodename, &node_name_index1,
+    if (ORTE_SUCCESS != (rc = setup_launch(&argc, &argv,
+                                           orte_process_info.nodename, &node_name_index1,
                                            &proc_vpid_index, prefix))) {
         ORTE_ERROR_LOG(rc);
         OBJ_DESTRUCT(&coll);
@@ -904,7 +895,8 @@ cleanup:
         buf = OBJ_NEW(opal_buffer_t);
         opal_dss.pack(buf, &target.vpid, 1, ORTE_VPID);
         opal_dss.pack(buf, &rc, 1, OPAL_INT);
-        orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, buf,
+        orte_rml.send_buffer_nb(orte_coll_conduit,
+                                ORTE_PROC_MY_HNP, buf,
                                 ORTE_RML_TAG_REPORT_REMOTE_LAUNCH,
                                 orte_rml_send_callback, NULL);
     }
@@ -935,6 +927,8 @@ static void process_launch_list(int fd, short args, void *cbdata)
     pid_t pid;
     orte_plm_rsh_caddy_t *caddy;
 
+    ORTE_ACQUIRE_OBJECT(caddy);
+
     while (num_in_progress < mca_plm_rsh_component.num_concurrent) {
         item = opal_list_remove_first(&launch_list);
         if (NULL == item) {
@@ -956,9 +950,45 @@ static void process_launch_list(int fd, short args, void *cbdata)
 
         /* child */
         if (pid == 0) {
+            /*
+             * When the user presses CTRL-C, SIGINT is sent to the whole process
+             * group which terminates the rsh/ssh command. This can cause the
+             * remote daemon to crash with a SIGPIPE when it tried to print out
+             * status information. This has two concequences:
+             * 1) The remote node is not cleaned up as it should. The local
+             *    processes will notice that the orted failed and cleanup their
+             *    part of the session directory, but the job level part will
+             *    remain littered.
+             * 2) Any debugging information we expected to see from the orted
+             *    during shutdown is lost.
+             *
+             * The solution here is to put the child processes in a separate
+             * process group from the HNP. So when the user presses CTRL-C
+             * then only the HNP receives the signal, and not the rsh/ssh
+             * child processes.
+             */
+#if HAVE_SETPGID
+            if( 0 != setpgid(0, 0) ) {
+                opal_output(0, "plm:rsh: Error: setpgid(0,0) failed in child with errno=%s(%d)\n",
+                            strerror(errno), errno);
+                exit(-1);
+            }
+#endif
+
             /* do the ssh launch - this will exit if it fails */
             ssh_child(caddy->argc, caddy->argv);
         } else { /* father */
+            // Put the child in a separate progress group
+            // - see comment in child section.
+#if HAVE_SETPGID
+            if( 0 != setpgid(pid, pid) ) {
+                opal_output(0, "plm:rsh: Warning: setpgid(%ld,%ld) failed in parent with errno=%s(%d)\n",
+                            (long)pid, (long)pid, strerror(errno), errno);
+                // Ignore this error since the child is off and running.
+                // We still need to track it.
+            }
+#endif
+
             /* indicate this daemon has been launched */
             caddy->daemon->state = ORTE_PROC_STATE_RUNNING;
             /* record the pid of the ssh fork */
@@ -990,7 +1020,11 @@ static void launch_daemons(int fd, short args, void *cbdata)
     orte_plm_rsh_caddy_t *caddy;
     opal_list_t coll;
     char *username;
+    int port, *portptr;
     orte_namelist_t *child;
+    char *rtmod;
+
+    ORTE_ACQUIRE_OBJECT(state);
 
     /* if we are launching debugger daemons, then just go
      * do it - no new daemons will be launched
@@ -1066,7 +1100,8 @@ static void launch_daemons(int fd, short args, void *cbdata)
                        true, mca_plm_rsh_component.num_concurrent, map->num_new_daemons);
         ORTE_ERROR_LOG(ORTE_ERR_FATAL);
         OBJ_RELEASE(state);
-        return;
+        rc = ORTE_ERR_SILENT;
+        goto cleanup;
     }
 
     /*
@@ -1111,11 +1146,17 @@ static void launch_daemons(int fd, short args, void *cbdata)
             }
         }
     }
+    if (NULL == node) {
+        /* this should be impossible, but adding the check will
+         * silence code checkers that don't know better */
+        ORTE_ERROR_LOG(ORTE_ERR_NOT_FOUND);
+        rc = ORTE_ERR_NOT_FOUND;
+        goto cleanup;
+    }
 
     /* if we are tree launching, find our children and create the launch cmd */
     if (!mca_plm_rsh_component.no_tree_spawn) {
         orte_daemon_cmd_flag_t command = ORTE_DAEMON_TREE_SPAWN;
-        opal_byte_object_t bo, *boptr;
         orte_job_t *jdatorted;
 
         /* get the tree spawn buffer */
@@ -1132,22 +1173,7 @@ static void launch_daemons(int fd, short args, void *cbdata)
             OBJ_RELEASE(orte_tree_launch_cmd);
             goto cleanup;
         }
-        /* construct a nodemap of all daemons we know about */
-        if (ORTE_SUCCESS != (rc = orte_util_encode_nodemap(&bo, false))) {
-            ORTE_ERROR_LOG(rc);
-            OBJ_RELEASE(orte_tree_launch_cmd);
-            goto cleanup;
-        }
-        /* store it */
-        boptr = &bo;
-        if (ORTE_SUCCESS != (rc = opal_dss.pack(orte_tree_launch_cmd, &boptr, 1, OPAL_BYTE_OBJECT))) {
-            ORTE_ERROR_LOG(rc);
-            OBJ_RELEASE(orte_tree_launch_cmd);
-            free(bo.bytes);
-            goto cleanup;
-        }
-        /* release the data since it has now been copied into our buffer */
-        free(bo.bytes);
+
         /* get the orted job data object */
         if (NULL == (jdatorted = orte_get_job_data_object(ORTE_PROC_MY_NAME->jobid))) {
             ORTE_ERROR_LOG(ORTE_ERR_NOT_FOUND);
@@ -1157,7 +1183,8 @@ static void launch_daemons(int fd, short args, void *cbdata)
 
         /* get the updated routing list */
         OBJ_CONSTRUCT(&coll, opal_list_t);
-        orte_routed.get_routing_list(&coll);
+        rtmod = orte_rml.get_routed(orte_coll_conduit);
+        orte_routed.get_routing_list(rtmod, &coll);
     }
 
     /* setup the launch */
@@ -1242,6 +1269,15 @@ static void launch_daemons(int fd, short args, void *cbdata)
         caddy = OBJ_NEW(orte_plm_rsh_caddy_t);
         caddy->argc = argc;
         caddy->argv = opal_argv_copy(argv);
+        /* insert the alternate port if any */
+        portptr = &port;
+        if (orte_get_attribute(&node->attributes, ORTE_NODE_PORT, (void**)&portptr, OPAL_INT)) {
+            char portname[16];
+            /* for the sake of simplicity, insert "-p" <port> in the duplicated argv */
+            opal_argv_insert_element(&caddy->argv, node_name_index1+1, "-p");
+            snprintf (portname, 15, "%d", port);
+            opal_argv_insert_element(&caddy->argv, node_name_index1+2, portname);
+        }
         caddy->daemon = node->daemon;
         OBJ_RETAIN(caddy->daemon);
         opal_list_append(&launch_list, &caddy->super);
@@ -1254,6 +1290,7 @@ static void launch_daemons(int fd, short args, void *cbdata)
     OPAL_OUTPUT_VERBOSE((1, orte_plm_base_framework.framework_output,
                          "%s plm:rsh: activating launch event",
                          ORTE_NAME_PRINT(ORTE_PROC_MY_NAME)));
+    ORTE_POST_OBJECT(state);
     opal_event_active(&launch_event, EV_WRITE, 1);
 
     /* now that we've launched the daemons, let the daemon callback
@@ -1324,6 +1361,10 @@ static int rsh_finalize(void)
             }
         }
     }
+    free(mca_plm_rsh_component.agent_path);
+    free(rsh_agent_path);
+    opal_argv_free(mca_plm_rsh_component.agent_argv);
+    opal_argv_free(rsh_agent_argv);
 
     return rc;
 }

@@ -1,3 +1,4 @@
+/* -*- Mode: C; c-basic-offset:4 ; indent-tabs-mode:nil -*- */
 /*
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
@@ -10,6 +11,8 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2016      Broadcom Limited. All rights reserved.
+ * Copyright (c) 2016-2017 Los Alamos National Security, LLC. All rights
+ *                         reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -39,16 +42,6 @@
 #ifdef OPAL_DISABLE_INLINE_ASM
 #undef OPAL_C_GCC_INLINE_ASSEMBLY
 #define OPAL_C_GCC_INLINE_ASSEMBLY 0
-#undef OPAL_CXX_GCC_INLINE_ASSEMBLY
-#define OPAL_CXX_GCC_INLINE_ASSEMBLY 0
-#undef OPAL_C_DEC_INLINE_ASSEMBLY
-#define OPAL_C_DEC_INLINE_ASSEMBLY 0
-#undef OPAL_CXX_DEC_INLINE_ASSEMBLY
-#define OPAL_CXX_DEC_INLINE_ASSEMBLY 0
-#undef OPAL_C_XLC_INLINE_ASSEMBLY
-#define OPAL_C_XLC_INLINE_ASSEMBLY 0
-#undef OPAL_CXX_XLC_INLINE_ASSEMBLY
-#define OPAL_CXX_XLC_INLINE_ASSEMBLY 0
 #endif
 
 /* define OPAL_{GCC,DEC,XLC}_INLINE_ASSEMBLY based on the
@@ -56,12 +49,8 @@
    are in C or C++ */
 #if defined(c_plusplus) || defined(__cplusplus)
 #define OPAL_GCC_INLINE_ASSEMBLY OPAL_CXX_GCC_INLINE_ASSEMBLY
-#define OPAL_DEC_INLINE_ASSEMBLY OPAL_CXX_DEC_INLINE_ASSEMBLY
-#define OPAL_XLC_INLINE_ASSEMBLY OPAL_CXX_XLC_INLINE_ASSEMBLY
 #else
 #define OPAL_GCC_INLINE_ASSEMBLY OPAL_C_GCC_INLINE_ASSEMBLY
-#define OPAL_DEC_INLINE_ASSEMBLY OPAL_C_DEC_INLINE_ASSEMBLY
-#define OPAL_XLC_INLINE_ASSEMBLY OPAL_C_XLC_INLINE_ASSEMBLY
 #endif
 
 /**********************************************************************
@@ -81,8 +70,8 @@ BEGIN_C_DECLS
 
 #if defined(DOXYGEN)
 /* don't include system-level gorp when generating doxygen files */
-#elif OPAL_ASSEMBLY_ARCH == OPAL_AMD64
-#include "opal/sys/amd64/timer.h"
+#elif OPAL_ASSEMBLY_ARCH == OPAL_X86_64
+#include "opal/sys/x86_64/timer.h"
 #elif OPAL_ASSEMBLY_ARCH == OPAL_ARM
 #include "opal/sys/arm/timer.h"
 #elif OPAL_ASSEMBLY_ARCH == OPAL_ARM64
@@ -109,6 +98,17 @@ BEGIN_C_DECLS
 
 typedef long opal_timer_t;
 #endif
+#endif
+
+#ifndef OPAL_HAVE_SYS_TIMER_IS_MONOTONIC
+
+#define OPAL_HAVE_SYS_TIMER_IS_MONOTONIC 1
+
+static inline bool opal_sys_timer_is_monotonic (void)
+{
+    return OPAL_TIMER_MONOTONIC;
+}
+
 #endif
 
 END_C_DECLS

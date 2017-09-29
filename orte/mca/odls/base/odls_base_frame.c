@@ -10,11 +10,12 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2010-2011 Oracle and/or its affiliates.  All rights reserved.
- * Copyright (c) 2011      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2011-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2011-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
  * Copyright (c) 2014-2015 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      Intel, Inc. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -31,7 +32,8 @@
 #include "opal/class/opal_ring_buffer.h"
 #include "orte/mca/mca.h"
 #include "opal/mca/base/base.h"
-#include "opal/mca/hwloc/hwloc.h"
+#include "opal/mca/hwloc/hwloc-internal.h"
+#include "opal/runtime/opal_progress_threads.h"
 #include "opal/util/output.h"
 #include "opal/util/path.h"
 #include "opal/util/argv.h"
@@ -76,6 +78,23 @@ static int orte_odls_base_register(mca_base_register_flag_t flags)
                                  MCA_BASE_VAR_SCOPE_READONLY,
                                  &orte_odls_globals.timeout_before_sigkill);
 
+    orte_odls_globals.num_threads = 0;
+    (void) mca_base_var_register("orte", "odls", "base", "num_threads",
+                                 "Number of threads to use for spawning local procs",
+                                 MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                 OPAL_INFO_LVL_9,
+                                 MCA_BASE_VAR_SCOPE_READONLY,
+                                 &orte_odls_globals.num_threads);
+
+    orte_odls_globals.signal_direct_children_only = false;
+    (void) mca_base_var_register("orte", "odls", "base", "signal_direct_children_only",
+                                 "Whether to restrict signals (e.g., SIGTERM) to direct children, or "
+                                 "to apply them as well to any children spawned by those processes",
+                                 MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
+                                 OPAL_INFO_LVL_9,
+                                 MCA_BASE_VAR_SCOPE_READONLY,
+                                 &orte_odls_globals.signal_direct_children_only);
+
     return ORTE_SUCCESS;
 }
 
@@ -98,6 +117,15 @@ static int orte_odls_base_close(void)
         }
     }
     OBJ_RELEASE(orte_local_children);
+
+    if (0 < orte_odls_globals.num_threads) {
+        /* stop the progress threads */
+        for (i=0; NULL != orte_odls_globals.ev_threads[i]; i++) {
+            opal_progress_thread_finalize(orte_odls_globals.ev_threads[i]);
+        }
+    }
+    free(orte_odls_globals.ev_bases);
+    opal_argv_free(orte_odls_globals.ev_threads);
 
     return mca_base_framework_components_close(&orte_odls_base_framework, NULL);
 }
@@ -174,6 +202,25 @@ static int orte_odls_base_open(mca_base_open_flag_t flags)
         opal_argv_append_nosize(&orte_odls_globals.xtermcmd, "-e");
     }
 
+    /* setup the pool of worker threads */
+    orte_odls_globals.ev_threads = NULL;
+    orte_odls_globals.next_base = 0;
+    if (0 == orte_odls_globals.num_threads) {
+        orte_odls_globals.ev_bases = (opal_event_base_t**)malloc(sizeof(opal_event_base_t*));
+        /* use the default event base */
+       orte_odls_globals.ev_bases[0] = orte_event_base;
+    } else {
+        orte_odls_globals.ev_bases =
+            (opal_event_base_t**)malloc(orte_odls_globals.num_threads * sizeof(opal_event_base_t*));
+        for (i=0; i < orte_odls_globals.num_threads; i++) {
+            asprintf(&tmp, "ORTE-ODLS-%d", i);
+            orte_odls_globals.ev_bases[i] = opal_progress_thread_init(tmp);
+            opal_argv_append_nosize(&orte_odls_globals.ev_threads, tmp);
+            free(tmp);
+        }
+
+    }
+
      /* Open up all available components */
     return mca_base_framework_components_open(&orte_odls_base_framework, flags);
 }
@@ -197,3 +244,30 @@ OBJ_CLASS_INSTANCE(orte_odls_launch_local_t,
                    opal_object_t,
                    launch_local_const,
                    launch_local_dest);
+
+static void sccon(orte_odls_spawn_caddy_t *p)
+{
+    memset(&p->opts, 0, sizeof(orte_iof_base_io_conf_t));
+    p->cmd = NULL;
+    p->wdir = NULL;
+    p->argv = NULL;
+    p->env = NULL;
+}
+static void scdes(orte_odls_spawn_caddy_t *p)
+{
+    if (NULL != p->cmd) {
+        free(p->cmd);
+    }
+    if (NULL != p->wdir) {
+        free(p->wdir);
+    }
+    if (NULL != p->argv) {
+        opal_argv_free(p->argv);
+    }
+    if (NULL != p->env) {
+        opal_argv_free(p->env);
+    }
+}
+OBJ_CLASS_INSTANCE(orte_odls_spawn_caddy_t,
+                   opal_object_t,
+                   sccon, scdes);

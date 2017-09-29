@@ -2,8 +2,9 @@
 /*
  * Copyright (c) 2014-2016 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2016      Research Organization for Information Science
+ * Copyright (c) 2016-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016      Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -237,7 +238,7 @@ static inline int ompi_osc_rdma_gacc_contig (ompi_osc_rdma_sync_t *sync, const v
         target_address = target_address & ~btl_alignment_mask;
 
         OSC_RDMA_VERBOSE(MCA_BASE_VERBOSE_TRACE, "initiating btl get. local: %p (handle %p), remote: 0x%" PRIx64
-                         " (handle %p)", ptr, (void *) frag->handle, target_address, (void *) target_handle);
+                         " (handle %p)", (void*)ptr, (void *) frag->handle, target_address, (void *) target_handle);
 
         ret = module->selected_btl->btl_get (module->selected_btl, peer->data_endpoint, ptr,
                                              target_address, frag->handle, target_handle, aligned_len,
@@ -248,7 +249,7 @@ static inline int ompi_osc_rdma_gacc_contig (ompi_osc_rdma_sync_t *sync, const v
         memcpy (ptr, source, len);
 
         OSC_RDMA_VERBOSE(MCA_BASE_VERBOSE_TRACE, "initiating btl put. local: %p (handle %p), remote: 0x%" PRIx64
-                         " (handle %p)", ptr, (void *) frag->handle, target_address, (void *) target_handle);
+                         " (handle %p)", (void*)ptr, (void *) frag->handle, target_address, (void *) target_handle);
 
         ret = module->selected_btl->btl_put (module->selected_btl, peer->data_endpoint, ptr,
                                              target_address, frag->handle, target_handle, len, 0,
@@ -958,7 +959,7 @@ static inline int cas_rdma (ompi_osc_rdma_sync_t *sync, const void *source_addr,
 
 
 int ompi_osc_rdma_compare_and_swap (const void *origin_addr, const void *compare_addr, void *result_addr,
-                                    ompi_datatype_t *dt, int target_rank, OPAL_PTRDIFF_TYPE target_disp,
+                                    ompi_datatype_t *dt, int target_rank, ptrdiff_t target_disp,
                                     ompi_win_t *win)
 {
     ompi_osc_rdma_module_t *module = GET_MODULE(win);
@@ -966,6 +967,7 @@ int ompi_osc_rdma_compare_and_swap (const void *origin_addr, const void *compare
     mca_btl_base_registration_handle_t *target_handle;
     ompi_osc_rdma_sync_t *sync;
     uint64_t target_address;
+    ptrdiff_t true_lb, true_extent;
     int ret;
 
     OSC_RDMA_VERBOSE(MCA_BASE_VERBOSE_TRACE, "cswap: 0x%lx, 0x%lx, 0x%lx, %s, %d, %d, %s",
@@ -977,7 +979,12 @@ int ompi_osc_rdma_compare_and_swap (const void *origin_addr, const void *compare
         return OMPI_ERR_RMA_SYNC;
     }
 
-    ret = osc_rdma_get_remote_segment (module, peer, target_disp, dt->super.size, &target_address, &target_handle);
+    ret = ompi_datatype_get_true_extent(dt, &true_lb, &true_extent);
+    if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
+        return ret;
+    }
+
+    ret = osc_rdma_get_remote_segment (module, peer, target_disp, true_lb+true_extent, &target_address, &target_handle);
     if (OPAL_UNLIKELY(OPAL_SUCCESS != ret)) {
         return ret;
     }
@@ -1014,7 +1021,7 @@ int ompi_osc_rdma_rget_accumulate_internal (ompi_osc_rdma_sync_t *sync, const vo
     ompi_osc_rdma_module_t *module = sync->module;
     mca_btl_base_registration_handle_t *target_handle;
     uint64_t target_address;
-    ptrdiff_t lb, extent;
+    ptrdiff_t lb, origin_extent, target_span;
     int ret;
 
     /* short-circuit case. note that origin_count may be 0 if op is MPI_NO_OP */
@@ -1026,20 +1033,24 @@ int ompi_osc_rdma_rget_accumulate_internal (ompi_osc_rdma_sync_t *sync, const vo
         return OMPI_SUCCESS;
     }
 
-    (void) ompi_datatype_get_extent (origin_datatype, &lb, &extent);
+    target_span = opal_datatype_span(&target_datatype->super, target_count, &lb);
 
-    ret = osc_rdma_get_remote_segment (module, peer, target_disp, extent * target_count, &target_address, &target_handle);
+    // a buffer defined by (buf, count, dt)
+    // will have data starting at buf+offset and ending len bytes later:
+    ret = osc_rdma_get_remote_segment (module, peer, target_disp, target_span+lb, &target_address, &target_handle);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
         return ret;
     }
 
-    if (module->acc_single_intrinsic && extent <= 8) {
+    (void) ompi_datatype_get_extent (origin_datatype, &lb, &origin_extent);
+
+    if (module->acc_single_intrinsic && origin_extent <= 8) {
         if (module->acc_use_amo && ompi_datatype_is_predefined (origin_datatype)) {
             if (NULL == result_addr) {
-                ret = ompi_osc_rdma_acc_single_atomic (sync, origin_addr, origin_datatype, extent, peer, target_address,
+                ret = ompi_osc_rdma_acc_single_atomic (sync, origin_addr, origin_datatype, origin_extent, peer, target_address,
                                                        target_handle, op, request);
             } else {
-                ret = ompi_osc_rdma_fetch_and_op_atomic (sync, origin_addr, result_addr, origin_datatype, extent, peer, target_address,
+                ret = ompi_osc_rdma_fetch_and_op_atomic (sync, origin_addr, result_addr, origin_datatype, origin_extent, peer, target_address,
                                                          target_handle, op, request);
             }
 
@@ -1048,7 +1059,7 @@ int ompi_osc_rdma_rget_accumulate_internal (ompi_osc_rdma_sync_t *sync, const vo
             }
         }
 
-        ret = ompi_osc_rdma_fetch_and_op_cas (sync, origin_addr, result_addr, origin_datatype, extent, peer, target_address,
+        ret = ompi_osc_rdma_fetch_and_op_cas (sync, origin_addr, result_addr, origin_datatype, origin_extent, peer, target_address,
                                               target_handle, op, request);
         if (OMPI_SUCCESS == ret) {
             return OMPI_SUCCESS;
@@ -1132,7 +1143,7 @@ int ompi_osc_rdma_rget_accumulate (const void *origin_addr, int origin_count, om
 }
 
 int ompi_osc_rdma_raccumulate (const void *origin_addr, int origin_count, ompi_datatype_t *origin_datatype, int target_rank,
-                               OPAL_PTRDIFF_TYPE target_disp, int target_count, ompi_datatype_t *target_datatype, ompi_op_t *op,
+                               ptrdiff_t target_disp, int target_count, ompi_datatype_t *target_datatype, ompi_op_t *op,
                                ompi_win_t *win, ompi_request_t **request)
 {
     ompi_osc_rdma_module_t *module = GET_MODULE(win);
@@ -1166,7 +1177,7 @@ int ompi_osc_rdma_raccumulate (const void *origin_addr, int origin_count, ompi_d
 }
 
 int ompi_osc_rdma_accumulate (const void *origin_addr, int origin_count, ompi_datatype_t *origin_datatype, int target_rank,
-                              OPAL_PTRDIFF_TYPE target_disp, int target_count, ompi_datatype_t *target_datatype, ompi_op_t *op,
+                              ptrdiff_t target_disp, int target_count, ompi_datatype_t *target_datatype, ompi_op_t *op,
                               ompi_win_t *win)
 {
     ompi_osc_rdma_module_t *module = GET_MODULE(win);
@@ -1189,7 +1200,7 @@ int ompi_osc_rdma_accumulate (const void *origin_addr, int origin_count, ompi_da
 
 
 int ompi_osc_rdma_fetch_and_op (const void *origin_addr, void *result_addr, ompi_datatype_t *dt, int target_rank,
-                                OPAL_PTRDIFF_TYPE target_disp, ompi_op_t *op, ompi_win_t *win)
+                                ptrdiff_t target_disp, ompi_op_t *op, ompi_win_t *win)
 {
     ompi_osc_rdma_module_t *module = GET_MODULE(win);
     ompi_osc_rdma_peer_t *peer;

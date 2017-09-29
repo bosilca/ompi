@@ -12,17 +12,17 @@
 #                         All rights reserved.
 # Copyright (c) 2006-2016 Cisco Systems, Inc.  All rights reserved.
 # Copyright (c) 2006-2008 Sun Microsystems, Inc.  All rights reserved.
-# Copyright (c) 2006-2011 Los Alamos National Security, LLC.  All rights
+# Copyright (c) 2006-2017 Los Alamos National Security, LLC.  All rights
 #                         reserved.
 # Copyright (c) 2009      Oak Ridge National Labs.  All rights reserved.
 # Copyright (c) 2011-2013 NVIDIA Corporation.  All rights reserved.
 # Copyright (c) 2012      Oracle and/or its affiliates.  All rights reserved.
 # Copyright (c) 2013      Mellanox Technologies, Inc.
 #                         All rights reserved.
-# Copyright (c) 2013-2014 Intel, Inc.  All rights reserved.
-# Copyright (c) 2014-2016 Research Organization for Information Science
+# Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
+# Copyright (c) 2014-2017 Research Organization for Information Science
 #                         and Technology (RIST). All rights reserved.
-# Copyright (c) 2016      IBM Corporation.  All rights reserved.
+# Copyright (c) 2016-2017 IBM Corporation.  All rights reserved.
 # $COPYRIGHT$
 #
 # Additional copyrights may follow
@@ -65,6 +65,10 @@ OPAL_LOAD_PLATFORM
 # Start it up
 #
 
+AC_CHECK_PROG([PERL],[perl],[perl],[no])
+AS_IF([test "X$PERL" = "Xno"],
+      [AC_MSG_ERROR(["Open MPI requires perl. Aborting"])])
+
 OPAL_CONFIGURE_SETUP
 opal_show_title "Configuring project_name_long"
 
@@ -80,6 +84,18 @@ AS_IF([test "$host" != "$target"],
       [AC_MSG_WARN([Cross-compile detected])
        AC_MSG_WARN([Cross-compiling is only partially supported])
        AC_MSG_WARN([Proceed at your own risk!])])
+# Check for architectures that we explicitly no longer support
+case "${host}" in
+    powerpc-*|powerpc64-*|ppc-*)
+        AC_MSG_ERROR([Big endian PPC is no longer supported.])
+        ;;
+esac
+case "${target}" in
+    powerpc-*|powerpc64-*|ppc-*)
+        AC_MSG_ERROR([Big endian PPC is no longer supported.])
+        ;;
+esac
+
 # AC_USE_SYSTEM_EXTENSIONS alters CFLAGS (e.g., adds -g -O2)
 OPAL_VAR_SCOPE_PUSH([CFLAGS_save])
 CFLAGS_save=$CFLAGS
@@ -147,7 +163,7 @@ AC_SUBST(libopen_pal_so_version)
 # transparently by adding some intelligence in autogen.pl
 # and/or opal_mca.m4, but I don't have the cycles to do this
 # right now.
-AC_SUBST(libmca_opal_common_libfabric_so_version)
+AC_SUBST(libmca_opal_common_ofi_so_version)
 AC_SUBST(libmca_opal_common_cuda_so_version)
 AC_SUBST(libmca_opal_common_sm_so_version)
 AC_SUBST(libmca_opal_common_ugni_so_version)
@@ -416,6 +432,8 @@ if test "$ac_cv_type_ssize_t" = yes ; then
 fi
 if test "$ac_cv_type_ptrdiff_t" = yes; then
     AC_CHECK_SIZEOF(ptrdiff_t)
+else
+    AC_MSG_ERROR([ptrdiff_t type is not available, this is required by C99 standard.  Cannot continue])
 fi
 AC_CHECK_SIZEOF(wchar_t)
 
@@ -582,7 +600,7 @@ AC_CACHE_SAVE
 opal_show_title "Header file tests"
 
 AC_CHECK_HEADERS([alloca.h aio.h arpa/inet.h dirent.h \
-    dlfcn.h execinfo.h err.h fcntl.h grp.h libgen.h \
+    dlfcn.h endian.h execinfo.h err.h fcntl.h grp.h libgen.h \
     libutil.h memory.h netdb.h netinet/in.h netinet/tcp.h \
     poll.h pthread.h pty.h pwd.h sched.h \
     strings.h stropts.h linux/ethtool.h linux/sockios.h \
@@ -593,7 +611,7 @@ AC_CHECK_HEADERS([alloca.h aio.h arpa/inet.h dirent.h \
     sys/types.h sys/uio.h sys/un.h net/uio.h sys/utsname.h sys/vfs.h sys/wait.h syslog.h \
     termios.h ulimit.h unistd.h util.h utmp.h malloc.h \
     ifaddrs.h crt_externs.h regex.h mntent.h paths.h \
-    ioLib.h sockLib.h hostLib.h shlwapi.h sys/synch.h db.h ndbm.h])
+    ioLib.h sockLib.h hostLib.h shlwapi.h sys/synch.h db.h ndbm.h zlib.h ieee754.h])
 
 AC_CHECK_HEADERS([sys/mount.h], [], [],
 [AC_INCLUDES_DEFAULT
@@ -779,27 +797,6 @@ AC_INCLUDES_DEFAULT
 ])
 
 #
-# Check for ptrdiff type.  Yes, there are platforms where
-# sizeof(void*) != sizeof(long) (64 bit Windows, apparently).
-#
-AC_MSG_CHECKING([for pointer diff type])
-if test $ac_cv_type_ptrdiff_t = yes ; then
-    opal_ptrdiff_t="ptrdiff_t"
-    opal_ptrdiff_size=$ac_cv_sizeof_ptrdiff_t
-elif test $ac_cv_sizeof_void_p -eq $ac_cv_sizeof_long ; then
-    opal_ptrdiff_t="long"
-    opal_ptrdiff_size=$ac_cv_sizeof_long
-elif test $ac_cv_type_long_long = yes && test $ac_cv_sizeof_void_p -eq $ac_cv_sizeof_long_long ; then
-    opal_ptrdiff_t="long long"
-    opal_ptrdiff_size=$ac_cv_sizeof_long_long
-else
-    AC_MSG_ERROR([Could not find datatype to emulate ptrdiff_t.  Cannot continue])
-fi
-AC_DEFINE_UNQUOTED([OPAL_PTRDIFF_TYPE], [$opal_ptrdiff_t],
-    [type to use for ptrdiff_t])
-AC_MSG_RESULT([$opal_ptrdiff_t (size: $opal_ptrdiff_size)])
-
-#
 # Find corresponding types for MPI_Aint, MPI_Count, and MPI_Offset.
 # And if relevant, find the corresponding MPI_ADDRESS_KIND,
 # MPI_COUNT_KIND, and MPI_OFFSET_KIND.
@@ -822,20 +819,6 @@ AC_TRY_LINK([void finalize (void) {}], [], [AC_MSG_RESULT([yes])
         opal_ld_have_fini=0])
 LDFLAGS=$LDFLAGS_save
 OPAL_VAR_SCOPE_POP
-
-opal_destructor_use_fini=0
-opal_no_destructor=0
-if test x$opal_cv___attribute__destructor = x0 ; then
-    if test x$opal_ld_have_fini = x1 ; then
-        opal_destructor_use_fini=1
-    else
-        opal_no_destructor=1;
-    fi
-fi
-
-AC_DEFINE_UNQUOTED(OPAL_NO_LIB_DESTRUCTOR, [$opal_no_destructor],
-    [Whether libraries can be configured with destructor functions])
-AM_CONDITIONAL(OPAL_DESTRUCTOR_USE_FINI, [test x$opal_destructor_use_fini = x1])
 
 ##################################
 # Libraries
@@ -1106,7 +1089,7 @@ AC_CACHE_SAVE
 # visible again
 #
 ###########################################################
-OPAL_SETUP_FT_OPTIONS
+dnl OPAL_SETUP_FT_OPTIONS
 ###########################################################
 # The following line is always required as it contains the
 # AC_DEFINE and AM_CONDITIONAL calls that set variables used
@@ -1442,6 +1425,10 @@ AC_CONFIG_FILES([
     test/util/Makefile
 ])
 m4_ifdef([project_ompi], [AC_CONFIG_FILES([test/monitoring/Makefile])])
+m4_ifdef([project_ompi], [
+          m4_ifdef([MCA_BUILD_ompi_pml_monitoring_DSO_TRUE],
+                   [AC_CONFIG_LINKS(test/monitoring/profile2mat.pl:test/monitoring/profile2mat.pl
+                                    test/monitoring/aggregate_profile.pl:test/monitoring/aggregate_profile.pl)])])
 
 AC_CONFIG_FILES([contrib/dist/mofed/debian/rules],
                 [chmod +x contrib/dist/mofed/debian/rules])
@@ -1452,6 +1439,8 @@ OPAL_CONFIG_FILES
 m4_ifdef([project_orte], [ORTE_CONFIG_FILES])
 m4_ifdef([project_ompi], [OMPI_CONFIG_FILES])
 m4_ifdef([project_oshmem], [OSHMEM_CONFIG_FILES])
+
+OPAL_CHECK_LIBNL_SUMMARY
 
 AC_OUTPUT
 

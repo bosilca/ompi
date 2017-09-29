@@ -2,7 +2,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2005 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -13,6 +13,7 @@
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -43,7 +44,7 @@
 int mca_io_ompio_file_open (ompi_communicator_t *comm,
                             const char *filename,
                             int amode,
-                            ompi_info_t *info,
+                            opal_info_t *info,
                             ompi_file_t *fh)
 {
     int ret = OMPI_SUCCESS;
@@ -78,7 +79,6 @@ int mca_io_ompio_file_open (ompi_communicator_t *comm,
     return ret;
 }
 
-
 int mca_io_ompio_file_close (ompi_file_t *fh)
 {
     int ret = OMPI_SUCCESS;
@@ -103,7 +103,7 @@ int mca_io_ompio_file_close (ompi_file_t *fh)
 }
 
 int mca_io_ompio_file_delete (const char *filename,
-                              struct ompi_info_t *info)
+                              struct opal_info_t *info)
 {
     int ret = OMPI_SUCCESS;
 
@@ -113,9 +113,14 @@ int mca_io_ompio_file_delete (const char *filename,
     */
     ret = unlink(filename);
 
-    if (0 > ret && ENOENT != errno ) {
-	opal_output (1, "errno = %d %s\n", errno, strerror(errno));
-        return MPI_ERR_ACCESS;
+    if (0 > ret ) {
+        if ( ENOENT == errno ) {
+            return MPI_ERR_NO_SUCH_FILE;
+        } else {
+            opal_output (0, "mca_io_ompio_file_delete: Could not remove file %s errno = %d %s\n", filename,
+                         errno, strerror(errno));
+            return MPI_ERR_ACCESS;
+        }
     }
 
     return OMPI_SUCCESS;
@@ -135,12 +140,12 @@ int mca_io_ompio_file_preallocate (ompi_file_t *fh,
     OPAL_THREAD_LOCK(&fh->f_mutex);
     tmp = diskspace;
 
-    ret = data->ompio_fh.f_comm->c_coll.coll_bcast (&tmp,
+    ret = data->ompio_fh.f_comm->c_coll->coll_bcast (&tmp,
                                                     1,
                                                     OMPI_OFFSET_DATATYPE,
                                                     OMPIO_ROOT,
                                                     data->ompio_fh.f_comm,
-                                                    data->ompio_fh.f_comm->c_coll.coll_bcast_module);
+                                                    data->ompio_fh.f_comm->c_coll->coll_bcast_module);
     if ( OMPI_SUCCESS != ret ) {
         OPAL_THREAD_UNLOCK(&fh->f_mutex);
         return OMPI_ERROR;
@@ -229,8 +234,8 @@ int mca_io_ompio_file_preallocate (ompi_file_t *fh,
 
 exit:     
     free ( buf );
-    fh->f_comm->c_coll.coll_bcast ( &ret, 1, MPI_INT, OMPIO_ROOT, fh->f_comm,
-                                   fh->f_comm->c_coll.coll_bcast_module);
+    fh->f_comm->c_coll->coll_bcast ( &ret, 1, MPI_INT, OMPIO_ROOT, fh->f_comm,
+                                   fh->f_comm->c_coll->coll_bcast_module);
     
     if ( diskspace > current_size ) {
         data->ompio_fh.f_fs->fs_file_set_size (&data->ompio_fh, diskspace);
@@ -251,12 +256,12 @@ int mca_io_ompio_file_set_size (ompi_file_t *fh,
 
     tmp = size;
     OPAL_THREAD_LOCK(&fh->f_mutex);
-    ret = data->ompio_fh.f_comm->c_coll.coll_bcast (&tmp,
+    ret = data->ompio_fh.f_comm->c_coll->coll_bcast (&tmp,
                                                     1,
                                                     OMPI_OFFSET_DATATYPE,
                                                     OMPIO_ROOT,
                                                     data->ompio_fh.f_comm,
-                                                    data->ompio_fh.f_comm->c_coll.coll_bcast_module);
+                                                    data->ompio_fh.f_comm->c_coll->coll_bcast_module);
     if ( OMPI_SUCCESS != ret ) {
         opal_output(1, ",mca_io_ompio_file_set_size: error in bcast\n");
         OPAL_THREAD_UNLOCK(&fh->f_mutex);
@@ -276,8 +281,8 @@ int mca_io_ompio_file_set_size (ompi_file_t *fh,
         return ret;
     }
     
-    ret = data->ompio_fh.f_comm->c_coll.coll_barrier (data->ompio_fh.f_comm,
-                                                      data->ompio_fh.f_comm->c_coll.coll_barrier_module);
+    ret = data->ompio_fh.f_comm->c_coll->coll_barrier (data->ompio_fh.f_comm,
+                                                      data->ompio_fh.f_comm->c_coll->coll_barrier_module);
     if ( OMPI_SUCCESS != ret ) {
         opal_output(1, ",mca_io_ompio_file_set_size: error in barrier\n");
         OPAL_THREAD_UNLOCK(&fh->f_mutex);
@@ -317,42 +322,6 @@ int mca_io_ompio_file_get_amode (ompi_file_t *fh,
 }
 
 
-int mca_io_ompio_file_set_info (ompi_file_t *fh,
-				ompi_info_t *info)
-{
-    int ret = OMPI_SUCCESS;
-
-    if ( MPI_INFO_NULL == fh->f_info ) {
-	/* OBJ_RELEASE(MPI_INFO_NULL); */
-    }
-    else {
-	ompi_info_free ( &fh->f_info);
-	fh->f_info = OBJ_NEW(ompi_info_t);
-	ret = ompi_info_dup (info, &fh->f_info);
-    }
-
-    return ret;
-}
-
-
-int mca_io_ompio_file_get_info (ompi_file_t *fh,
-				ompi_info_t ** info_used)
-{
-    int ret = OMPI_SUCCESS;
-    ompi_info_t *info=NULL;
-
-    info = OBJ_NEW(ompi_info_t);
-    if (NULL == info) {
-        return MPI_ERR_INFO;
-    }
-    if (MPI_INFO_NULL != fh->f_info) {
-	ret = ompi_info_dup (fh->f_info, &info);
-    }
-    *info_used = info;
-
-    return ret;
-}
-
 int mca_io_ompio_file_get_type_extent (ompi_file_t *fh,
                                        struct ompi_datatype_t *datatype,
                                        MPI_Aint *extent)
@@ -377,12 +346,12 @@ int mca_io_ompio_file_set_atomicity (ompi_file_t *fh,
 
     /* check if the atomicity flag is the same on all processes */
     tmp = flag;
-    data->ompio_fh.f_comm->c_coll.coll_bcast (&tmp,
+    data->ompio_fh.f_comm->c_coll->coll_bcast (&tmp,
                                               1,
                                               MPI_INT,
                                               OMPIO_ROOT,
                                               data->ompio_fh.f_comm,
-                                              data->ompio_fh.f_comm->c_coll.coll_bcast_module);
+                                              data->ompio_fh.f_comm->c_coll->coll_bcast_module);
 
     if (tmp != flag) {
         OPAL_THREAD_UNLOCK(&fh->f_mutex);
@@ -483,7 +452,7 @@ int mca_io_ompio_file_get_position (ompi_file_t *fd,
     data = (mca_io_ompio_data_t *) fd->f_io_selected_data;
     fh = &data->ompio_fh;
 
-    OPAL_THREAD_UNLOCK(&fd->f_mutex);
+    OPAL_THREAD_LOCK(&fd->f_mutex);
     ret = mca_common_ompio_file_get_position (fh, offset);
     OPAL_THREAD_UNLOCK(&fd->f_mutex);
 

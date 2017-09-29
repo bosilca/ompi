@@ -10,14 +10,14 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2007-2013 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2007-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2007-2016 Los Alamos National Security, LLC.  All rights
  *                         reserved.
  * Copyright (c) 2009      Institut National de Recherche en Informatique
  *                         et Automatique. All rights reserved.
  * Copyright (c) 2010      Oracle and/or its affiliates.  All rights reserved.
- * Copyright (c) 2013-2016 Intel, Inc. All rights reserved.
- * Copyright (c) 2015-2016 Research Organization for Information Science
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
@@ -65,7 +65,7 @@
 #include "opal/mca/base/mca_base_var.h"
 #include "opal/util/daemon_init.h"
 #include "opal/dss/dss.h"
-#include "opal/mca/hwloc/hwloc.h"
+#include "opal/mca/hwloc/hwloc-internal.h"
 #include "opal/mca/pmix/pmix.h"
 
 #include "orte/util/show_help.h"
@@ -76,6 +76,8 @@
 #include "orte/util/parse_options.h"
 #include "orte/mca/rml/base/rml_contact.h"
 #include "orte/util/pre_condition_transports.h"
+#include "orte/util/compress.h"
+#include "orte/util/threads.h"
 
 #include "orte/mca/errmgr/errmgr.h"
 #include "orte/mca/ess/ess.h"
@@ -85,6 +87,7 @@
 #include "orte/mca/rml/rml_types.h"
 #include "orte/mca/odls/odls.h"
 #include "orte/mca/odls/base/odls_private.h"
+#include "orte/mca/oob/base/base.h"
 #include "orte/mca/plm/plm.h"
 #include "orte/mca/ras/ras.h"
 #include "orte/mca/routed/routed.h"
@@ -111,6 +114,11 @@
 static opal_event_t *pipe_handler;
 static void shutdown_callback(int fd, short flags, void *arg);
 static void pipe_closed(int fd, short flags, void *arg);
+static void rollup(int status, orte_process_name_t* sender,
+                   opal_buffer_t *buffer,
+                   orte_rml_tag_t tag, void *cbdata);
+static opal_buffer_t *bucket, *mybucket = NULL;
+static int ncollected = 0;
 
 static char *orte_parent_uri;
 
@@ -126,9 +134,7 @@ static struct {
     int uri_pipe;
     int singleton_died_pipe;
     bool abort;
-    bool mapreduce;
     bool tree_spawn;
-    char *hnp_topo_sig;
     bool test_suicide;
 } orted_globals;
 
@@ -209,18 +215,6 @@ opal_cmd_line_init_t orte_cmd_line_opts[] = {
       NULL, OPAL_CMD_LINE_TYPE_STRING,
       "Regular expression defining nodes in system" },
 
-    { "orte_hetero_nodes", '\0', NULL, "hetero-nodes", 0,
-      NULL, OPAL_CMD_LINE_TYPE_BOOL,
-      "Nodes in cluster may differ in topology, so send the topology back from each node [Default = false]" },
-
-    { NULL, '\0', NULL, "hnp-topo-sig", 1,
-      &orted_globals.hnp_topo_sig, OPAL_CMD_LINE_TYPE_STRING,
-      "Topology signature of HNP" },
-
-    { NULL, '\0', "mapreduce", "mapreduce", 0,
-      &orted_globals.mapreduce, OPAL_CMD_LINE_TYPE_BOOL,
-      "Whether to report process bindings to stderr" },
-
     /* End of list */
     { NULL, '\0', NULL, NULL, 0,
       NULL, OPAL_CMD_LINE_TYPE_NULL, NULL }
@@ -230,20 +224,18 @@ int orte_daemon(int argc, char *argv[])
 {
     int ret = 0;
     opal_cmd_line_t *cmd_line = NULL;
-    char *rml_uri;
     int i;
     opal_buffer_t *buffer;
     char hostname[OPAL_MAXHOSTNAMELEN];
 #if OPAL_ENABLE_FT_CR == 1
     char *tmp_env_var = NULL;
 #endif
-    char *coprocessors;
-    uint8_t tflag;
 
     /* initialize the globals */
     memset(&orted_globals, 0, sizeof(orted_globals));
     /* initialize the singleton died pipe to an illegal value so we can detect it was set */
     orted_globals.singleton_died_pipe = -1;
+    bucket = OBJ_NEW(opal_buffer_t);
 
     /* setup to check common command line options that just report and die */
     cmd_line = OBJ_NEW(opal_cmd_line_t);
@@ -293,8 +285,9 @@ int orte_daemon(int argc, char *argv[])
      */
     orte_launch_environ = opal_argv_copy(environ);
 
-    /* purge any ess flag set in the environ when we were launched */
+    /* purge any ess/pmix flags set in the environ when we were launched */
     opal_unsetenv(OPAL_MCA_PREFIX"ess", &orte_launch_environ);
+    opal_unsetenv(OPAL_MCA_PREFIX"pmix", &orte_launch_environ);
 
     /* if orte_daemon_debug is set, let someone know we are alive right
      * away just in case we have a problem along the way
@@ -335,11 +328,6 @@ int orte_daemon(int argc, char *argv[])
     free(tmp_env_var);
 #endif
 
-    /* if mapreduce set, flag it */
-    if (orted_globals.mapreduce) {
-        orte_map_reduce = true;
-    }
-
     /* detach from controlling terminal
      * otherwise, remain attached so output can get to us
      */
@@ -365,6 +353,7 @@ int orte_daemon(int argc, char *argv[])
             return ret;
         }
     }
+
     /* finalize the OPAL utils. As they are opened again from orte_init->opal_init
      * we continue to have a reference count on them. So we have to finalize them twice...
      */
@@ -374,7 +363,7 @@ int orte_daemon(int argc, char *argv[])
     if (NULL != orte_daemon_cores) {
         char **cores=NULL, tmp[128];
         hwloc_obj_t pu;
-        hwloc_cpuset_t ours, pucpus, res;
+        hwloc_cpuset_t ours, res;
         int core;
 
         /* could be a collection of comma-delimited ranges, so
@@ -384,7 +373,6 @@ int orte_daemon(int argc, char *argv[])
         if (NULL != cores) {
             ours = hwloc_bitmap_alloc();
             hwloc_bitmap_zero(ours);
-            pucpus = hwloc_bitmap_alloc();
             res = hwloc_bitmap_alloc();
             for (i=0; NULL != cores[i]; i++) {
                 core = strtoul(cores[i], NULL, 10);
@@ -399,12 +387,10 @@ int orte_daemon(int argc, char *argv[])
                                    orte_daemon_cores);
                     ret = ORTE_ERR_NOT_SUPPORTED;
                     hwloc_bitmap_free(ours);
-                    hwloc_bitmap_free(pucpus);
                     hwloc_bitmap_free(res);
                     goto DONE;
                 }
-                hwloc_bitmap_and(pucpus, pu->online_cpuset, pu->allowed_cpuset);
-                hwloc_bitmap_or(res, ours, pucpus);
+                hwloc_bitmap_or(res, ours, pu->cpuset);
                 hwloc_bitmap_copy(ours, res);
             }
             /* if the result is all zeros, then don't bind */
@@ -418,7 +404,6 @@ int orte_daemon(int argc, char *argv[])
             }
             /* cleanup */
             hwloc_bitmap_free(ours);
-            hwloc_bitmap_free(pucpus);
             hwloc_bitmap_free(res);
             opal_argv_free(cores);
         }
@@ -467,13 +452,18 @@ int orte_daemon(int argc, char *argv[])
     /* insert our contact info into our process_info struct so we
      * have it for later use and set the local daemon field to our name
      */
-    orte_process_info.my_daemon_uri = orte_rml.get_contact_info();
+    orte_oob_base_get_addr(&orte_process_info.my_daemon_uri);
+    if (NULL == orte_process_info.my_daemon_uri) {
+        /* no way to communicate */
+        ret = ORTE_ERROR;
+        goto DONE;
+    }
     ORTE_PROC_MY_DAEMON->jobid = ORTE_PROC_MY_NAME->jobid;
     ORTE_PROC_MY_DAEMON->vpid = ORTE_PROC_MY_NAME->vpid;
 
     /* if I am also the hnp, then update that contact info field too */
     if (ORTE_PROC_IS_HNP) {
-        orte_process_info.my_hnp_uri = orte_rml.get_contact_info();
+        orte_process_info.my_hnp_uri = strdup(orte_process_info.my_daemon_uri);
         ORTE_PROC_MY_HNP->jobid = ORTE_PROC_MY_NAME->jobid;
         ORTE_PROC_MY_HNP->vpid = ORTE_PROC_MY_NAME->vpid;
     }
@@ -590,10 +580,10 @@ int orte_daemon(int argc, char *argv[])
         ORTE_FLAG_SET(proc, ORTE_PROC_FLAG_LOCAL);
 
         /* set the ORTE_JOB_TRANSPORT_KEY from the environment */
-        orte_pre_condition_transports(jdata);
+        orte_pre_condition_transports(jdata, NULL);
 
         /* register the singleton's nspace with our PMIx server */
-        if (ORTE_SUCCESS != (ret = orte_pmix_server_register_nspace(jdata))) {
+        if (ORTE_SUCCESS != (ret = orte_pmix_server_register_nspace(jdata, false))) {
           ORTE_ERROR_LOG(ret);
           goto DONE;
         }
@@ -612,12 +602,13 @@ int orte_daemon(int argc, char *argv[])
         opal_argv_append_nosize(&singenv, env_str);
         free(env_str);
 
-        nptr = opal_argv_join(singenv, ',');
+        nptr = opal_argv_join(singenv, '*');
         opal_argv_free(singenv);
+
         /* create a string that contains our uri + sysinfo + PMIx server URI envars */
         orte_util_convert_sysinfo_to_string(&sysinfo, orte_local_cpu_type, orte_local_cpu_model);
         asprintf(&tmp, "%s[%s]%s", orte_process_info.my_daemon_uri, sysinfo, nptr);
-	      free(sysinfo);
+        free(sysinfo);
         free(nptr);
 
         /* pass that info to the singleton */
@@ -667,7 +658,6 @@ int orte_daemon(int argc, char *argv[])
     /* If I have a parent, then save his contact info so
      * any messages we send can flow thru him.
      */
-
     orte_parent_uri = NULL;
     (void) mca_base_var_register ("orte", "orte", NULL, "parent_uri",
                                   "URI for the parent if tree launch is enabled.",
@@ -678,9 +668,9 @@ int orte_daemon(int argc, char *argv[])
                                   &orte_parent_uri);
     if (NULL != orte_parent_uri) {
         orte_process_name_t parent;
+        opal_value_t val;
 
-        /* set the contact info into the hash table */
-        orte_rml.set_contact_info(orte_parent_uri);
+        /* set the contact info into our local database */
         ret = orte_rml_base_parse_uris(orte_parent_uri, &parent, NULL);
         if (ORTE_SUCCESS != ret) {
             ORTE_ERROR_LOG(ret);
@@ -688,6 +678,18 @@ int orte_daemon(int argc, char *argv[])
             orte_parent_uri = NULL;
             goto DONE;
         }
+        OBJ_CONSTRUCT(&val, opal_value_t);
+        val.key = OPAL_PMIX_PROC_URI;
+        val.type = OPAL_STRING;
+        val.data.string = orte_parent_uri;
+        if (OPAL_SUCCESS != (ret = opal_pmix.store_local(&parent, &val))) {
+            ORTE_ERROR_LOG(ret);
+            OBJ_DESTRUCT(&val);
+            goto DONE;
+        }
+        val.key = NULL;
+        val.data.string = NULL;
+        OBJ_DESTRUCT(&val);
 
         /* don't need this value anymore */
         free(orte_parent_uri);
@@ -696,14 +698,14 @@ int orte_daemon(int argc, char *argv[])
         /* tell the routed module that we have a path
          * back to the HNP
          */
-        if (ORTE_SUCCESS != (ret = orte_routed.update_route(ORTE_PROC_MY_HNP, &parent))) {
+        if (ORTE_SUCCESS != (ret = orte_routed.update_route(NULL, ORTE_PROC_MY_HNP, &parent))) {
             ORTE_ERROR_LOG(ret);
             goto DONE;
         }
         /* set the lifeline to point to our parent so that we
          * can handle the situation if that lifeline goes away
          */
-        if (ORTE_SUCCESS != (ret = orte_routed.set_lifeline(&parent))) {
+        if (ORTE_SUCCESS != (ret = orte_routed.set_lifeline(NULL, &parent))) {
             ORTE_ERROR_LOG(ret);
             goto DONE;
         }
@@ -714,6 +716,31 @@ int orte_daemon(int argc, char *argv[])
      * for it
      */
     if (!ORTE_PROC_IS_HNP) {
+        orte_process_name_t target;
+        target.jobid = ORTE_PROC_MY_NAME->jobid;
+
+        if (orte_fwd_mpirun_port || orte_static_ports) {
+            /* setup the rollup callback */
+            orte_rml.recv_buffer_nb(ORTE_NAME_WILDCARD, ORTE_RML_TAG_ORTED_CALLBACK,
+                                    ORTE_RML_PERSISTENT, rollup, NULL);
+            target.vpid = ORTE_PROC_MY_NAME->vpid;
+            /* since we will be waiting for any children to send us
+             * their rollup info before sending to our parent, save
+             * a little time in the launch phase by "warming up" the
+             * connection to our parent while we wait for our children */
+            buffer = OBJ_NEW(opal_buffer_t);  // zero-byte message
+            if (0 > (ret = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                                   ORTE_PROC_MY_PARENT, buffer,
+                                                   ORTE_RML_TAG_WARMUP_CONNECTION,
+                                                   orte_rml_send_callback, NULL))) {
+                ORTE_ERROR_LOG(ret);
+                OBJ_RELEASE(buffer);
+                goto DONE;
+            }
+        } else {
+            target.vpid = 0;
+        }
+
         /* send the information to the orted report-back point - this function
          * will process the data, but also counts the number of
          * orteds that reported back so the launch procedure can continue.
@@ -728,14 +755,56 @@ int orte_daemon(int argc, char *argv[])
             OBJ_RELEASE(buffer);
             goto DONE;
         }
-        /* for now, always include our contact info, even if we are using
-         * static ports. Eventually, this will be removed
-         */
-        rml_uri = orte_rml.get_contact_info();
-        if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &rml_uri, 1, OPAL_STRING))) {
-            ORTE_ERROR_LOG(ret);
-            OBJ_RELEASE(buffer);
-            goto DONE;
+
+        /* get any connection info we may have pushed */
+        {
+            opal_value_t *val = NULL, *kv;
+            opal_list_t *modex;
+            int32_t flag;
+
+            if (OPAL_SUCCESS != (ret = opal_pmix.get(ORTE_PROC_MY_NAME, NULL, NULL, &val)) || NULL == val) {
+                /* just pack a marker indicating we don't have any to share */
+                flag = 0;
+                if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &flag, 1, OPAL_INT32))) {
+                    ORTE_ERROR_LOG(ret);
+                    OBJ_RELEASE(buffer);
+                    goto DONE;
+                }
+            } else {
+                /* the data is returned as a list of key-value pairs in the opal_value_t */
+                if (OPAL_PTR == val->type) {
+                    modex = (opal_list_t*)val->data.ptr;
+                    flag = (int32_t)opal_list_get_size(modex);
+                    if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &flag, 1, OPAL_INT32))) {
+                        ORTE_ERROR_LOG(ret);
+                        OBJ_RELEASE(buffer);
+                        goto DONE;
+                    }
+                    OPAL_LIST_FOREACH(kv, modex, opal_value_t) {
+                        if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &kv, 1, OPAL_VALUE))) {
+                            ORTE_ERROR_LOG(ret);
+                            OBJ_RELEASE(buffer);
+                            goto DONE;
+                        }
+                    }
+                    OPAL_LIST_RELEASE(modex);
+                } else {
+                    opal_output(0, "VAL KEY: %s", (NULL == val->key) ? "NULL" : val->key);
+                    /* single value */
+                    flag = 1;
+                    if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &flag, 1, OPAL_INT32))) {
+                        ORTE_ERROR_LOG(ret);
+                        OBJ_RELEASE(buffer);
+                        goto DONE;
+                    }
+                    if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &val, 1, OPAL_VALUE))) {
+                        ORTE_ERROR_LOG(ret);
+                        OBJ_RELEASE(buffer);
+                        goto DONE;
+                    }
+                }
+                OBJ_RELEASE(val);
+            }
         }
 
         /* include our node name */
@@ -773,42 +842,72 @@ int orte_daemon(int argc, char *argv[])
             opal_argv_free(aliases);
         }
 
-        /* add the local topology, if different from the HNP's or user directed us to,
-         * but always if we are the first daemon to ensure we get a compute node */
-        if (1 == ORTE_PROC_MY_NAME->vpid || orte_hetero_nodes ||
-            0 != strcmp(orte_topo_signature, orted_globals.hnp_topo_sig)) {
-            tflag = 1;
-            if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &tflag, 1, OPAL_UINT8))) {
-                ORTE_ERROR_LOG(ret);
-            }
-            if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &orte_topo_signature, 1, OPAL_STRING))) {
-                ORTE_ERROR_LOG(ret);
-            }
-            if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &opal_hwloc_topology, 1, OPAL_HWLOC_TOPO))) {
-                ORTE_ERROR_LOG(ret);
-            }
-        } else {
-            tflag = 0;
-            if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &tflag, 1, OPAL_UINT8))) {
-                ORTE_ERROR_LOG(ret);
-            }
-        }
-        /* detect and add any coprocessors */
-        coprocessors = opal_hwloc_base_find_coprocessors(opal_hwloc_topology);
-        if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &coprocessors, 1, OPAL_STRING))) {
+        /* always send back our topology signature - this is a small string
+         * and won't hurt anything */
+        if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &orte_topo_signature, 1, OPAL_STRING))) {
             ORTE_ERROR_LOG(ret);
-        }
-        /* see if I am on a coprocessor */
-        coprocessors = opal_hwloc_base_check_on_coprocessor();
-        if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &coprocessors, 1, OPAL_STRING))) {
-            ORTE_ERROR_LOG(ret);
-        }
-        if (NULL!= coprocessors) {
-            free(coprocessors);
         }
 
-        /* send to the HNP's callback - will be routed if routes are available */
-        if (0 > (ret = orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, buffer,
+        /* if we are rank=1, then send our topology back - otherwise, mpirun
+         * will request it if necessary */
+        if (1 == ORTE_PROC_MY_NAME->vpid) {
+            opal_buffer_t data;
+            int8_t flag;
+            uint8_t *cmpdata;
+            size_t cmplen;
+
+            /* setup an intermediate buffer */
+            OBJ_CONSTRUCT(&data, opal_buffer_t);
+
+            if (ORTE_SUCCESS != (ret = opal_dss.pack(&data, &opal_hwloc_topology, 1, OPAL_HWLOC_TOPO))) {
+                ORTE_ERROR_LOG(ret);
+            }
+            if (orte_util_compress_block((uint8_t*)data.base_ptr, data.bytes_used,
+                                 &cmpdata, &cmplen)) {
+                /* the data was compressed - mark that we compressed it */
+                flag = 1;
+                if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &flag, 1, OPAL_INT8))) {
+                    ORTE_ERROR_LOG(ret);
+                    free(cmpdata);
+                    OBJ_DESTRUCT(&data);
+                }
+                /* pack the compressed length */
+                if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &cmplen, 1, OPAL_SIZE))) {
+                    ORTE_ERROR_LOG(ret);
+                    free(cmpdata);
+                    OBJ_DESTRUCT(&data);
+                }
+                /* pack the uncompressed length */
+                if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &data.bytes_used, 1, OPAL_SIZE))) {
+                    ORTE_ERROR_LOG(ret);
+                    free(cmpdata);
+                    OBJ_DESTRUCT(&data);
+                }
+                /* pack the compressed info */
+                if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, cmpdata, cmplen, OPAL_UINT8))) {
+                    ORTE_ERROR_LOG(ret);
+                    free(cmpdata);
+                    OBJ_DESTRUCT(&data);
+                }
+                OBJ_DESTRUCT(&data);
+                free(cmpdata);
+            } else {
+                /* mark that it was not compressed */
+                flag = 0;
+                if (ORTE_SUCCESS != (ret = opal_dss.pack(buffer, &flag, 1, OPAL_INT8))) {
+                    ORTE_ERROR_LOG(ret);
+                    OBJ_DESTRUCT(&data);
+                    free(cmpdata);
+                }
+                /* transfer the payload across */
+                opal_dss.copy_payload(buffer, &data);
+                OBJ_DESTRUCT(&data);
+            }
+        }
+
+        /* send it to the designated target */
+        if (0 > (ret = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                               &target, buffer,
                                                ORTE_RML_TAG_ORTED_CALLBACK,
                                                orte_rml_send_callback, NULL))) {
             ORTE_ERROR_LOG(ret);
@@ -877,6 +976,7 @@ int orte_daemon(int argc, char *argv[])
     while (orte_event_base_active) {
         opal_event_loop(orte_event_base, OPAL_EVLOOP_ONCE);
     }
+    ORTE_ACQUIRE_OBJECT(orte_event_base_active);
 
     /* ensure all local procs are dead */
     orte_odls.kill_local_procs(NULL);
@@ -887,6 +987,11 @@ int orte_daemon(int argc, char *argv[])
 
     /* cleanup and leave */
     orte_finalize();
+    opal_finalize_util();
+
+    orte_session_dir_cleanup(ORTE_JOBID_WILDCARD);
+    /* cleanup the process info */
+    orte_proc_info_finalize();
 
     if (orte_debug_flag) {
         fprintf(stderr, "exiting with status %d\n", orte_exit_status);
@@ -935,4 +1040,69 @@ static void shutdown_callback(int fd, short flags, void *arg)
     orte_odls.kill_local_procs(NULL);
     orte_session_dir_cleanup(ORTE_JOBID_WILDCARD);
     exit(ORTE_ERROR_DEFAULT_EXIT_CODE);
+}
+
+static void rollup(int status, orte_process_name_t* sender,
+                   opal_buffer_t *buffer,
+                   orte_rml_tag_t tag, void *cbdata)
+{
+    int nreqd;
+    char *rtmod;
+    int ret;
+    orte_process_name_t child;
+    int32_t i, flag, cnt;
+    opal_value_t *kv;
+
+    /* xfer the contents of the rollup to our bucket */
+    opal_dss.copy_payload(bucket, buffer);
+    ncollected++;
+
+    /* if the sender is ourselves, then we save that buffer
+     * so we can insert it at the beginning */
+    if (sender->jobid == ORTE_PROC_MY_NAME->jobid &&
+        sender->vpid == ORTE_PROC_MY_NAME->vpid) {
+        mybucket = OBJ_NEW(opal_buffer_t);
+        opal_dss.copy_payload(mybucket, buffer);
+    } else {
+        /* the first entry in the bucket will be from our
+         * direct child - harvest it for connection info */
+        cnt = 1;
+        if (ORTE_SUCCESS != (ret = opal_dss.unpack(buffer, &child, &cnt, ORTE_NAME))) {
+            ORTE_ERROR_LOG(ret);
+            goto report;
+        }
+        cnt = 1;
+        if (ORTE_SUCCESS != (ret = opal_dss.unpack(buffer, &flag, &cnt, OPAL_INT32))) {
+            ORTE_ERROR_LOG(ret);
+            goto report;
+        }
+        for (i=0; i < flag; i++) {
+            cnt = 1;
+            if (ORTE_SUCCESS != (ret = opal_dss.unpack(buffer, &kv, &cnt, OPAL_VALUE))) {
+                ORTE_ERROR_LOG(ret);
+                goto report;
+            }
+            /* store this in a daemon wireup buffer for later distribution */
+            opal_pmix.store_local(&child, kv);
+            OBJ_RELEASE(kv);
+        }
+    }
+
+  report:
+    /* get the number of children */
+    rtmod = orte_rml.get_routed(orte_mgmt_conduit);
+    nreqd = orte_routed.num_routes(rtmod) + 1;
+    if (nreqd == ncollected && NULL != mybucket) {
+        /* add the collection of our children's buckets to ours */
+        opal_dss.copy_payload(mybucket, bucket);
+        OBJ_RELEASE(bucket);
+        /* relay this on to our parent */
+        if (0 > (ret = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                               ORTE_PROC_MY_PARENT, mybucket,
+                                               ORTE_RML_TAG_ORTED_CALLBACK,
+                                               orte_rml_send_callback, NULL))) {
+            ORTE_ERROR_LOG(ret);
+            OBJ_RELEASE(mybucket);
+        }
+    }
 }

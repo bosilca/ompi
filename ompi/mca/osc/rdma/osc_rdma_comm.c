@@ -2,6 +2,10 @@
 /*
  * Copyright (c) 2014-2016 Los Alamos National Security, LLC.  All rights
  *                         reserved.
+ * Copyright (c) 2016      Intel, Inc.  All rights reserved.
+ * Copyright (c) 2017      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -50,7 +54,7 @@ int ompi_osc_get_data_blocking (ompi_osc_rdma_module_t *module, struct mca_btl_b
         }
 
         local_handle = frag->handle;
-        OSC_RDMA_VERBOSE(MCA_BASE_VERBOSE_TRACE, "allocated temporary buffer %p in fragment %p", ptr,
+        OSC_RDMA_VERBOSE(MCA_BASE_VERBOSE_TRACE, "allocated temporary buffer %p in fragment %p", (void*)ptr,
                          (void *) frag);
     }
 
@@ -732,7 +736,7 @@ static int ompi_osc_rdma_get_contig (ompi_osc_rdma_sync_t *sync, ompi_osc_rdma_p
             }
         } else {
             OSC_RDMA_VERBOSE(MCA_BASE_VERBOSE_TRACE, "using internal buffer %p in fragment %p for get of size %lu bytes, source address 0x%lx",
-                             ptr, (void *) frag, (unsigned long) aligned_len, (unsigned long) aligned_source_base);
+                             (void*)ptr, (void *) frag, (unsigned long) aligned_len, (unsigned long) aligned_source_base);
             local_handle = frag->handle;
         }
     }
@@ -773,7 +777,7 @@ static int ompi_osc_rdma_get_contig (ompi_osc_rdma_sync_t *sync, ompi_osc_rdma_p
 
 static inline int ompi_osc_rdma_put_w_req (ompi_osc_rdma_sync_t *sync, const void *origin_addr, int origin_count,
                                            ompi_datatype_t *origin_datatype, ompi_osc_rdma_peer_t *peer,
-                                           OPAL_PTRDIFF_TYPE target_disp, int target_count,
+                                           ptrdiff_t target_disp, int target_count,
                                            ompi_datatype_t *target_datatype, ompi_osc_rdma_request_t *request)
 {
     ompi_osc_rdma_module_t *module = sync->module;
@@ -790,7 +794,14 @@ static inline int ompi_osc_rdma_put_w_req (ompi_osc_rdma_sync_t *sync, const voi
         return OMPI_SUCCESS;
     }
 
-    ret = osc_rdma_get_remote_segment (module, peer, target_disp, target_datatype->super.size * target_count,
+    ptrdiff_t len, offset;
+    // a buffer defined by (buf, count, dt)
+    // will have data starting at buf+offset and ending len bytes later:
+    len = opal_datatype_span(&target_datatype->super, target_count, &offset);
+
+    // the below function wants arg4 to be the number of bytes after
+    // source_disp that the data ends, which is offset+len
+    ret = osc_rdma_get_remote_segment (module, peer, target_disp, offset+len,
                                        &target_address, &target_handle);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
         return ret;
@@ -808,12 +819,13 @@ static inline int ompi_osc_rdma_put_w_req (ompi_osc_rdma_sync_t *sync, const voi
 }
 
 static inline int ompi_osc_rdma_get_w_req (ompi_osc_rdma_sync_t *sync, void *origin_addr, int origin_count, ompi_datatype_t *origin_datatype,
-                                           ompi_osc_rdma_peer_t *peer, OPAL_PTRDIFF_TYPE source_disp, int source_count,
+                                           ompi_osc_rdma_peer_t *peer, ptrdiff_t source_disp, int source_count,
                                            ompi_datatype_t *source_datatype, ompi_osc_rdma_request_t *request)
 {
     ompi_osc_rdma_module_t *module = sync->module;
     mca_btl_base_registration_handle_t *source_handle;
     uint64_t source_address;
+    ptrdiff_t source_span, source_lb;
     int ret;
 
     /* short-circuit case */
@@ -825,7 +837,11 @@ static inline int ompi_osc_rdma_get_w_req (ompi_osc_rdma_sync_t *sync, void *ori
         return OMPI_SUCCESS;
     }
 
-    ret = osc_rdma_get_remote_segment (module, peer, source_disp, source_datatype->super.size * source_count,
+    // a buffer defined by (buf, count, dt)
+    // will have data starting at buf+offset and ending len bytes later:
+    source_span = opal_datatype_span(&source_datatype->super, source_count, &source_lb);
+
+    ret = osc_rdma_get_remote_segment (module, peer, source_disp, source_span+source_lb,
                                        &source_address, &source_handle);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
         return ret;
@@ -842,7 +858,7 @@ static inline int ompi_osc_rdma_get_w_req (ompi_osc_rdma_sync_t *sync, void *ori
                                  module->selected_btl->btl_get_limit, ompi_osc_rdma_get_contig, true);
 }
 int ompi_osc_rdma_put (const void *origin_addr, int origin_count, ompi_datatype_t *origin_datatype,
-                       int target_rank, OPAL_PTRDIFF_TYPE target_disp, int target_count,
+                       int target_rank, ptrdiff_t target_disp, int target_count,
                        ompi_datatype_t *target_datatype, ompi_win_t *win)
 {
     ompi_osc_rdma_module_t *module = GET_MODULE(win);
@@ -863,7 +879,7 @@ int ompi_osc_rdma_put (const void *origin_addr, int origin_count, ompi_datatype_
 }
 
 int ompi_osc_rdma_rput (const void *origin_addr, int origin_count, ompi_datatype_t *origin_datatype,
-                        int target_rank, OPAL_PTRDIFF_TYPE target_disp, int target_count,
+                        int target_rank, ptrdiff_t target_disp, int target_count,
                         ompi_datatype_t *target_datatype, ompi_win_t *win,
                         ompi_request_t **request)
 {
@@ -898,7 +914,7 @@ int ompi_osc_rdma_rput (const void *origin_addr, int origin_count, ompi_datatype
 }
 
 int ompi_osc_rdma_get (void *origin_addr, int origin_count, ompi_datatype_t *origin_datatype,
-                       int source_rank, OPAL_PTRDIFF_TYPE source_disp, int source_count,
+                       int source_rank, ptrdiff_t source_disp, int source_count,
                        ompi_datatype_t *source_datatype, ompi_win_t *win)
 {
     ompi_osc_rdma_module_t *module = GET_MODULE(win);
@@ -919,7 +935,7 @@ int ompi_osc_rdma_get (void *origin_addr, int origin_count, ompi_datatype_t *ori
 }
 
 int ompi_osc_rdma_rget (void *origin_addr, int origin_count, ompi_datatype_t *origin_datatype,
-                        int source_rank, OPAL_PTRDIFF_TYPE source_disp, int source_count,
+                        int source_rank, ptrdiff_t source_disp, int source_count,
                         ompi_datatype_t *source_datatype, ompi_win_t *win,
                         ompi_request_t **request)
 {

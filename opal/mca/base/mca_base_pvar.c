@@ -1,12 +1,13 @@
 /* -*- Mode: C; c-basic-offset:4 ; indent-tabs-mode:nil -*- */
 /*
- * Copyright (c) 2013-2015 Los Alamos National Security, LLC. All rights
+ * Copyright (c) 2013-2017 Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2015      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2015      Bull SAS.  All rights reserved.
  * Copyright (c) 2015      The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -148,7 +149,7 @@ static int mca_base_pvar_default_get_value (const mca_base_pvar_t *pvar, void *v
     /* not used */
     (void) obj_handle;
 
-    memmove (value, pvar->ctx, var_type_sizes[pvar->type]);
+    memmove (value, pvar->ctx, ompi_var_type_sizes[pvar->type]);
 
     return OPAL_SUCCESS;
 }
@@ -158,7 +159,7 @@ static int mca_base_pvar_default_set_value (mca_base_pvar_t *pvar, const void *v
     /* not used */
     (void) obj_handle;
 
-    memmove (pvar->ctx, value, var_type_sizes[pvar->type]);
+    memmove (pvar->ctx, value, ompi_var_type_sizes[pvar->type]);
 
     return OPAL_SUCCESS;
 }
@@ -183,7 +184,7 @@ int mca_base_pvar_register (const char *project, const char *framework, const ch
                             int bind, mca_base_pvar_flag_t flags, mca_base_get_value_fn_t get_value,
                             mca_base_set_value_fn_t set_value, mca_base_notify_fn_t notify, void *ctx)
 {
-    int ret, group_index;
+    int ret, group_index, pvar_index;
     mca_base_pvar_t *pvar;
 
     /* assert on usage errors */
@@ -288,15 +289,18 @@ int mca_base_pvar_register (const char *project, const char *framework, const ch
                 }
             }
 
-            /* add this performance variable to the MCA variable group */
-            ret = mca_base_var_group_add_pvar (group_index, pvar_count);
-            if (0 > ret) {
+            pvar_index = opal_pointer_array_add (&registered_pvars, pvar);
+            if (0 > pvar_index) {
                 break;
             }
+            pvar->pvar_index = pvar_index;
 
-            ret = opal_pointer_array_add (&registered_pvars, pvar);
-            if (0 > ret) {
-                break;
+            /* add this performance variable to the MCA variable group */
+            if (0 <= group_index) {
+                ret = mca_base_var_group_add_pvar (group_index, pvar_index);
+                if (0 > ret) {
+                    break;
+                }
             }
 
             pvar->pvar_index = pvar_count;
@@ -344,9 +348,8 @@ int mca_base_component_pvar_register (const mca_base_component_t *component, con
                                       int bind, mca_base_pvar_flag_t flags, mca_base_get_value_fn_t get_value,
                                       mca_base_set_value_fn_t set_value, mca_base_notify_fn_t notify, void *ctx)
 {
-    /* XXX -- component_update -- We will stash the project name in the component */
     /* invalidate this variable if the component's group is deregistered */
-    return mca_base_pvar_register(NULL, component->mca_type_name, component->mca_component_name,
+    return mca_base_pvar_register(component->mca_project_name, component->mca_type_name, component->mca_component_name,
                                   name, description, verbosity, var_class, type, enumerator, bind,
                                   flags | MCA_BASE_PVAR_FLAG_IWG, get_value, set_value, notify, ctx);
 }
@@ -478,7 +481,7 @@ int mca_base_pvar_handle_alloc (mca_base_pvar_session_t *session, int index, voi
 
         /* get the size of this datatype since read functions will expect an
            array of datatype not mca_base_pvar_value_t's. */
-        datatype_size = var_type_sizes[pvar->type];
+        datatype_size = ompi_var_type_sizes[pvar->type];
         if (0 == datatype_size) {
             ret = OPAL_ERROR;
             break;
@@ -686,7 +689,7 @@ int mca_base_pvar_handle_read_value (mca_base_pvar_handle_t *handle, void *value
     if (mca_base_pvar_is_sum (handle->pvar) || mca_base_pvar_is_watermark (handle->pvar) ||
         !mca_base_pvar_handle_is_running (handle)) {
         /* read the value cached in the handle. */
-        memmove (value, handle->current_value, handle->count * var_type_sizes[handle->pvar->type]);
+        memmove (value, handle->current_value, handle->count * ompi_var_type_sizes[handle->pvar->type]);
     } else {
         /* read the value directly from the variable. */
         ret = handle->pvar->get_value (handle->pvar, value, handle->obj_handle);
@@ -715,7 +718,9 @@ int mca_base_pvar_handle_write_value (mca_base_pvar_handle_t *handle, const void
         return ret;
     }
 
-    memmove (handle->current_value, value, handle->count * var_type_sizes[handle->pvar->type]);
+    memmove (handle->current_value, value, handle->count * ompi_var_type_sizes[handle->pvar->type]);
+    /* read the value directly from the variable. */
+    ret = handle->pvar->set_value (handle->pvar, value, handle->obj_handle);
 
     return OPAL_SUCCESS;
 }
@@ -794,7 +799,7 @@ int mca_base_pvar_handle_reset (mca_base_pvar_handle_t *handle)
     /* reset this handle to a state analagous to when it was created */
     if (mca_base_pvar_is_sum (handle->pvar)) {
         /* reset the running sum to 0 */
-        memset (handle->current_value, 0, handle->count * var_type_sizes[handle->pvar->type]);
+        memset (handle->current_value, 0, handle->count * ompi_var_type_sizes[handle->pvar->type]);
 
         if (mca_base_pvar_handle_is_running (handle)) {
             ret = handle->pvar->get_value (handle->pvar, handle->last_value, handle->obj_handle);
@@ -874,7 +879,7 @@ int mca_base_pvar_dump(int index, char ***out, mca_base_var_dump_type_t output_t
             }
         }
 
-        (void)asprintf(out[0] + line++, "%stype:%s", tmp, var_type_names[pvar->type]);
+        (void)asprintf(out[0] + line++, "%stype:%s", tmp, ompi_var_type_names[pvar->type]);
         free(tmp);  // release tmp storage
     } else {
         /* there will be at most three lines in the pretty print case */
@@ -884,7 +889,7 @@ int mca_base_pvar_dump(int index, char ***out, mca_base_var_dump_type_t output_t
         }
 
         (void)asprintf (out[0] + line++, "performance \"%s\" (type: %s, class: %s)", full_name,
-                        var_type_names[pvar->type], pvar_class_names[pvar->var_class]);
+                        ompi_var_type_names[pvar->type], pvar_class_names[pvar->var_class]);
 
         if (pvar->description) {
             (void)asprintf(out[0] + line++, "%s", pvar->description);

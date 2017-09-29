@@ -2,7 +2,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2005 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -10,8 +10,9 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2008-2016 University of Houston. All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -264,17 +265,17 @@ int mca_fcoll_dynamic_gen2_file_write_all (mca_io_ompio_file_t *fh,
     start_comm_time = MPI_Wtime();
 #endif
     if ( 1 == mca_fcoll_dynamic_gen2_num_groups ) {
-        ret = fh->f_comm->c_coll.coll_allgather (broken_total_lengths,
+        ret = fh->f_comm->c_coll->coll_allgather (broken_total_lengths,
                                                  dynamic_gen2_num_io_procs,
                                                  MPI_LONG,
                                                  total_bytes_per_process,
                                                  dynamic_gen2_num_io_procs,
                                                  MPI_LONG,
                                                  fh->f_comm,
-                                                 fh->f_comm->c_coll.coll_allgather_module);
+                                                 fh->f_comm->c_coll->coll_allgather_module);
     }
     else {
-        ret = fcoll_base_coll_allgather_array (broken_total_lengths,
+        ret = ompi_fcoll_base_coll_allgather_array (broken_total_lengths,
                                                dynamic_gen2_num_io_procs,
                                                MPI_LONG,
                                                total_bytes_per_process,
@@ -323,17 +324,17 @@ int mca_fcoll_dynamic_gen2_file_write_all (mca_io_ompio_file_t *fh,
     start_comm_time = MPI_Wtime();
 #endif
     if ( 1 == mca_fcoll_dynamic_gen2_num_groups ) {
-        ret = fh->f_comm->c_coll.coll_allgather(broken_counts,
+        ret = fh->f_comm->c_coll->coll_allgather(broken_counts,
                                                 dynamic_gen2_num_io_procs,
                                                 MPI_INT,
                                                 result_counts,
                                                 dynamic_gen2_num_io_procs,
                                                 MPI_INT,
                                                 fh->f_comm,
-                                                fh->f_comm->c_coll.coll_allgather_module);            
+                                                fh->f_comm->c_coll->coll_allgather_module);            
     }
     else {
-        ret = fcoll_base_coll_allgather_array (broken_counts,
+        ret = ompi_fcoll_base_coll_allgather_array (broken_counts,
                                                dynamic_gen2_num_io_procs,
                                                MPI_INT,
                                                result_counts,
@@ -409,7 +410,7 @@ int mca_fcoll_dynamic_gen2_file_write_all (mca_io_ompio_file_t *fh,
         start_comm_time = MPI_Wtime();
 #endif
         if ( 1 == mca_fcoll_dynamic_gen2_num_groups ) {
-            ret = fh->f_comm->c_coll.coll_allgatherv (broken_iov_arrays[i],
+            ret = fh->f_comm->c_coll->coll_allgatherv (broken_iov_arrays[i],
                                                       broken_counts[i],
                                                       fh->f_iov_type,
                                                       aggr_data[i]->global_iov_array,
@@ -417,10 +418,10 @@ int mca_fcoll_dynamic_gen2_file_write_all (mca_io_ompio_file_t *fh,
                                                       displs,
                                                       fh->f_iov_type,
                                                       fh->f_comm,
-                                                      fh->f_comm->c_coll.coll_allgatherv_module );
+                                                      fh->f_comm->c_coll->coll_allgatherv_module );
         }
         else {
-            ret = fcoll_base_coll_allgatherv_array (broken_iov_arrays[i],
+            ret = ompi_fcoll_base_coll_allgatherv_array (broken_iov_arrays[i],
                                                     broken_counts[i],
                                                     fh->f_iov_type,
                                                     aggr_data[i]->global_iov_array,
@@ -455,7 +456,7 @@ int mca_fcoll_dynamic_gen2_file_write_all (mca_io_ompio_file_t *fh,
                 ret = OMPI_ERR_OUT_OF_RESOURCE;
                 goto exit;
             }
-            fcoll_base_sort_iovec (aggr_data[i]->global_iov_array, total_fview_count, aggr_data[i]->sorted);
+            ompi_fcoll_base_sort_iovec (aggr_data[i]->global_iov_array, total_fview_count, aggr_data[i]->sorted);
         }
         
         if (NULL != local_iov_array){
@@ -810,13 +811,18 @@ static int shuffle_init ( int index, int cycles, int aggregator, int rank, mca_i
     /**************************************************************************
      ***  7b. Determine the number of bytes to be actually written in this cycle
      **************************************************************************/
-    if (cycles-1 == index) {
-        data->bytes_to_write_in_cycle = data->total_bytes - data->bytes_per_cycle*index;
-    }
-    else {
+    int local_cycles= ceil((double)data->total_bytes / data->bytes_per_cycle);
+    if ( index  < (local_cycles -1) ) {
         data->bytes_to_write_in_cycle = data->bytes_per_cycle;
     }
+    else if ( index == (local_cycles -1)) {
+        data->bytes_to_write_in_cycle = data->total_bytes - data->bytes_per_cycle*index ;
+    }
+    else {
+        data->bytes_to_write_in_cycle = 0;
+    }
     data->bytes_to_write = data->bytes_to_write_in_cycle;
+
 #if DEBUG_ON
     if (aggregator == rank) {
         printf ("****%d: CYCLE %d   Bytes %lld**********\n",
@@ -864,7 +870,7 @@ static int shuffle_init ( int index, int cycles, int aggregator, int rank, mca_i
                 if (aggregator == rank) {
                     data->blocklen_per_process[data->n][data->disp_index[data->n] - 1] = data->bytes_remaining;
                     data->displs_per_process[data->n][data->disp_index[data->n] - 1] =
-                        (OPAL_PTRDIFF_TYPE)data->global_iov_array[data->sorted[data->current_index]].iov_base +
+                        (ptrdiff_t)data->global_iov_array[data->sorted[data->current_index]].iov_base +
                         (data->global_iov_array[data->sorted[data->current_index]].iov_len
                          - data->bytes_remaining);
                     
@@ -892,7 +898,7 @@ static int shuffle_init ( int index, int cycles, int aggregator, int rank, mca_i
                 if (aggregator == rank) {
                     data->blocklen_per_process[data->n][data->disp_index[data->n] - 1] = data->bytes_to_write_in_cycle;
                     data->displs_per_process[data->n][data->disp_index[data->n] - 1] =
-                        (OPAL_PTRDIFF_TYPE)data->global_iov_array[data->sorted[data->current_index]].iov_base +
+                        (ptrdiff_t)data->global_iov_array[data->sorted[data->current_index]].iov_base +
                         (data->global_iov_array[data->sorted[data->current_index]].iov_len
                          - data->bytes_remaining);
                 }
@@ -913,7 +919,7 @@ static int shuffle_init ( int index, int cycles, int aggregator, int rank, mca_i
                 if (aggregator == rank) {
                     data->blocklen_per_process[data->n][data->disp_index[data->n] - 1] = data->bytes_to_write_in_cycle;
                     data->displs_per_process[data->n][data->disp_index[data->n] - 1] =
-                        (OPAL_PTRDIFF_TYPE)data->global_iov_array[data->sorted[data->current_index]].iov_base ;
+                        (ptrdiff_t)data->global_iov_array[data->sorted[data->current_index]].iov_base ;
                 }
                 if (data->procs_in_group[data->n] == rank) {
                     bytes_sent += data->bytes_to_write_in_cycle;
@@ -929,7 +935,7 @@ static int shuffle_init ( int index, int cycles, int aggregator, int rank, mca_i
                 if (aggregator == rank) {
                     data->blocklen_per_process[data->n][data->disp_index[data->n] - 1] =
                         data->global_iov_array[data->sorted[data->current_index]].iov_len;
-                    data->displs_per_process[data->n][data->disp_index[data->n] - 1] = (OPAL_PTRDIFF_TYPE)
+                    data->displs_per_process[data->n][data->disp_index[data->n] - 1] = (ptrdiff_t)
                         data->global_iov_array[data->sorted[data->current_index]].iov_base;
                     
                     /*realloc for next blocklength
@@ -1137,7 +1143,7 @@ static int shuffle_init ( int index, int cycles, int aggregator, int rank, mca_i
         /* allocate a send buffer and copy the data that needs
            to be sent into it in case the data is non-contigous
            in memory */
-        OPAL_PTRDIFF_TYPE mem_address;
+        ptrdiff_t mem_address;
         size_t remaining = 0;
         size_t temp_position = 0;
         
@@ -1151,7 +1157,7 @@ static int shuffle_init ( int index, int cycles, int aggregator, int rank, mca_i
         remaining = bytes_sent;
         
         while (remaining) {
-            mem_address = (OPAL_PTRDIFF_TYPE)
+            mem_address = (ptrdiff_t)
                 (data->decoded_iov[data->iov_index].iov_base) + data->current_position;
             
             if (remaining >=
@@ -1261,7 +1267,7 @@ static int shuffle_init ( int index, int cycles, int aggregator, int rank, mca_i
         for (i=0 ; i<num_of_io_entries ; i++) {
             printf(" ADDRESS: %p  OFFSET: %ld   LENGTH: %ld\n",
                    io_array[i].memory_address,
-                   (OPAL_PTRDIFF_TYPE)io_array[i].offset,
+                   (ptrdiff_t)io_array[i].offset,
                    io_array[i].length);
         }
         

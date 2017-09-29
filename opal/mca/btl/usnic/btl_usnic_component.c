@@ -12,7 +12,7 @@
  *                         All rights reserved.
  * Copyright (c) 2006      Sandia National Laboratories. All rights
  *                         reserved.
- * Copyright (c) 2008-2016 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2008-2017 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2012-2014 Los Alamos National Security, LLC.  All rights
  *                         reserved.
  * Copyright (c) 2014      Intel, Inc. All rights reserved.
@@ -90,7 +90,7 @@
 opal_recursive_mutex_t btl_usnic_lock =  OPAL_RECURSIVE_MUTEX_STATIC_INIT;
 
 /* RNG buffer definition */
-opal_rng_buff_t opal_btl_usnic_rand_buff = {0};
+opal_rng_buff_t opal_btl_usnic_rand_buff = {{0}};
 
 /* simulated clock */
 uint64_t opal_btl_usnic_ticks = 0;
@@ -704,6 +704,8 @@ static mca_btl_base_module_t** usnic_component_init(int* num_btl_modules,
     struct fi_info hints = {0};
     struct fi_ep_attr ep_attr = {0};
     struct fi_fabric_attr fabric_attr = {0};
+    struct fi_rx_attr rx_attr = {0};
+    struct fi_tx_attr tx_attr = {0};
 
     /* We only want providers named "usnic" that are of type EP_DGRAM */
     fabric_attr.prov_name = "usnic";
@@ -714,6 +716,11 @@ static mca_btl_base_module_t** usnic_component_init(int* num_btl_modules,
     hints.addr_format = FI_SOCKADDR;
     hints.ep_attr = &ep_attr;
     hints.fabric_attr = &fabric_attr;
+    hints.tx_attr = &tx_attr;
+    hints.rx_attr = &rx_attr;
+
+    tx_attr.iov_limit = 1;
+    rx_attr.iov_limit = 1;
 
     ret = fi_getinfo(libfabric_api, NULL, 0, 0, &hints, &info_list);
     if (0 != ret) {
@@ -1159,6 +1166,8 @@ static int usnic_component_progress(void)
                 if (OPAL_LIKELY(OPAL_BTL_USNIC_SEG_RECV ==
                             rseg->rs_base.us_type)) {
                     opal_btl_usnic_recv_fast(module, rseg, channel);
+                    ++module->stats.num_seg_total_completions;
+                    ++module->stats.num_seg_recv_completions;
                     fastpath_ok = false;    /* prevent starvation */
                     return 1;
                 } else {
@@ -1188,6 +1197,8 @@ static int usnic_handle_completion(
     seg = (opal_btl_usnic_segment_t*)completion->op_context;
     rseg = (opal_btl_usnic_recv_segment_t*)seg;
 
+    ++module->stats.num_seg_total_completions;
+
     /* Make the completion be Valgrind-defined */
     opal_memchecker_base_mem_defined(seg, sizeof(*seg));
 
@@ -1198,24 +1209,30 @@ static int usnic_handle_completion(
 
     /**** Send ACK completions ****/
     case OPAL_BTL_USNIC_SEG_ACK:
+        ++module->stats.num_seg_ack_completions;
         opal_btl_usnic_ack_complete(module,
                 (opal_btl_usnic_ack_segment_t *)seg);
         break;
 
-    /**** Send of frag segment completion ****/
+    /**** Send of frag segment completion (i.e., the MPI message's
+          one-and-only segment has completed sending) ****/
     case OPAL_BTL_USNIC_SEG_FRAG:
+        ++module->stats.num_seg_frag_completions;
         opal_btl_usnic_frag_send_complete(module,
                 (opal_btl_usnic_frag_segment_t*)seg);
         break;
 
-    /**** Send of chunk segment completion ****/
+    /**** Send of chunk segment completion (i.e., part of a large MPI
+          message is done sending) ****/
     case OPAL_BTL_USNIC_SEG_CHUNK:
+        ++module->stats.num_seg_chunk_completions;
         opal_btl_usnic_chunk_send_complete(module,
                 (opal_btl_usnic_chunk_segment_t*)seg);
         break;
 
     /**** Receive completions ****/
     case OPAL_BTL_USNIC_SEG_RECV:
+        ++module->stats.num_seg_recv_completions;
         opal_btl_usnic_recv(module, rseg, channel);
         break;
 

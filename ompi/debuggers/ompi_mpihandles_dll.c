@@ -5,6 +5,9 @@
  *                         reserved.
  * Copyright (c) 2008      Sun Microsystems, Inc.  All rights reserved.
  * Copyright (c) 2012-2013 Inria.  All rights reserved.
+ * Copyright (c) 2016      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017 IBM Corp.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -84,10 +87,6 @@ struct mpidbg_name_map_t *mpidbg_status_name_map = NULL;
  * cases like the above with compilers that require the symbol (like
  * Sun Studio) we add in these definitions here.
  */
-size_t ompi_request_completed;
-opal_condition_t ompi_request_cond;
-size_t ompi_request_waiting;
-opal_mutex_t ompi_request_lock;
 opal_mutex_t opal_event_lock;
 int opal_progress_spin_count;
 bool opal_mutex_check_locks;
@@ -164,12 +163,17 @@ int mpidbg_interface_version_compatibility(void)
 }
 
 
+static char mpidbg_version_str[OMPI_MAX_VER_SIZE];
+
 /* Returns a string specific to OMPI */
 char *mpidbg_version_string(void)
 {
+    int offset;
     printf("mpidbg_version_string\n");
-    return "Open MPI handle interpretation support for parallel"
-           " debuggers compiled on " __DATE__;
+    offset = snprintf(mpidbg_version_str, OMPI_MAX_VER_SIZE-1,  
+                      "Open MPI handle interpretation support for parallel debuggers ");
+    ompi_get_lib_version(mpidbg_version_str+offset, OMPI_MAX_VER_SIZE-offset);
+    return mpidbg_version_str;
 }
 
 
@@ -234,7 +238,7 @@ int mpidbg_init_per_image(mqs_image *image, const mqs_image_callbacks *icb,
         mqs_find_type(image, "ompi_file_t", mqs_lang_c);
     handle_types->hi_c_group = i_info->ompi_group_t.type;
     handle_types->hi_c_info =
-        mqs_find_type(image, "ompi_info_t", mqs_lang_c);
+        mqs_find_type(image, "opal_info_t", mqs_lang_c);
     /* JMS: "MPI_Offset" is a typedef (see comment about MPI_Aint above) */
     handle_types->hi_c_offset =
         mqs_find_type(image, "MPI_Offset", mqs_lang_c);

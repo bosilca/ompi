@@ -2,14 +2,15 @@
  * Copyright (c) 2009-2011 The Trustees of Indiana University.
  *                         All rights reserved.
  * Copyright (c) 2010      Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2010-2017 Oak Ridge National Labs.  All rights reserved.
  * Copyright (c) 2004-2011 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2011      Oracle and/or all its affiliates.  All rights reserved.
  * Copyright (c) 2011-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2014-2016 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc. All rights reserved.
+ * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -31,6 +32,7 @@
 #include "opal/util/output.h"
 #include "opal/dss/dss.h"
 
+#include "orte/mca/iof/base/base.h"
 #include "orte/mca/rml/rml.h"
 #include "orte/mca/odls/odls.h"
 #include "orte/mca/odls/base/base.h"
@@ -48,6 +50,7 @@
 #include "orte/util/proc_info.h"
 #include "orte/util/show_help.h"
 #include "orte/util/nidmap.h"
+#include "orte/util/threads.h"
 
 #include "orte/runtime/orte_globals.h"
 #include "orte/runtime/orte_locks.h"
@@ -63,32 +66,15 @@
 static int init(void);
 static int finalize(void);
 
-static int predicted_fault(opal_list_t *proc_list,
-                           opal_list_t *node_list,
-                           opal_list_t *suggested_map);
-
-static int suggest_map_targets(orte_proc_t *proc,
-                               orte_node_t *oldnode,
-                               opal_list_t *node_list);
-
-static int ft_event(int state);
-
-
 /******************
  * dvm module
  ******************/
 orte_errmgr_base_module_t orte_errmgr_dvm_module = {
-    init,
-    finalize,
-    orte_errmgr_base_log,
-    orte_errmgr_base_abort,
-    orte_errmgr_base_abort_peers,
-    predicted_fault,
-    suggest_map_targets,
-    ft_event,
-    orte_errmgr_base_register_migration_warning,
-    NULL,
-    orte_errmgr_base_execute_error_callbacks
+    .init = init,
+    .finalize = finalize,
+    .logfn = orte_errmgr_base_log,
+    .abort = orte_errmgr_base_abort,
+    .abort_peers = orte_errmgr_base_abort_peers
 };
 
 
@@ -140,11 +126,11 @@ static void job_errors(int fd, short args, void *cbdata)
     orte_state_caddy_t *caddy = (orte_state_caddy_t*)cbdata;
     orte_job_t *jdata;
     orte_job_state_t jobstate;
-    orte_exit_code_t sts;
-    orte_proc_t *aborted_proc;
     opal_buffer_t *answer;
     int32_t rc, ret;
     int room, *rmptr;
+
+    ORTE_ACQUIRE_OBJECT(caddy);
 
     /*
      * if orte is trying to shutdown, just let it
@@ -173,109 +159,67 @@ static void job_errors(int fd, short args, void *cbdata)
                          ORTE_JOBID_PRINT(jdata->jobid),
                          orte_job_state_to_str(jobstate)));
 
-    if (ORTE_JOB_STATE_NEVER_LAUNCHED == jobstate ||
-        ORTE_JOB_STATE_ALLOC_FAILED == jobstate ||
-        ORTE_JOB_STATE_MAP_FAILED == jobstate ||
-        ORTE_JOB_STATE_CANNOT_LAUNCH == jobstate) {
-        /* disable routing as we may not have performed the daemon
-         * wireup - e.g., in a managed environment, all the daemons
-         * "phone home", but don't actually wireup into the routed
-         * network until they receive the launch message
-         */
-        orte_routing_is_enabled = false;
-        jdata->num_terminated = jdata->num_procs;
-        ORTE_ACTIVATE_JOB_STATE(caddy->jdata, ORTE_JOB_STATE_TERMINATED);
-        /* if it was a dynamic spawn, then we better tell them this didn't work */
-        if (ORTE_JOBID_INVALID != jdata->originator.jobid) {
-            rc = jobstate;
-            answer = OBJ_NEW(opal_buffer_t);
-            if (ORTE_SUCCESS != (ret = opal_dss.pack(answer, &rc, 1, OPAL_INT32))) {
-                ORTE_ERROR_LOG(ret);
-                OBJ_RELEASE(caddy);
-                return;
-            }
-            if (ORTE_SUCCESS != (ret = opal_dss.pack(answer, &jdata->jobid, 1, ORTE_JOBID))) {
-                ORTE_ERROR_LOG(ret);
-                OBJ_RELEASE(caddy);
-                return;
-            }
-            /* pack the room number */
-            rmptr = &room;
-            if (orte_get_attribute(&jdata->attributes, ORTE_JOB_ROOM_NUM, (void**)&rmptr, OPAL_INT)) {
-                if (ORTE_SUCCESS != (ret = opal_dss.pack(answer, &room, 1, OPAL_INT))) {
-                    ORTE_ERROR_LOG(ret);
-                    OBJ_RELEASE(caddy);
-                    return;
-                }
-            }
-            OPAL_OUTPUT_VERBOSE((5, orte_errmgr_base_framework.framework_output,
-                                 "%s errmgr:dvm sending dyn error release of job %s to %s",
-                                 ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
-                                 ORTE_JOBID_PRINT(jdata->jobid),
-                                 ORTE_NAME_PRINT(&jdata->originator)));
-            if (0 > (ret = orte_rml.send_buffer_nb(&jdata->originator, answer,
-                                                   ORTE_RML_TAG_LAUNCH_RESP,
-                                                   orte_rml_send_callback, NULL))) {
-                ORTE_ERROR_LOG(ret);
-                OBJ_RELEASE(answer);
-            }
+    if (jdata->jobid == ORTE_PROC_MY_NAME->jobid) {
+        /* if the daemon job aborted and we haven't heard from everyone yet,
+         * then this could well have been caused by a daemon not finding
+         * a way back to us. In this case, output a message indicating a daemon
+         * died without reporting. Otherwise, say nothing as we
+         * likely already output an error message */
+        if (ORTE_JOB_STATE_ABORTED == jobstate &&
+            jdata->num_procs != jdata->num_reported) {
+            orte_routing_is_enabled = false;
+            orte_show_help("help-errmgr-base.txt", "failed-daemon", true);
         }
+        /* there really isn't much else we can do since the problem
+         * is in the DVM itself, so best just to terminate */
+        jdata->num_terminated = jdata->num_procs;
+        /* activate the terminated state so we can exit */
+        ORTE_ACTIVATE_JOB_STATE(jdata, ORTE_JOB_STATE_TERMINATED);
         OBJ_RELEASE(caddy);
         return;
     }
 
-    if (ORTE_JOB_STATE_FAILED_TO_START == jobstate ||
-        ORTE_JOB_STATE_FAILED_TO_LAUNCH == jobstate) {
-        /* the job object for this job will have been NULL'd
-         * in the array if the job was solely local. If it isn't
-         * NULL, then we need to tell everyone else to die
-         */
-        aborted_proc = NULL;
-        if (orte_get_attribute(&jdata->attributes, ORTE_JOB_ABORTED_PROC, (void**)&aborted_proc, OPAL_PTR)) {
-            sts = aborted_proc->exit_code;
-            if (ORTE_PROC_MY_NAME->jobid == jdata->jobid) {
-                if (WIFSIGNALED(sts)) { /* died on signal */
-#ifdef WCOREDUMP
-                    if (WCOREDUMP(sts)) {
-                        orte_show_help("help-plm-base.txt", "daemon-died-signal-core", true,
-                                       WTERMSIG(sts));
-                        sts = WTERMSIG(sts);
-                    } else {
-                        orte_show_help("help-plm-base.txt", "daemon-died-signal", true,
-                                       WTERMSIG(sts));
-                        sts = WTERMSIG(sts);
-                    }
-#else
-                    orte_show_help("help-plm-base.txt", "daemon-died-signal", true,
-                                   WTERMSIG(sts));
-                    sts = WTERMSIG(sts);
-#endif /* WCOREDUMP */
-                } else {
-                    orte_show_help("help-plm-base.txt", "daemon-died-no-signal", true,
-                                   WEXITSTATUS(sts));
-                    sts = WEXITSTATUS(sts);
-                }
-            }
-        }
-        /* if this is the daemon job, then we need to ensure we
-         * output an error message indicating we couldn't launch the
-         * daemons */
-        if (jdata->jobid == ORTE_PROC_MY_NAME->jobid) {
-            orte_show_help("help-errmgr-base.txt", "failed-daemon-launch", true);
+    /* all other cases involve jobs submitted to the DVM - therefore,
+     * we only inform the submitter of the problem, but do NOT terminate
+     * the DVM itself */
+
+    rc = jobstate;
+    answer = OBJ_NEW(opal_buffer_t);
+    if (ORTE_SUCCESS != (ret = opal_dss.pack(answer, &rc, 1, OPAL_INT32))) {
+        ORTE_ERROR_LOG(ret);
+        OBJ_RELEASE(caddy);
+        return;
+    }
+    if (ORTE_SUCCESS != (ret = opal_dss.pack(answer, &jdata->jobid, 1, ORTE_JOBID))) {
+        ORTE_ERROR_LOG(ret);
+        OBJ_RELEASE(caddy);
+        return;
+    }
+    /* pack the room number */
+    rmptr = &room;
+    if (orte_get_attribute(&jdata->attributes, ORTE_JOB_ROOM_NUM, (void**)&rmptr, OPAL_INT)) {
+        if (ORTE_SUCCESS != (ret = opal_dss.pack(answer, &room, 1, OPAL_INT))) {
+            ORTE_ERROR_LOG(ret);
+            OBJ_RELEASE(caddy);
+            return;
         }
     }
-
-    /* if the daemon job aborted and we haven't heard from everyone yet,
-     * then this could well have been caused by a daemon not finding
-     * a way back to us. In this case, output a message indicating a daemon
-     * died without reporting. Otherwise, say nothing as we
-     * likely already output an error message */
-    if (ORTE_JOB_STATE_ABORTED == jobstate &&
-        jdata->jobid == ORTE_PROC_MY_NAME->jobid &&
-        jdata->num_procs != jdata->num_reported) {
-        orte_show_help("help-errmgr-base.txt", "failed-daemon", true);
+    OPAL_OUTPUT_VERBOSE((5, orte_errmgr_base_framework.framework_output,
+                         "%s errmgr:dvm sending notification of job %s failure to %s",
+                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
+                         ORTE_JOBID_PRINT(jdata->jobid),
+                         ORTE_NAME_PRINT(&jdata->originator)));
+    if (0 > (ret = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                                   &jdata->originator, answer,
+                                                   ORTE_RML_TAG_LAUNCH_RESP,
+                                                   orte_rml_send_callback, NULL))) {
+        ORTE_ERROR_LOG(ret);
+        OBJ_RELEASE(answer);
     }
+    /* ensure we terminate any processes left running in the DVM */
+    _terminate_job(jdata->jobid);
 
+    /* cleanup */
     OBJ_RELEASE(caddy);
 }
 
@@ -288,6 +232,9 @@ static void proc_errors(int fd, short args, void *cbdata)
     orte_proc_state_t state = caddy->proc_state;
     int i;
     int32_t i32, *i32ptr;
+    char *rtmod;
+
+    ORTE_ACQUIRE_OBJECT(caddy);
 
     OPAL_OUTPUT_VERBOSE((1, orte_errmgr_base_framework.framework_output,
                          "%s errmgr:dvm: for proc %s state %s",
@@ -308,6 +255,9 @@ static void proc_errors(int fd, short args, void *cbdata)
         goto cleanup;
     }
     pptr = (orte_proc_t*)opal_pointer_array_get_item(jdata->procs, proc->vpid);
+
+    /* get the management conduit's routed module */
+    rtmod = orte_rml.get_routed(orte_mgmt_conduit);
 
     /* we MUST handle a communication failure before doing anything else
      * as it requires some special care to avoid normal termination issues
@@ -331,6 +281,10 @@ static void proc_errors(int fd, short args, void *cbdata)
         }
         /* mark the daemon as gone */
         ORTE_FLAG_UNSET(pptr, ORTE_PROC_FLAG_ALIVE);
+        /* update the state */
+        pptr->state = state;
+        /* adjust our num_procs */
+        --orte_process_info.num_procs;
         /* if we have ordered orteds to terminate or abort
          * is in progress, record it */
         if (orte_orteds_term_ordered || orte_abnormal_term_ordered) {
@@ -338,9 +292,9 @@ static void proc_errors(int fd, short args, void *cbdata)
                                  "%s Comm failure: daemons terminating - recording daemon %s as gone",
                                  ORTE_NAME_PRINT(ORTE_PROC_MY_NAME), ORTE_NAME_PRINT(proc)));
             /* remove from dependent routes, if it is one */
-            orte_routed.route_lost(proc);
+            orte_routed.route_lost(rtmod, proc);
             /* if all my routes and local children are gone, then terminate ourselves */
-            if (0 == orte_routed.num_routes()) {
+            if (0 == orte_routed.num_routes(rtmod)) {
                 for (i=0; i < orte_local_children->size; i++) {
                     if (NULL != (proct = (orte_proc_t*)opal_pointer_array_get_item(orte_local_children, i)) &&
                         ORTE_FLAG_TEST(pptr, ORTE_PROC_FLAG_ALIVE) && proct->state < ORTE_PROC_STATE_UNTERMINATED) {
@@ -361,7 +315,7 @@ static void proc_errors(int fd, short args, void *cbdata)
                 OPAL_OUTPUT_VERBOSE((5, orte_errmgr_base_framework.framework_output,
                                      "%s Comm failure: %d routes remain alive",
                                      ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
-                                     (int)orte_routed.num_routes()));
+                                     (int)orte_routed.num_routes(rtmod)));
             }
             goto cleanup;
         }
@@ -371,7 +325,11 @@ static void proc_errors(int fd, short args, void *cbdata)
         /* record the first one to fail */
         if (!ORTE_FLAG_TEST(jdata, ORTE_JOB_FLAG_ABORTED)) {
             /* output an error message so the user knows what happened */
-            orte_show_help("help-errmgr-base.txt", "node-died", true, pptr->node->name);
+            orte_show_help("help-errmgr-base.txt", "node-died", true,
+                           ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
+                           orte_process_info.nodename,
+                           ORTE_NAME_PRINT(proc),
+                           pptr->node->name);
             /* mark the daemon job as failed */
             jdata->state = ORTE_JOB_STATE_COMM_FAILED;
             /* point to the lowest rank to cause the problem */
@@ -408,7 +366,7 @@ static void proc_errors(int fd, short args, void *cbdata)
         }
         /* if all my routes and children are gone, then terminate
            ourselves nicely (i.e., this is a normal termination) */
-        if (0 == orte_routed.num_routes()) {
+        if (0 == orte_routed.num_routes(rtmod)) {
             OPAL_OUTPUT_VERBOSE((2, orte_errmgr_base_framework.framework_output,
                                  "%s errmgr:default:dvm all routes gone - exiting",
                                  ORTE_NAME_PRINT(ORTE_PROC_MY_NAME)));
@@ -416,7 +374,7 @@ static void proc_errors(int fd, short args, void *cbdata)
         }
     }
 
- keep_going:
+  keep_going:
     /* ensure we record the failed proc properly so we can report
      * the error once we terminate
      */
@@ -547,9 +505,10 @@ static void proc_errors(int fd, short args, void *cbdata)
                 opal_dss.pack(answer, &pptr->node, 1, ORTE_NODE);
             }
             /* return response */
-            if (0 > (ret = orte_rml.send_buffer_nb(&jdata->originator, answer,
-                                                   ORTE_RML_TAG_LAUNCH_RESP,
-                                                   orte_rml_send_callback, NULL))) {
+            if (0 > (ret = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                                           &jdata->originator, answer,
+                                                           ORTE_RML_TAG_LAUNCH_RESP,
+                                                           orte_rml_send_callback, NULL))) {
                 ORTE_ERROR_LOG(ret);
                 OBJ_RELEASE(answer);
             }
@@ -635,7 +594,7 @@ static void proc_errors(int fd, short args, void *cbdata)
             _terminate_job(jdata->jobid);
         }
         /* remove from dependent routes, if it is one */
-        orte_routed.route_lost(proc);
+        orte_routed.route_lost(rtmod, proc);
         break;
 
     case ORTE_PROC_STATE_UNABLE_TO_SEND_MSG:
@@ -671,23 +630,4 @@ static void proc_errors(int fd, short args, void *cbdata)
 
  cleanup:
     OBJ_RELEASE(caddy);
-}
-
-static int predicted_fault(opal_list_t *proc_list,
-                           opal_list_t *node_list,
-                           opal_list_t *suggested_map)
-{
-    return ORTE_ERR_NOT_IMPLEMENTED;
-}
-
-static int suggest_map_targets(orte_proc_t *proc,
-                               orte_node_t *oldnode,
-                               opal_list_t *node_list)
-{
-    return ORTE_ERR_NOT_IMPLEMENTED;
-}
-
-static int ft_event(int state)
-{
-    return ORTE_SUCCESS;
 }

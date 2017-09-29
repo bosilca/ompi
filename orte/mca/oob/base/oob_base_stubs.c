@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2012-2014 Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2013-2015 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -21,7 +21,7 @@
 #include "orte/mca/errmgr/errmgr.h"
 #include "orte/mca/state/state.h"
 #include "orte/mca/rml/rml.h"
-
+#include "orte/util/threads.h"
 #include "orte/mca/oob/base/base.h"
 #if OPAL_ENABLE_FT_CR == 1
 #include "orte/mca/state/base/base.h"
@@ -32,7 +32,7 @@ static void process_uri(char *uri);
 void orte_oob_base_send_nb(int fd, short args, void *cbdata)
 {
     orte_oob_send_t *cd = (orte_oob_send_t*)cbdata;
-    orte_rml_send_t *msg = cd->msg;
+    orte_rml_send_t *msg;
     mca_base_component_list_item_t *cli;
     orte_oob_base_peer_t *pr;
     int rc;
@@ -42,13 +42,25 @@ void orte_oob_base_send_nb(int fd, short args, void *cbdata)
     bool reachable;
     char *uri;
 
+    ORTE_ACQUIRE_OBJECT(cd);
+
     /* done with this. release it now */
+    msg = cd->msg;
     OBJ_RELEASE(cd);
 
     opal_output_verbose(5, orte_oob_base_framework.framework_output,
-                        "%s oob:base:send to target %s",
+                        "%s oob:base:send to target %s - attempt %u",
                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
-                        ORTE_NAME_PRINT(&msg->dst));
+                        ORTE_NAME_PRINT(&msg->dst), msg->retries);
+
+    /* don't try forever - if we have exceeded the number of retries,
+     * then report this message as undeliverable even if someone continues
+     * to think they could reach it */
+    if (orte_rml_base.max_retries <= msg->retries) {
+        msg->status = ORTE_ERR_NO_PATH_TO_TARGET;
+        ORTE_RML_SEND_COMPLETE(msg);
+        return;
+    }
 
     /* check if we have this peer in our hash table */
     memcpy(&ui64, (char*)&msg->dst, sizeof(uint64_t));
@@ -94,7 +106,7 @@ void orte_oob_base_send_nb(int fd, short args, void *cbdata)
             OPAL_LIST_FOREACH(cli, &orte_oob_base.actives, mca_base_component_list_item_t) {
                 component = (mca_oob_base_component_t*)cli->cli_component;
                 if (NULL != component->is_reachable) {
-                    if (component->is_reachable(&msg->dst)) {
+                    if (component->is_reachable(msg->routed, &msg->dst)) {
                         /* there is a way to reach this peer - record it
                          * so we don't waste this time again
                          */
@@ -120,8 +132,11 @@ void orte_oob_base_send_nb(int fd, short args, void *cbdata)
                  * this is a local proc we just haven't heard from
                  * yet due to a race condition. Check that situation */
                 if (ORTE_PROC_IS_DAEMON || ORTE_PROC_IS_HNP) {
-                    ORTE_OOB_SEND(msg);
-                    return;
+                    ++msg->retries;
+                    if (msg->retries < orte_rml_base.max_retries) {
+                        ORTE_OOB_SEND(msg);
+                        return;
+                    }
                 }
                 msg->status = ORTE_ERR_ADDRESSEE_UNKNOWN;
                 ORTE_RML_SEND_COMPLETE(msg);
@@ -154,7 +169,7 @@ void orte_oob_base_send_nb(int fd, short args, void *cbdata)
     OPAL_LIST_FOREACH(cli, &orte_oob_base.actives, mca_base_component_list_item_t) {
         component = (mca_oob_base_component_t*)cli->cli_component;
         /* is this peer reachable via this component? */
-        if (!component->is_reachable(&msg->dst)) {
+        if (!component->is_reachable(msg->routed, &msg->dst)) {
             continue;
         }
         /* it is addressable, so attempt to send via that transport */
@@ -212,11 +227,13 @@ void orte_oob_base_get_addr(char **uri)
     bool one_added = false;
     mca_base_component_list_item_t *cli;
     mca_oob_base_component_t *component;
+    opal_value_t val;
 
     /* start with our process name */
     if (ORTE_SUCCESS != (rc = orte_util_convert_process_name_to_string(&final, ORTE_PROC_MY_NAME))) {
         ORTE_ERROR_LOG(rc);
-        goto unblock;
+        *uri = NULL;
+        return;
     }
     len = strlen(final);
 
@@ -264,52 +281,18 @@ void orte_oob_base_get_addr(char **uri)
         }
     }
 
- unblock:
     *uri = final;
-}
-
-/**
- * This function will loop
- * across all oob components, letting each look at the uri and extract
- * info from it if it can. An error is to be returned if NO component
- * can successfully extract a contact.
- */
-static void req_cons(mca_oob_uri_req_t *ptr)
-{
-    ptr->uri = NULL;
-}
-static void req_des(mca_oob_uri_req_t *ptr)
-{
-    if (NULL != ptr->uri) {
-        free(ptr->uri);
+    /* push this into our modex storage */
+    OBJ_CONSTRUCT(&val, opal_value_t);
+    val.key = OPAL_PMIX_PROC_URI;
+    val.type = OPAL_STRING;
+    val.data.string = final;
+    if (OPAL_SUCCESS != (rc = opal_pmix.store_local(ORTE_PROC_MY_NAME, &val))) {
+        ORTE_ERROR_LOG(rc);
     }
-}
-OBJ_CLASS_INSTANCE(mca_oob_uri_req_t,
-                   opal_object_t,
-                   req_cons, req_des);
-
-void orte_oob_base_set_addr(int fd, short args, void *cbdata)
-{
-    mca_oob_uri_req_t *req = (mca_oob_uri_req_t*)cbdata;
-    char *uri = req->uri;
-
-    opal_output_verbose(5, orte_oob_base_framework.framework_output,
-                        "%s: set_addr to uri %s",
-                        ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
-                        (NULL == uri) ? "NULL" : uri);
-
-    /* if the request doesn't contain a URI, then we
-     * have an error
-     */
-    if (NULL == uri) {
-        opal_output(0, "%s: NULL URI", ORTE_NAME_PRINT(ORTE_PROC_MY_NAME));
-        ORTE_FORCED_TERMINATE(1);
-        OBJ_RELEASE(req);
-        return;
-    }
-
-    process_uri(uri);
-    OBJ_RELEASE(req);
+    val.key = NULL;
+    val.data.string = NULL;
+    OBJ_DESTRUCT(&val);
 }
 
 static void process_uri(char *uri)

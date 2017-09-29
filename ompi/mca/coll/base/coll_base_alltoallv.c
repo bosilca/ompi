@@ -14,8 +14,9 @@
  * Copyright (c) 2013      Los Alamos National Security, LLC. All Rights
  *                         reserved.
  * Copyright (c) 2013      FUJITSU LIMITED.  All rights reserved.
- * Copyright (c) 2014-2016 Research Organization for Information Science
+ * Copyright (c) 2014-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -42,31 +43,34 @@ mca_coll_base_alltoallv_intra_basic_inplace(const void *rbuf, const int *rcounts
                                             struct ompi_communicator_t *comm,
                                             mca_coll_base_module_t *module)
 {
-    mca_coll_base_module_t *base_module = (mca_coll_base_module_t*) module;
     int i, j, size, rank, err=MPI_SUCCESS;
-    ompi_request_t **preq, **reqs;
     char *allocated_buffer, *tmp_buffer;
-    size_t max_size, rdtype_size;
-    OPAL_PTRDIFF_TYPE ext, gap = 0;
+    size_t max_size;
+    ptrdiff_t ext, gap = 0;
 
     /* Initialize. */
 
     size = ompi_comm_size(comm);
     rank = ompi_comm_rank(comm);
-    ompi_datatype_type_size(rdtype, &rdtype_size);
 
     /* If only one process, we're done. */
-    if (1 == size || 0 == rdtype_size) {
+    if (1 == size) {
         return MPI_SUCCESS;
     }
-
     /* Find the largest receive amount */
     ompi_datatype_type_extent (rdtype, &ext);
     for (i = 0, max_size = 0 ; i < size ; ++i) {
+        if (i == rank) {
+            continue;
+        }
         size_t size = opal_datatype_span(&rdtype->super, rcounts[i], &gap);
         max_size = size > max_size ? size : max_size;
     }
     /* The gap will always be the same as we are working on the same datatype */
+
+    if (OPAL_UNLIKELY(0 == max_size)) {
+        return MPI_SUCCESS;
+    }
 
     /* Allocate a temporary buffer */
     allocated_buffer = calloc (max_size, 1);
@@ -76,60 +80,42 @@ mca_coll_base_alltoallv_intra_basic_inplace(const void *rbuf, const int *rcounts
     tmp_buffer = allocated_buffer - gap;
 
     /* Initiate all send/recv to/from others. */
-    reqs = preq = coll_base_comm_get_reqs(base_module->base_data, 2);
-    if( NULL == reqs ) { err = OMPI_ERR_OUT_OF_RESOURCE; goto error_hndl; }
-
     /* in-place alltoallv slow algorithm (but works) */
     for (i = 0 ; i < size ; ++i) {
         for (j = i+1 ; j < size ; ++j) {
-            preq = reqs;
-
-            if (i == rank && rcounts[j]) {
+            if (i == rank && 0 != rcounts[j]) {
                 /* Copy the data into the temporary buffer */
                 err = ompi_datatype_copy_content_same_ddt (rdtype, rcounts[j],
                                                            tmp_buffer, (char *) rbuf + rdisps[j] * ext);
                 if (MPI_SUCCESS != err) { goto error_hndl; }
 
                 /* Exchange data with the peer */
-                err = MCA_PML_CALL(irecv ((char *) rbuf + rdisps[j] * ext, rcounts[j], rdtype,
-                                          j, MCA_COLL_BASE_TAG_ALLTOALLV, comm, preq++));
+                err = ompi_coll_base_sendrecv_actual((void *) tmp_buffer,  rcounts[j], rdtype,
+                                                     j, MCA_COLL_BASE_TAG_ALLTOALLV,
+                                                     (char *)rbuf + rdisps[j] * ext, rcounts[j], rdtype,
+                                                     j, MCA_COLL_BASE_TAG_ALLTOALLV,
+                                                     comm, MPI_STATUS_IGNORE);
                 if (MPI_SUCCESS != err) { goto error_hndl; }
-
-                err = MCA_PML_CALL(isend ((void *) tmp_buffer,  rcounts[j], rdtype,
-                                          j, MCA_COLL_BASE_TAG_ALLTOALLV, MCA_PML_BASE_SEND_STANDARD,
-                                          comm, preq++));
-                if (MPI_SUCCESS != err) { goto error_hndl; }
-            } else if (j == rank && rcounts[i]) {
+            } else if (j == rank && 0 != rcounts[i]) {
                 /* Copy the data into the temporary buffer */
                 err = ompi_datatype_copy_content_same_ddt (rdtype, rcounts[i],
                                                            tmp_buffer, (char *) rbuf + rdisps[i] * ext);
                 if (MPI_SUCCESS != err) { goto error_hndl; }
 
                 /* Exchange data with the peer */
-                err = MCA_PML_CALL(irecv ((char *) rbuf + rdisps[i] * ext, rcounts[i], rdtype,
-                                          i, MCA_COLL_BASE_TAG_ALLTOALLV, comm, preq++));
+                err = ompi_coll_base_sendrecv_actual((void *) tmp_buffer,  rcounts[i], rdtype,
+                                                     i, MCA_COLL_BASE_TAG_ALLTOALLV,
+                                                     (char *) rbuf + rdisps[i] * ext, rcounts[i], rdtype,
+                                                     i, MCA_COLL_BASE_TAG_ALLTOALLV,
+                                                     comm, MPI_STATUS_IGNORE);
                 if (MPI_SUCCESS != err) { goto error_hndl; }
-
-                err = MCA_PML_CALL(isend ((void *) tmp_buffer,  rcounts[i], rdtype,
-                                          i, MCA_COLL_BASE_TAG_ALLTOALLV, MCA_PML_BASE_SEND_STANDARD,
-                                          comm, preq++));
-                if (MPI_SUCCESS != err) { goto error_hndl; }
-            } else {
-                continue;
             }
-
-            /* Wait for the requests to complete */
-            err = ompi_request_wait_all (2, reqs, MPI_STATUSES_IGNORE);
-            if (MPI_SUCCESS != err) { goto error_hndl; }
         }
     }
 
  error_hndl:
     /* Free the temporary buffer */
     free (allocated_buffer);
-    if( MPI_SUCCESS != err ) {
-        ompi_coll_base_free_reqs(reqs, 2 );
-    }
 
     /* All done */
     return err;
@@ -244,12 +230,12 @@ ompi_coll_base_alltoallv_intra_basic_linear(const void *sbuf, const int *scounts
 
     /* Now, initiate all send/recv to/from others. */
     nreqs = 0;
-    reqs = preq = coll_base_comm_get_reqs(data, 2 * size);
+    reqs = preq = ompi_coll_base_comm_get_reqs(data, 2 * size);
     if( NULL == reqs ) { err = OMPI_ERR_OUT_OF_RESOURCE; goto err_hndl; }
 
     /* Post all receives first */
     for (i = 0; i < size; ++i) {
-        if (i == rank || 0 == rcounts[i]) {
+        if (i == rank) {
             continue;
         }
 
@@ -263,7 +249,7 @@ ompi_coll_base_alltoallv_intra_basic_linear(const void *sbuf, const int *scounts
 
     /* Now post all sends */
     for (i = 0; i < size; ++i) {
-        if (i == rank || 0 == scounts[i]) {
+        if (i == rank) {
             continue;
         }
 

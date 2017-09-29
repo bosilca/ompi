@@ -3,14 +3,14 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2013 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2006-2010 University of Houston. All rights reserved.
+ * Copyright (c) 2006-2017 University of Houston. All rights reserved.
  * Copyright (c) 2007-2012 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2009      Sun Microsystems, Inc. All rights reserved.
  * Copyright (c) 2012-2015 Los Alamos National Security, LLC.
@@ -18,9 +18,10 @@
  * Copyright (c) 2011-2013 Inria.  All rights reserved.
  * Copyright (c) 2011-2013 Universite Bordeaux 1
  *                         All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
- * Copyright (c) 2015      Intel, Inc. All rights reserved.
+ * Copyright (c) 2015-2017 Intel, Inc. All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -33,6 +34,8 @@
 #include <stdio.h>
 
 #include "opal/util/bit_ops.h"
+#include "opal/util/info_subscriber.h"
+#include "opal/mca/pmix/pmix.h"
 #include "ompi/constants.h"
 #include "ompi/mca/pml/pml.h"
 #include "ompi/mca/coll/base/base.h"
@@ -52,9 +55,9 @@
 opal_pointer_array_t ompi_mpi_communicators = {{0}};
 opal_pointer_array_t ompi_comm_f_to_c_table = {{0}};
 
-ompi_predefined_communicator_t  ompi_mpi_comm_world = {{{0}}};
-ompi_predefined_communicator_t  ompi_mpi_comm_self = {{{0}}};
-ompi_predefined_communicator_t  ompi_mpi_comm_null = {{{0}}};
+ompi_predefined_communicator_t  ompi_mpi_comm_world = {{{{0}}}};
+ompi_predefined_communicator_t  ompi_mpi_comm_self = {{{{0}}}};
+ompi_predefined_communicator_t  ompi_mpi_comm_null = {{{{0}}}};
 ompi_communicator_t  *ompi_mpi_comm_parent = NULL;
 
 ompi_predefined_communicator_t *ompi_mpi_comm_world_addr =
@@ -67,7 +70,7 @@ ompi_predefined_communicator_t *ompi_mpi_comm_null_addr =
 static void ompi_comm_construct(ompi_communicator_t* comm);
 static void ompi_comm_destruct(ompi_communicator_t* comm);
 
-OBJ_CLASS_INSTANCE(ompi_communicator_t, opal_object_t,
+OBJ_CLASS_INSTANCE(ompi_communicator_t, opal_infosubscriber_t,
                    ompi_comm_construct,
                    ompi_comm_destruct);
 
@@ -86,15 +89,15 @@ int ompi_comm_init(void)
 
     /* Setup communicator array */
     OBJ_CONSTRUCT(&ompi_mpi_communicators, opal_pointer_array_t);
-    if( OPAL_SUCCESS != opal_pointer_array_init(&ompi_mpi_communicators, 0,
+    if( OPAL_SUCCESS != opal_pointer_array_init(&ompi_mpi_communicators, 16,
                                                 OMPI_FORTRAN_HANDLE_MAX, 64) ) {
         return OMPI_ERROR;
     }
 
     /* Setup f to c table (we can no longer use the cid as the fortran handle) */
     OBJ_CONSTRUCT(&ompi_comm_f_to_c_table, opal_pointer_array_t);
-    if( OPAL_SUCCESS != opal_pointer_array_init(&ompi_comm_f_to_c_table, 0,
-                                                OMPI_FORTRAN_HANDLE_MAX, 64) ) {
+    if( OPAL_SUCCESS != opal_pointer_array_init(&ompi_comm_f_to_c_table, 8,
+                                                OMPI_FORTRAN_HANDLE_MAX, 32) ) {
         return OMPI_ERROR;
     }
 
@@ -148,6 +151,26 @@ int ompi_comm_init(void)
        because MPI_COMM_WORLD has some predefined attributes. */
     ompi_attr_hash_init(&ompi_mpi_comm_world.comm.c_keyhash);
 
+    /* Check for the binding policy used. We are only interested in
+       whether mapby-node has been set right now (could be extended later)
+       and only on MPI_COMM_WORLD, since for all other sub-communicators
+       it is virtually impossible to identify their layout across nodes
+       in the most generic sense. This is used by OMPIO for deciding which
+       ranks to use for aggregators
+    */
+    opal_process_name_t wildcard = {ORTE_PROC_MY_NAME->jobid, OPAL_VPID_WILDCARD};
+    char *str=NULL;
+    int rc;
+
+    OPAL_MODEX_RECV_VALUE_OPTIONAL(rc, OPAL_PMIX_MAPBY, &wildcard, &str, OPAL_STRING);
+    if ( 0 == rc && NULL != str) {
+        if ( strstr ( str, "BYNODE") ) {
+            OMPI_COMM_SET_MAPBY_NODE(&ompi_mpi_comm_world.comm);
+        }
+        if (NULL != str) {
+            free(str);
+        }
+    }
     /* Setup MPI_COMM_SELF */
     OBJ_CONSTRUCT(&ompi_mpi_comm_self, ompi_communicator_t);
     assert(ompi_mpi_comm_self.comm.c_f_to_c_index == 1);
@@ -219,6 +242,7 @@ ompi_communicator_t *ompi_comm_allocate ( int local_size, int remote_size )
 
     /* create new communicator element */
     new_comm = OBJ_NEW(ompi_communicator_t);
+    new_comm->super.s_info = NULL;
     new_comm->c_local_group = ompi_group_allocate ( local_size );
     if ( 0 < remote_size ) {
         new_comm->c_remote_group = ompi_group_allocate (remote_size);
@@ -357,6 +381,7 @@ static void ompi_comm_construct(ompi_communicator_t* comm)
     comm->c_ibcast_tag = 0;
     comm->c_ireduce_tag = 0;
     comm->c_iallreduce_tag = 0;
+    comm->c_coll         = NULL;
 
     /* A keyhash will be created if/when an attribute is cached on
        this communicator */
@@ -366,12 +391,6 @@ static void ompi_comm_construct(ompi_communicator_t* comm)
 #ifdef OMPI_WANT_PERUSE
     comm->c_peruse_handles = NULL;
 #endif
-
-    /* Need to zero out the collectives module because we sometimes
-       call coll_unselect without a matching call to coll_select, and
-       we need an easy way for the coll base code to realize we've
-       done this. */
-    memset(&comm->c_coll, 0, sizeof(mca_coll_base_comm_coll_t));
 }
 
 static void ompi_comm_destruct(ompi_communicator_t* comm)
@@ -383,7 +402,7 @@ static void ompi_comm_destruct(ompi_communicator_t* comm)
 
     /* Release the collective module */
 
-    if ( MPI_COMM_NULL != comm ) {
+    if ( NULL != comm->c_coll ) {
         mca_coll_base_comm_unselect(comm);
     }
 
@@ -448,5 +467,42 @@ static void ompi_comm_destruct(ompi_communicator_t* comm)
                                              comm->c_f_to_c_index)) {
         opal_pointer_array_set_item ( &ompi_comm_f_to_c_table,
                                       comm->c_f_to_c_index, NULL);
+    }
+}
+
+#define OMPI_COMM_SET_INFO_FN(name, flag)       \
+    static char *ompi_comm_set_ ## name (opal_infosubscriber_t *obj, char *key, char *value) \
+    {                                                                   \
+        ompi_communicator_t *comm = (ompi_communicator_t *) obj;        \
+                                                                        \
+        if (opal_str_to_bool(value)) {                                  \
+            comm->c_assertions |= flag;                                 \
+        } else {                                                        \
+            comm->c_assertions &= ~flag;                                \
+        }                                                               \
+                                                                        \
+        return OMPI_COMM_CHECK_ASSERT(comm, flag) ? "true" : "false";   \
+    }
+
+OMPI_COMM_SET_INFO_FN(no_any_source, OMPI_COMM_ASSERT_NO_ANY_SOURCE)
+OMPI_COMM_SET_INFO_FN(no_any_tag, OMPI_COMM_ASSERT_NO_ANY_TAG)
+OMPI_COMM_SET_INFO_FN(allow_overtake, OMPI_COMM_ASSERT_ALLOW_OVERTAKE)
+OMPI_COMM_SET_INFO_FN(exact_length, OMPI_COMM_ASSERT_EXACT_LENGTH)
+
+void ompi_comm_assert_subscribe (ompi_communicator_t *comm, int32_t assert_flag)
+{
+    switch (assert_flag) {
+    case OMPI_COMM_ASSERT_NO_ANY_SOURCE:
+        opal_infosubscribe_subscribe (&comm->super, "mpi_assert_no_any_source", "false", ompi_comm_set_no_any_source);
+        break;
+    case OMPI_COMM_ASSERT_NO_ANY_TAG:
+        opal_infosubscribe_subscribe (&comm->super, "mpi_assert_no_any_tag", "false", ompi_comm_set_no_any_tag);
+        break;
+    case OMPI_COMM_ASSERT_ALLOW_OVERTAKE:
+        opal_infosubscribe_subscribe (&comm->super, "mpi_assert_allow_overtaking", "false", ompi_comm_set_allow_overtake);
+        break;
+    case OMPI_COMM_ASSERT_EXACT_LENGTH:
+        opal_infosubscribe_subscribe (&comm->super, "mpi_assert_exact_length", "false", ompi_comm_set_exact_length);
+        break;
     }
 }

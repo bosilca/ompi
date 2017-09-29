@@ -13,7 +13,9 @@
  *                         All rights reserved.
  * Copyright (c) 2009      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2011      Oak Ridge National Labs.  All rights reserved.
- * Copyright (c) 2013-2016 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2017      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -62,6 +64,7 @@
 #include "opal/mca/event/event.h"
 
 #include "orte/util/name_fns.h"
+#include "orte/util/threads.h"
 #include "orte/runtime/orte_globals.h"
 #include "orte/mca/errmgr/errmgr.h"
 #include "orte/mca/ess/ess.h"
@@ -75,47 +78,120 @@
 #include "orte/mca/oob/tcp/oob_tcp_common.h"
 #include "orte/mca/oob/tcp/oob_tcp_connection.h"
 
-static int send_bytes(mca_oob_tcp_peer_t* peer)
+#define OOB_SEND_MAX_RETRIES 3
+
+void mca_oob_tcp_queue_msg(int sd, short args, void *cbdata)
 {
-    mca_oob_tcp_send_t* msg = peer->send_msg;
-    int rc;
+    mca_oob_tcp_send_t *snd = (mca_oob_tcp_send_t*)cbdata;
+    mca_oob_tcp_peer_t *peer;
 
-    OPAL_TIMING_EVENT((&tm_oob, "to %s %d bytes",
-                       ORTE_NAME_PRINT(&(peer->name)), msg->sdbytes));
+    ORTE_ACQUIRE_OBJECT(snd);
+    peer = (mca_oob_tcp_peer_t*)snd->peer;
 
-    while (0 < msg->sdbytes) {
-        rc = write(peer->sd, msg->sdptr, msg->sdbytes);
-        if (rc < 0) {
-            if (opal_socket_errno == EINTR) {
-                continue;
-            } else if (opal_socket_errno == EAGAIN) {
-                /* tell the caller to keep this message on active,
-                 * but let the event lib cycle so other messages
-                 * can progress while this socket is busy
-                 */
-                return ORTE_ERR_RESOURCE_BUSY;
-            } else if (opal_socket_errno == EWOULDBLOCK) {
-                /* tell the caller to keep this message on active,
-                 * but let the event lib cycle so other messages
-                 * can progress while this socket is busy
-                 */
-                return ORTE_ERR_WOULD_BLOCK;
-            }
-            /* we hit an error and cannot progress this message */
-            opal_output(0, "%s->%s mca_oob_tcp_msg_send_bytes: write failed: %s (%d) [sd = %d]",
-                        ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
-                        ORTE_NAME_PRINT(&(peer->name)),
-                        strerror(opal_socket_errno),
-                        opal_socket_errno,
-                        peer->sd);
-            return ORTE_ERR_COMM_FAILURE;
-        }
-        /* update location */
-        msg->sdbytes -= rc;
-        msg->sdptr += rc;
+    /* if there is no message on-deck, put this one there */
+    if (NULL == peer->send_msg) {
+        peer->send_msg = snd;
+    } else {
+        /* add it to the queue */
+        opal_list_append(&peer->send_queue, &snd->super);
     }
-    /* we sent the full data block */
-    return ORTE_SUCCESS;
+    if (snd->activate) {
+        /* if we aren't connected, then start connecting */
+        if (MCA_OOB_TCP_CONNECTED != peer->state) {
+            peer->state = MCA_OOB_TCP_CONNECTING;
+            ORTE_ACTIVATE_TCP_CONN_STATE(peer, mca_oob_tcp_peer_try_connect);
+        } else {
+            /* ensure the send event is active */
+            if (!peer->send_ev_active) {
+                peer->send_ev_active = true;
+                ORTE_POST_OBJECT(peer);
+                opal_event_add(&peer->send_event, 0);
+            }
+        }
+    }
+}
+
+static int send_msg(mca_oob_tcp_peer_t* peer, mca_oob_tcp_send_t* msg)
+{
+    struct iovec iov[2];
+    int iov_count, retries = 0;
+    ssize_t remain = msg->sdbytes, rc;
+
+    iov[0].iov_base = msg->sdptr;
+    iov[0].iov_len = msg->sdbytes;
+    if (!msg->hdr_sent) {
+        if (NULL != msg->data) {
+            /* relay message - just send that data */
+            iov[1].iov_base = msg->data;
+        } else if (NULL != msg->msg->buffer) {
+            /* buffer send */
+            iov[1].iov_base = msg->msg->buffer->base_ptr;
+        } else {
+            iov[1].iov_base = msg->msg->data;
+        }
+        iov[1].iov_len = ntohl(msg->hdr.nbytes);
+        remain += ntohl(msg->hdr.nbytes);
+        iov_count = 2;
+    } else {
+        iov_count = 1;
+    }
+
+  retry:
+    rc = writev(peer->sd, iov, iov_count);
+    if (OPAL_LIKELY(rc == remain)) {
+        /* we successfully sent the header and the msg data if any */
+        msg->hdr_sent = true;
+        msg->sdbytes = 0;
+        msg->sdptr = (char *)iov[iov_count-1].iov_base + iov[iov_count-1].iov_len;
+        return ORTE_SUCCESS;
+    } else if (rc < 0) {
+        if (opal_socket_errno == EINTR) {
+            goto retry;
+        } else if (opal_socket_errno == EAGAIN) {
+            /* tell the caller to keep this message on active,
+             * but let the event lib cycle so other messages
+             * can progress while this socket is busy
+             */
+            ++retries;
+            if (retries < OOB_SEND_MAX_RETRIES) {
+                goto retry;
+            }
+            return ORTE_ERR_RESOURCE_BUSY;
+        } else if (opal_socket_errno == EWOULDBLOCK) {
+            /* tell the caller to keep this message on active,
+             * but let the event lib cycle so other messages
+             * can progress while this socket is busy
+             */
+            ++retries;
+            if (retries < OOB_SEND_MAX_RETRIES) {
+                goto retry;
+            }
+            return ORTE_ERR_WOULD_BLOCK;
+        } else {
+            /* we hit an error and cannot progress this message */
+            opal_output(0, "oob:tcp: send_msg: write failed: %s (%d) [sd = %d]",
+                        strerror(opal_socket_errno),
+                        opal_socket_errno, peer->sd);
+            return ORTE_ERR_UNREACH;
+        }
+    } else {
+        /* short writev. This usually means the kernel buffer is full,
+         * so there is no point for retrying at that time.
+         * simply update the msg and return with PMIX_ERR_RESOURCE_BUSY */
+        if ((size_t)rc < msg->sdbytes) {
+            /* partial write of the header or the msg data */
+            msg->sdptr = (char *)msg->sdptr + rc;
+            msg->sdbytes -= rc;
+        } else {
+            /* header was fully written, but only a part of the msg data was written */
+            msg->hdr_sent = true;
+            rc -= msg->sdbytes;
+            assert(2 == iov_count);
+            msg->sdptr = (char *)iov[1].iov_base + rc;
+            msg->sdbytes = ntohl(msg->hdr.nbytes) - rc;
+        }
+        return ORTE_ERR_RESOURCE_BUSY;
+    }
 }
 
 /*
@@ -125,8 +201,11 @@ static int send_bytes(mca_oob_tcp_peer_t* peer)
 void mca_oob_tcp_send_handler(int sd, short flags, void *cbdata)
 {
     mca_oob_tcp_peer_t* peer = (mca_oob_tcp_peer_t*)cbdata;
-    mca_oob_tcp_send_t* msg = peer->send_msg;
+    mca_oob_tcp_send_t* msg;
     int rc;
+
+    ORTE_ACQUIRE_OBJECT(peer);
+    msg = peer->send_msg;
 
     opal_output_verbose(OOB_TCP_DEBUG_CONNECT, orte_oob_base_framework.framework_output,
                         "%s tcp:send_handler called to send to peer %s",
@@ -155,68 +234,56 @@ void mca_oob_tcp_send_handler(int sd, short flags, void *cbdata)
                             ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
                             (NULL == peer->send_msg) ? "NULL" : ORTE_NAME_PRINT(&peer->name));
         if (NULL != msg) {
-            /* if the header hasn't been completely sent, send it */
-            if (!msg->hdr_sent) {
-                if (ORTE_SUCCESS == (rc = send_bytes(peer))) {
-                    /* header is completely sent */
-                    msg->hdr_sent = true;
-                    /* setup to send the data */
-                    if (NULL != msg->data) {
-                        /* relay msg - send that data */
-                        msg->sdptr = msg->data;
-                        msg->sdbytes = (int)ntohl(msg->hdr.nbytes);
-                    } else if (NULL == msg->msg) {
-                        /* this was a zero-byte relay - nothing more to do */
-                        OBJ_RELEASE(msg);
-                        peer->send_msg = NULL;
-                        goto next;
-                    } else if (NULL != msg->msg->buffer) {
-                        /* send the buffer data as a single block */
-                        msg->sdptr = msg->msg->buffer->base_ptr;
-                        msg->sdbytes = msg->msg->buffer->bytes_used;
-                    } else if (NULL != msg->msg->iov) {
-                        /* start with the first iovec */
-                        msg->sdptr = msg->msg->iov[0].iov_base;
-                        msg->sdbytes = msg->msg->iov[0].iov_len;
-                        msg->iovnum = 0;
-                    } else {
-                        /* just send the data */
-                        msg->sdptr = msg->msg->data;
-                        msg->sdbytes = msg->msg->count;
-                    }
-                    /* fall thru and let the send progress */
-                } else if (ORTE_ERR_RESOURCE_BUSY == rc ||
-                           ORTE_ERR_WOULD_BLOCK == rc) {
-                    /* exit this event and let the event lib progress */
-                    return;
-                } else {
-                    // report the error
-                    opal_output(0, "%s-%s mca_oob_tcp_peer_send_handler: unable to send header",
-                                ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
-                                ORTE_NAME_PRINT(&(peer->name)));
-                    opal_event_del(&peer->send_event);
-                    msg->msg->status = rc;
+            opal_output_verbose(2, orte_oob_base_framework.framework_output,
+                                "oob:tcp:send_handler SENDING MSG");
+            if (ORTE_SUCCESS == (rc = send_msg(peer, msg))) {
+                /* this msg is complete */
+                if (NULL != msg->data || NULL == msg->msg) {
+                    /* the relay is complete - release the data */
+                    opal_output_verbose(2, orte_oob_base_framework.framework_output,
+                                        "%s MESSAGE RELAY COMPLETE TO %s OF %d BYTES ON SOCKET %d",
+                                        ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
+                                        ORTE_NAME_PRINT(&(peer->name)),
+                                        (int)ntohl(msg->hdr.nbytes), peer->sd);
+                    OBJ_RELEASE(msg);
+                    peer->send_msg = NULL;
+                } else if (NULL != msg->msg->buffer) {
+                    /* we are done - notify the RML */
+                    opal_output_verbose(2, orte_oob_base_framework.framework_output,
+                                        "%s MESSAGE SEND COMPLETE TO %s OF %d BYTES ON SOCKET %d",
+                                        ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
+                                        ORTE_NAME_PRINT(&(peer->name)),
+                                        (int)ntohl(msg->hdr.nbytes), peer->sd);
+                    msg->msg->status = ORTE_SUCCESS;
                     ORTE_RML_SEND_COMPLETE(msg->msg);
                     OBJ_RELEASE(msg);
                     peer->send_msg = NULL;
-                    goto next;
-                }
-            }
-            /* progress the data transmission */
-            if (msg->hdr_sent) {
-                if (ORTE_SUCCESS == (rc = send_bytes(peer))) {
-                    /* this block is complete */
-                    if (NULL != msg->data || NULL == msg->msg) {
-                        /* the relay is complete - release the data */
-                        opal_output_verbose(2, orte_oob_base_framework.framework_output,
-                                            "%s MESSAGE RELAY COMPLETE TO %s OF %d BYTES ON SOCKET %d",
-                                            ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
-                                            ORTE_NAME_PRINT(&(peer->name)),
-                                            (int)ntohl(msg->hdr.nbytes), peer->sd);
-                        OBJ_RELEASE(msg);
-                        peer->send_msg = NULL;
-                    } else if (NULL != msg->msg->buffer) {
-                        /* we are done - notify the RML */
+                } else if (NULL != msg->msg->data) {
+                    /* this was a relay we have now completed - no need to
+                     * notify the RML as the local proc didn't initiate
+                     * the send
+                     */
+                    opal_output_verbose(2, orte_oob_base_framework.framework_output,
+                                        "%s MESSAGE RELAY COMPLETE TO %s OF %d BYTES ON SOCKET %d",
+                                        ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
+                                        ORTE_NAME_PRINT(&(peer->name)),
+                                        (int)ntohl(msg->hdr.nbytes), peer->sd);
+                    msg->msg->status = ORTE_SUCCESS;
+                    OBJ_RELEASE(msg);
+                    peer->send_msg = NULL;
+                } else {
+                    /* rotate to the next iovec */
+                    msg->iovnum++;
+                    if (msg->iovnum < msg->msg->count) {
+                        msg->sdptr = msg->msg->iov[msg->iovnum].iov_base;
+                        msg->sdbytes = msg->msg->iov[msg->iovnum].iov_len;
+                        /* exit this event to give the event lib
+                         * a chance to progress any other pending
+                         * actions
+                         */
+                        return;
+                    } else {
+                        /* this message is complete - notify the RML */
                         opal_output_verbose(2, orte_oob_base_framework.framework_output,
                                             "%s MESSAGE SEND COMPLETE TO %s OF %d BYTES ON SOCKET %d",
                                             ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
@@ -226,64 +293,27 @@ void mca_oob_tcp_send_handler(int sd, short flags, void *cbdata)
                         ORTE_RML_SEND_COMPLETE(msg->msg);
                         OBJ_RELEASE(msg);
                         peer->send_msg = NULL;
-                    } else if (NULL != msg->msg->data) {
-                        /* this was a relay we have now completed - no need to
-                         * notify the RML as the local proc didn't initiate
-                         * the send
-                         */
-                        opal_output_verbose(2, orte_oob_base_framework.framework_output,
-                                            "%s MESSAGE RELAY COMPLETE TO %s OF %d BYTES ON SOCKET %d",
-                                            ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
-                                            ORTE_NAME_PRINT(&(peer->name)),
-                                            (int)ntohl(msg->hdr.nbytes), peer->sd);
-                        msg->msg->status = ORTE_SUCCESS;
-                        OBJ_RELEASE(msg);
-                        peer->send_msg = NULL;
-                    } else {
-                        /* rotate to the next iovec */
-                        msg->iovnum++;
-                        if (msg->iovnum < msg->msg->count) {
-                            msg->sdptr = msg->msg->iov[msg->iovnum].iov_base;
-                            msg->sdbytes = msg->msg->iov[msg->iovnum].iov_len;
-                            /* exit this event to give the event lib
-                             * a chance to progress any other pending
-                             * actions
-                             */
-                            return;
-                        } else {
-                            /* this message is complete - notify the RML */
-                            opal_output_verbose(2, orte_oob_base_framework.framework_output,
-                                                "%s MESSAGE SEND COMPLETE TO %s OF %d BYTES ON SOCKET %d",
-                                                ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
-                                                ORTE_NAME_PRINT(&(peer->name)),
-                                                (int)ntohl(msg->hdr.nbytes), peer->sd);
-                            msg->msg->status = ORTE_SUCCESS;
-                            ORTE_RML_SEND_COMPLETE(msg->msg);
-                            OBJ_RELEASE(msg);
-                            peer->send_msg = NULL;
-                        }
                     }
-                    /* fall thru to queue the next message */
-                } else if (ORTE_ERR_RESOURCE_BUSY == rc ||
-                           ORTE_ERR_WOULD_BLOCK == rc) {
-                    /* exit this event and let the event lib progress */
-                    return;
-                } else {
-                    // report the error
-                    opal_output(0, "%s-%s mca_oob_tcp_peer_send_handler: unable to send message ON SOCKET %d",
-                                ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
-                                ORTE_NAME_PRINT(&(peer->name)), peer->sd);
-                    opal_event_del(&peer->send_event);
-                    msg->msg->status = rc;
-                    ORTE_RML_SEND_COMPLETE(msg->msg);
-                    OBJ_RELEASE(msg);
-                    peer->send_msg = NULL;
-                    ORTE_FORCED_TERMINATE(1);
-                    return;
                 }
+                /* fall thru to queue the next message */
+            } else if (ORTE_ERR_RESOURCE_BUSY == rc ||
+                       ORTE_ERR_WOULD_BLOCK == rc) {
+                /* exit this event and let the event lib progress */
+                return;
+            } else {
+                // report the error
+                opal_output(0, "%s-%s mca_oob_tcp_peer_send_handler: unable to send message ON SOCKET %d",
+                            ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
+                            ORTE_NAME_PRINT(&(peer->name)), peer->sd);
+                opal_event_del(&peer->send_event);
+                msg->msg->status = rc;
+                ORTE_RML_SEND_COMPLETE(msg->msg);
+                OBJ_RELEASE(msg);
+                peer->send_msg = NULL;
+                ORTE_FORCED_TERMINATE(1);
+                return;
             }
 
-        next:
             /* if current message completed - progress any pending sends by
              * moving the next in the queue into the "on-deck" position. Note
              * that this doesn't mean we send the message right now - we will
@@ -316,9 +346,6 @@ void mca_oob_tcp_send_handler(int sd, short flags, void *cbdata)
 static int read_bytes(mca_oob_tcp_peer_t* peer)
 {
     int rc;
-#if OPAL_ENABLE_TIMING
-    int to_read = peer->recv_msg->rdbytes;
-#endif
 
     /* read until all bytes recvd or error */
     while (0 < peer->recv_msg->rdbytes) {
@@ -390,9 +417,6 @@ static int read_bytes(mca_oob_tcp_peer_t* peer)
         peer->recv_msg->rdptr += rc;
     }
 
-    OPAL_TIMING_EVENT((&tm_oob, "from %s %d bytes",
-                       ORTE_NAME_PRINT(&(peer->name)), to_read));
-
     /* we read the full data block */
     return ORTE_SUCCESS;
 }
@@ -407,9 +431,8 @@ void mca_oob_tcp_recv_handler(int sd, short flags, void *cbdata)
     mca_oob_tcp_peer_t* peer = (mca_oob_tcp_peer_t*)cbdata;
     int rc;
     orte_rml_send_t *snd;
-#if OPAL_ENABLE_TIMING
-    bool timing_same_as_hdr = false;
-#endif
+
+    ORTE_ACQUIRE_OBJECT(peer);
 
     opal_output_verbose(OOB_TCP_DEBUG_CONNECT, orte_oob_base_framework.framework_output,
                         "%s:tcp:recv:handler called for peer %s",
@@ -424,8 +447,9 @@ void mca_oob_tcp_recv_handler(int sd, short flags, void *cbdata)
                                 ORTE_NAME_PRINT(ORTE_PROC_MY_NAME));
             /* we connected! Start the send/recv events */
             if (!peer->recv_ev_active) {
-                opal_event_add(&peer->recv_event, 0);
                 peer->recv_ev_active = true;
+                ORTE_POST_OBJECT(peer);
+                opal_event_add(&peer->recv_event, 0);
             }
             if (peer->timer_ev_active) {
                 opal_event_del(&peer->timer_event);
@@ -436,8 +460,9 @@ void mca_oob_tcp_recv_handler(int sd, short flags, void *cbdata)
                 peer->send_msg = (mca_oob_tcp_send_t*)opal_list_remove_first(&peer->send_queue);
             }
             if (NULL != peer->send_msg && !peer->send_ev_active) {
-                opal_event_add(&peer->send_event, 0);
                 peer->send_ev_active = true;
+                ORTE_POST_OBJECT(peer);
+                opal_event_add(&peer->send_event, 0);
             }
             /* update our state */
             peer->state = MCA_OOB_TCP_CONNECTED;
@@ -479,15 +504,7 @@ void mca_oob_tcp_recv_handler(int sd, short flags, void *cbdata)
             opal_output_verbose(OOB_TCP_DEBUG_CONNECT, orte_oob_base_framework.framework_output,
                                 "%s:tcp:recv:handler read hdr",
                                 ORTE_NAME_PRINT(ORTE_PROC_MY_NAME));
-#if OPAL_ENABLE_TIMING
-            int to_recv = peer->recv_msg->rdbytes;
-#endif
             if (ORTE_SUCCESS == (rc = read_bytes(peer))) {
-#if OPAL_ENABLE_TIMING
-                timing_same_as_hdr = true;
-#endif
-                OPAL_TIMING_EVENT((&tm_oob, "from %s %d bytes [header]",
-                                   ORTE_NAME_PRINT(&(peer->name)), to_recv));
                 /* completed reading the header */
                 peer->recv_msg->hdr_recvd = true;
                 /* convert the header */
@@ -540,11 +557,6 @@ void mca_oob_tcp_recv_handler(int sd, short flags, void *cbdata)
                                     ORTE_NAME_PRINT(&peer->recv_msg->hdr.dst),
                                     peer->recv_msg->hdr.tag);
 
-                OPAL_TIMING_EVENT((&tm_oob, "from %s %d bytes [body:%s]",
-                                   ORTE_NAME_PRINT(&(peer->name)),
-                                   (int)peer->recv_msg->hdr.nbytes,
-                                   (timing_same_as_hdr) ? "same" : "next"));
-
                 /* am I the intended recipient (header was already converted back to host order)? */
                 if (peer->recv_msg->hdr.dst.jobid == ORTE_PROC_MY_NAME->jobid &&
                     peer->recv_msg->hdr.dst.vpid == ORTE_PROC_MY_NAME->vpid) {
@@ -574,6 +586,7 @@ void mca_oob_tcp_recv_handler(int sd, short flags, void *cbdata)
                     snd->data = peer->recv_msg->data;
                     snd->seq_num = peer->recv_msg->hdr.seq_num;
                     snd->count = peer->recv_msg->hdr.nbytes;
+                    snd->routed = strdup(peer->recv_msg->hdr.routed);
                     snd->cbfunc.iov = NULL;
                     snd->cbdata = NULL;
                     /* activate the OOB send state */
@@ -613,6 +626,7 @@ void mca_oob_tcp_recv_handler(int sd, short flags, void *cbdata)
 
 static void snd_cons(mca_oob_tcp_send_t *ptr)
 {
+    memset(&ptr->hdr, 0, sizeof(mca_oob_tcp_hdr_t));
     ptr->msg = NULL;
     ptr->data = NULL;
     ptr->hdr_sent = false;
@@ -638,6 +652,7 @@ OBJ_CLASS_INSTANCE(mca_oob_tcp_send_t,
 
 static void rcv_cons(mca_oob_tcp_recv_t *ptr)
 {
+    memset(&ptr->hdr, 0, sizeof(mca_oob_tcp_hdr_t));
     ptr->hdr_recvd = false;
     ptr->rdptr = NULL;
     ptr->rdbytes = 0;
@@ -654,4 +669,3 @@ static void err_cons(mca_oob_tcp_msg_error_t *ptr)
 OBJ_CLASS_INSTANCE(mca_oob_tcp_msg_error_t,
                    opal_object_t,
                    err_cons, NULL);
-

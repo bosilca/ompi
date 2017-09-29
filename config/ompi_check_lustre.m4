@@ -10,8 +10,8 @@ dnl Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
 dnl                         University of Stuttgart.  All rights reserved.
 dnl Copyright (c) 2004-2006 The Regents of the University of California.
 dnl                         All rights reserved.
-dnl Copyright (c) 2009      Cisco Systems, Inc.  All rights reserved.
-dnl Copyright (c) 2008-2012 University of Houston. All rights reserved.
+dnl Copyright (c) 2009-2017 Cisco Systems, Inc.  All rights reserved
+dnl Copyright (c) 2008-2017 University of Houston. All rights reserved.
 dnl Copyright (c) 2015      Research Organization for Information Science
 dnl                         and Technology (RIST). All rights reserved.
 dnl $COPYRIGHT$
@@ -39,16 +39,15 @@ AC_DEFUN([OMPI_CHECK_LUSTRE],[
     check_lustre_configuration="none"
     ompi_check_lustre_happy="yes"
 
-
     # Get some configuration information
     AC_ARG_WITH([lustre],
         [AC_HELP_STRING([--with-lustre(=DIR)],
              [Build Lustre support, optionally adding DIR/include, DIR/lib, and DIR/lib64 to the search path for headers and libraries])])
-    OPAL_CHECK_WITHDIR([lustre], [$with_lustre], [include/lustre/liblustreapi.h])
+    OPAL_CHECK_WITHDIR([lustre], [$with_lustre], [include/lustre/lustreapi.h])
 
-    AS_IF([test -z "$with_lustre"],
+    AS_IF([test -z "$with_lustre" || test "$with_lustre" = "yes"],
           [ompi_check_lustre_dir="/usr"],
-          [ompi_check_lustre_dir="$with_lustre"])
+          [ompi_check_lustre_dir=$with_lustre])
 
     if test -e "$ompi_check_lustre_dir/lib64" ; then
         ompi_check_lustre_libdir="$ompi_check_lustre_dir/lib64"
@@ -57,13 +56,13 @@ AC_DEFUN([OMPI_CHECK_LUSTRE],[
     fi
 
     # Add correct -I and -L flags
-    OPAL_CHECK_PACKAGE([$1], [lustre/liblustreapi.h], [lustreapi], [llapi_file_create], [],
+    OPAL_CHECK_PACKAGE([$1], [lustre/lustreapi.h], [lustreapi], [llapi_file_create], [],
                        [$ompi_check_lustre_dir], [$ompi_check_lustre_libdir], [ompi_check_lustre_happy="yes"],
                        [ompi_check_lustre_happy="no"])
 
     AC_MSG_CHECKING([for required lustre data structures])
    cat > conftest.c <<EOF
-#include "lustre/liblustreapi.h"
+#include "lustre/lustreapi.h"
 void alloc_lum()
 {
   int v1, v3;
@@ -88,6 +87,6 @@ OPAL_LOG_COMMAND(
     AS_IF([test "$ompi_check_lustre_happy" = "yes"],
           [$2],
           [AS_IF([test ! -z "$with_lustre" && test "$with_lustre" != "no"],
-                  [echo LUSTRE support not found])
-              $3])
+                 [AC_MSG_ERROR([Lustre support requested but not found.  Aborting])])
+           $3])
 ])

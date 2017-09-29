@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2006 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2016 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2006 High Performance Computing Center Stuttgart,
@@ -15,7 +15,7 @@
  * Copyright (c) 2009      Oak Ridge National Labs.  All rights reserved.
  * Copyright (c) 2013      Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2015-2016 Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016      FUJITSU LIMITED.  All rights reserved.
  * $COPYRIGHT$
@@ -384,8 +384,9 @@ opal_pointer_array_t ompi_datatype_f_to_c_table = {{0}};
         (PDST)->super.opt_desc = (PSRC)->super.opt_desc;                             \
         (PDST)->packed_description = (PSRC)->packed_description;                     \
         (PSRC)->packed_description = NULL;                                           \
-        memcpy( (PDST)->super.btypes, (PSRC)->super.btypes,                          \
-                OPAL_DATATYPE_MAX_PREDEFINED * sizeof(uint32_t) );                   \
+        /* transfer the ptypes */                                                    \
+        (PDST)->super.ptypes = (PSRC)->super.ptypes;                                 \
+        (PSRC)->super.ptypes = NULL;                                                 \
     } while(0)
 
 #define DECLARE_MPI2_COMPOSED_STRUCT_DDT( PDATA, MPIDDT, MPIDDTNAME, type1, type2, MPIType1, MPIType2, FLAGS) \
@@ -393,20 +394,20 @@ opal_pointer_array_t ompi_datatype_f_to_c_table = {{0}};
         struct { type1 v1; type2 v2; } s[2];                                         \
         ompi_datatype_t *types[2], *ptype;                                           \
         int bLength[2] = {1, 1};                                                     \
-        OPAL_PTRDIFF_TYPE base, displ[2];                                            \
+        ptrdiff_t base, displ[2];                                                    \
                                                                                      \
         types[0] = (ompi_datatype_t*)ompi_datatype_basicDatatypes[MPIType1];         \
         types[1] = (ompi_datatype_t*)ompi_datatype_basicDatatypes[MPIType2];         \
-        base = (OPAL_PTRDIFF_TYPE)(&(s[0]));                                         \
-        displ[0] = (OPAL_PTRDIFF_TYPE)(&(s[0].v1));                                  \
+        base = (ptrdiff_t)(&(s[0]));                                                 \
+        displ[0] = (ptrdiff_t)(&(s[0].v1));                                          \
         displ[0] -= base;                                                            \
-        displ[1] = (OPAL_PTRDIFF_TYPE)(&(s[0].v2));                                  \
+        displ[1] = (ptrdiff_t)(&(s[0].v2));                                          \
         displ[1] -= base;                                                            \
                                                                                      \
         ompi_datatype_create_struct( 2, bLength, displ, types, &ptype );             \
-        displ[0] = (OPAL_PTRDIFF_TYPE)(&(s[1]));                                     \
+        displ[0] = (ptrdiff_t)(&(s[1]));                                             \
         displ[0] -= base;                                                            \
-        if( displ[0] != (displ[1] + (OPAL_PTRDIFF_TYPE)sizeof(type2)) )              \
+        if( displ[0] != (displ[1] + (ptrdiff_t)sizeof(type2)) )                      \
             ptype->super.ub = displ[0];  /* force a new extent for the datatype */   \
         ptype->super.flags |= (FLAGS);                                               \
         ptype->id = MPIDDT;                                                          \
@@ -457,7 +458,7 @@ int32_t ompi_datatype_init( void )
     /* Create the f2c translation table */
     OBJ_CONSTRUCT(&ompi_datatype_f_to_c_table, opal_pointer_array_t);
     if( OPAL_SUCCESS != opal_pointer_array_init(&ompi_datatype_f_to_c_table,
-                                                0, OMPI_FORTRAN_HANDLE_MAX, 64)) {
+                                                64, OMPI_FORTRAN_HANDLE_MAX, 32)) {
         return OMPI_ERROR;
     }
     /* All temporary datatypes created on the following statement will get registered
@@ -512,7 +513,6 @@ int32_t ompi_datatype_init( void )
     /* Copy the desc pointer from the <OMPI_DATATYPE_MPI_MAX_PREDEFINED datatypes to
        the synonym types */
 
-
     /* Start to populate the f2c index translation table */
 
     /* The order of the data registration should be the same as the
@@ -523,14 +523,14 @@ int32_t ompi_datatype_init( void )
     /* This macro makes everything significantly easier to read below.
        All hail the moog!  :-) */
 
-#define MOOG(name, index)                                                            \
-    {                                                                                \
-        ompi_mpi_##name.dt.d_f_to_c_index =                                          \
-            opal_pointer_array_add(&ompi_datatype_f_to_c_table, &ompi_mpi_##name);   \
+#define MOOG(name, index)                                               \
+    do {                                                                \
+        ompi_mpi_##name.dt.d_f_to_c_index =                             \
+            opal_pointer_array_add(&ompi_datatype_f_to_c_table, &ompi_mpi_##name); \
         if( ompi_datatype_number_of_predefined_data < (ompi_mpi_##name).dt.d_f_to_c_index ) \
             ompi_datatype_number_of_predefined_data = (ompi_mpi_##name).dt.d_f_to_c_index; \
-        assert( (index) == ompi_mpi_##name.dt.d_f_to_c_index );                      \
-    }
+        assert( (index) == ompi_mpi_##name.dt.d_f_to_c_index );         \
+    } while(0)
 
     /*
      * This MUST match the order of ompi/include/mpif-values.pl
@@ -628,7 +628,7 @@ int32_t ompi_datatype_init( void )
     for( i = 0; i < ompi_mpi_count.dt.d_f_to_c_index; i++ ) {
         opal_datatype_t* datatype = (opal_datatype_t*)opal_pointer_array_get_item(&ompi_datatype_f_to_c_table, i );
 
-        if( (datatype->ub - datatype->lb) == (OPAL_PTRDIFF_TYPE)datatype->size ) {
+        if( (datatype->ub - datatype->lb) == (ptrdiff_t)datatype->size ) {
             datatype->flags |= OPAL_DATATYPE_FLAG_NO_GAPS;
         } else {
             datatype->flags &= ~OPAL_DATATYPE_FLAG_NO_GAPS;
@@ -737,7 +737,7 @@ void ompi_datatype_dump( const ompi_datatype_t* pData )
                      (long)pData->super.size, (int)pData->super.align, pData->super.id, (int)pData->super.desc.length, (int)pData->super.desc.used,
                      (long)pData->super.true_lb, (long)pData->super.true_ub, (long)(pData->super.true_ub - pData->super.true_lb),
                      (long)pData->super.lb, (long)pData->super.ub, (long)(pData->super.ub - pData->super.lb),
-                     (int)pData->super.nbElems, (int)pData->super.btypes[OPAL_DATATYPE_LOOP], (int)pData->super.flags );
+                     (int)pData->super.nbElems, (int)pData->super.loops, (int)pData->super.flags );
     /* dump the flags */
     if( ompi_datatype_is_predefined(pData) ) {
         index += snprintf( buffer + index, length - index, "predefined " );

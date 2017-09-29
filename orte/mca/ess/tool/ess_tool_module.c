@@ -9,7 +9,7 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2015      Intel, Inc. All rights reserved.
+ * Copyright (c) 2015-2017 Intel, Inc. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -32,6 +32,7 @@
 #endif
 
 #include "opal/runtime/opal_progress_threads.h"
+#include "opal/mca/pmix/pmix_types.h"
 
 #include "orte/util/show_help.h"
 #include "orte/mca/plm/base/base.h"
@@ -63,8 +64,8 @@ static int rte_init(void)
 {
     int ret;
     char *error = NULL;
-    orte_jobid_t jobid;
-    orte_vpid_t vpid;
+    opal_list_t flags;
+    opal_value_t *val;
 
     /* run the prolog */
     if (ORTE_SUCCESS != (ret = orte_ess_base_std_prolog())) {
@@ -72,40 +73,6 @@ static int rte_init(void)
         goto error;
     }
 
-
-    if (NULL != orte_ess_base_jobid &&
-        NULL != orte_ess_base_vpid) {
-        opal_output_verbose(2, orte_ess_base_framework.framework_output,
-                            "ess:tool:obtaining name from environment");
-        if (ORTE_SUCCESS != (ret = orte_util_convert_string_to_jobid(&jobid, orte_ess_base_jobid))) {
-            return(ret);
-        }
-        ORTE_PROC_MY_NAME->jobid = jobid;
-        if (ORTE_SUCCESS != (ret = orte_util_convert_string_to_vpid(&vpid, orte_ess_base_vpid))) {
-            return(ret);
-        }
-        ORTE_PROC_MY_NAME->vpid = vpid;
-    } else {
-        /* If we are a tool with no name, then define it here */
-        uint16_t jobfam;
-        uint32_t hash32;
-        uint32_t bias;
-
-        opal_output_verbose(2, orte_ess_base_framework.framework_output,
-                            "ess:tool:computing name");
-        /* hash the nodename */
-        OPAL_HASH_STR(orte_process_info.nodename, hash32);
-        bias = (uint32_t)orte_process_info.pid;
-        /* fold in the bias */
-        hash32 = hash32 ^ bias;
-
-        /* now compress to 16-bits */
-        jobfam = (uint16_t)(((0x0000ffff & (0xffff0000 & hash32) >> 16)) ^ (0x0000ffff & hash32));
-
-        /* set the name */
-        ORTE_PROC_MY_NAME->jobid = 0xffff0000 & ((uint32_t)jobfam << 16);
-        ORTE_PROC_MY_NAME->vpid = 0;
-    }
 
     /* if requested, get an async event base - we use the
      * opal_async one so we don't startup extra threads if
@@ -115,12 +82,58 @@ static int rte_init(void)
         progress_thread_running = true;
     }
 
-    /* do the rest of the standard tool init */
-    if (ORTE_SUCCESS != (ret = orte_ess_base_tool_setup())) {
+    /* setup the tool connection flags */
+    OBJ_CONSTRUCT(&flags, opal_list_t);
+    if (mca_ess_tool_component.do_not_connect) {
+        val = OBJ_NEW(opal_value_t);
+        val->key = strdup(OPAL_PMIX_TOOL_DO_NOT_CONNECT);
+        val->type = OPAL_BOOL;
+        val->data.flag = true;
+        opal_list_append(&flags, &val->super);
+    } else if (mca_ess_tool_component.system_server_first) {
+        val = OBJ_NEW(opal_value_t);
+        val->key = strdup(OPAL_PMIX_CONNECT_SYSTEM_FIRST);
+        val->type = OPAL_BOOL;
+        val->data.flag = true;
+        opal_list_append(&flags, &val->super);
+    } else if (mca_ess_tool_component.system_server_only) {
+        val = OBJ_NEW(opal_value_t);
+        val->key = strdup(OPAL_PMIX_CONNECT_TO_SYSTEM);
+        val->type = OPAL_BOOL;
+        val->data.flag = true;
+        opal_list_append(&flags, &val->super);
+    }
+    if (0 < mca_ess_tool_component.wait_to_connect) {
+        val = OBJ_NEW(opal_value_t);
+        val->key = strdup(OPAL_PMIX_CONNECT_RETRY_DELAY);
+        val->type = OPAL_UINT32;
+        val->data.uint32 = mca_ess_tool_component.wait_to_connect;
+        opal_list_append(&flags, &val->super);
+    }
+    if (0 < mca_ess_tool_component.num_retries) {
+        val = OBJ_NEW(opal_value_t);
+        val->key = strdup(OPAL_PMIX_CONNECT_MAX_RETRIES);
+        val->type = OPAL_UINT32;
+        val->data.uint32 = mca_ess_tool_component.num_retries;
+        opal_list_append(&flags, &val->super);
+    }
+    if (0 < mca_ess_tool_component.pid) {
+        val = OBJ_NEW(opal_value_t);
+        val->key = strdup(OPAL_PMIX_SERVER_PIDINFO);
+        val->type = OPAL_PID;
+        val->data.pid = mca_ess_tool_component.pid;
+        opal_list_append(&flags, &val->super);
+    }
+
+
+    /* do the standard tool init */
+    if (ORTE_SUCCESS != (ret = orte_ess_base_tool_setup(&flags))) {
         ORTE_ERROR_LOG(ret);
+        OPAL_LIST_DESTRUCT(&flags);
         error = "orte_ess_base_tool_setup";
         goto error;
     }
+    OPAL_LIST_DESTRUCT(&flags);
 
     return ORTE_SUCCESS;
 
@@ -174,4 +187,3 @@ static void rte_abort(int status, bool report)
     /* Now just exit */
     exit(status);
 }
-

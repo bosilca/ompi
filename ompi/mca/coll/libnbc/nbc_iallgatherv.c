@@ -11,8 +11,12 @@
  * Copyright (c) 2012      Oracle and/or its affiliates.  All rights reserved.
  * Copyright (c) 2013-2015 Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2014-2015 Research Organization for Information Science
+ * Copyright (c) 2014-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation.  All rights reserved.
+ * $COPYRIGHT$
+ *
+ * Additional copyrights may follow
  *
  */
 #include "nbc_internal.h"
@@ -31,13 +35,12 @@
  *   each node receives from node (rank-2)%p recvcounts[(rank+2)%p] elements */
 int ompi_coll_libnbc_iallgatherv(const void* sendbuf, int sendcount, MPI_Datatype sendtype, void* recvbuf, const int *recvcounts, const int *displs,
                                  MPI_Datatype recvtype, struct ompi_communicator_t *comm, ompi_request_t ** request,
-                                 struct mca_coll_base_module_2_1_0_t *module)
+                                 struct mca_coll_base_module_2_2_0_t *module)
 {
   int rank, p, res, speer, rpeer;
   MPI_Aint rcvext;
   NBC_Schedule *schedule;
   char *rbuf, *sbuf, inplace;
-  NBC_Handle *handle;
   ompi_coll_libnbc_module_t *libnbc_module = (ompi_coll_libnbc_module_t*) module;
 
   NBC_IN_PLACE(sendbuf, recvbuf, inplace);
@@ -82,7 +85,8 @@ int ompi_coll_libnbc_iallgatherv(const void* sendbuf, int sendcount, MPI_Datatyp
       return res;
     }
 
-    res = NBC_Sched_send (sbuf, false, sendcount, sendtype, speer, schedule, false);
+    /* send to rank r - not from the sendbuf to optimize MPI_IN_PLACE */
+    res = NBC_Sched_send (sbuf, false, recvcounts[rank], recvtype, speer, schedule, false);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
       OBJ_RELEASE(schedule);
       return res;
@@ -95,31 +99,22 @@ int ompi_coll_libnbc_iallgatherv(const void* sendbuf, int sendcount, MPI_Datatyp
     return res;
   }
 
-  res = NBC_Init_handle (comm, &handle, libnbc_module);
+  res = NBC_Schedule_request (schedule, comm, libnbc_module, request, NULL);
   if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
     OBJ_RELEASE(schedule);
     return res;
   }
-
-  res = NBC_Start (handle, schedule);
-  if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
-    NBC_Return_handle (handle);
-    return res;
-  }
-
-  *request = (ompi_request_t *) handle;
 
   return OMPI_SUCCESS;
 }
 
 int ompi_coll_libnbc_iallgatherv_inter(const void* sendbuf, int sendcount, MPI_Datatype sendtype, void* recvbuf, const int *recvcounts, const int *displs,
 				       MPI_Datatype recvtype, struct ompi_communicator_t *comm, ompi_request_t ** request,
-				       struct mca_coll_base_module_2_1_0_t *module)
+				       struct mca_coll_base_module_2_2_0_t *module)
 {
   int res, rsize;
   MPI_Aint rcvext;
   NBC_Schedule *schedule;
-  NBC_Handle *handle;
   ompi_coll_libnbc_module_t *libnbc_module = (ompi_coll_libnbc_module_t*) module;
 
   rsize = ompi_comm_remote_size (comm);
@@ -164,19 +159,11 @@ int ompi_coll_libnbc_iallgatherv_inter(const void* sendbuf, int sendcount, MPI_D
     return res;
   }
 
-  res = NBC_Init_handle (comm, &handle, libnbc_module);
+  res = NBC_Schedule_request(schedule, comm, libnbc_module, request, NULL);
   if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
     OBJ_RELEASE(schedule);
     return res;
   }
-
-  res = NBC_Start (handle, schedule);
-  if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
-    NBC_Return_handle (handle);
-    return res;
-  }
-
-  *request = (ompi_request_t *) handle;
 
   return OMPI_SUCCESS;
 }

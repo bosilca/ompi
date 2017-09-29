@@ -10,13 +10,18 @@
 # Copyright (c) 2004-2005 The Regents of the University of California.
 #                         All rights reserved.
 # Copyright (c) 2010      Cisco Systems, Inc.  All rights reserved.
-# Copyright (c) 2015      Intel, Inc. All rights reserved
+# Copyright (c) 2015-2017 Intel, Inc. All rights reserved.
+# Copyright (c) 2017      Los Alamos National Security, LLC.  All rights
+#                         reserved.
+# Copyright (c) 2017      IBM Corporation.  All rights reserved.
 # $COPYRIGHT$
 #
 # Additional copyrights may follow
 #
 # $HEADER$
 #
+
+AM_CPPFLAGS = $(opal_common_ofi_CPPFLAGS)
 
 sources = \
 	rml_ofi.h \
@@ -39,15 +44,10 @@ endif
 mcacomponentdir = $(ortelibdir)
 mcacomponent_LTLIBRARIES = $(component_install)
 mca_rml_ofi_la_SOURCES = $(sources)
-mca_rml_ofi_la_LDFLAGS = \
-			$(orte_rml_ofi_LDFLAGS) \
-			-module -avoid-version
-mca_rml_ofi_la_LIBADD = $(orte_rml_ofi_LIBS) \
-			$(OPAL_TOP_BUILDDIR)/opal/mca/common/libfabric/lib@OPAL_LIB_PREFIX@mca_common_libfabric.la
+mca_rml_ofi_la_LDFLAGS = -module -avoid-version
+mca_rml_ofi_la_LIBADD = $(top_builddir)/orte/lib@ORTE_LIB_PREFIX@open-rte.la \
+	$(OPAL_TOP_BUILDDIR)/opal/mca/common/ofi/lib@OPAL_LIB_PREFIX@mca_common_ofi.la
 
 noinst_LTLIBRARIES = $(component_noinst)
 libmca_rml_ofi_la_SOURCES = $(sources)
-libmca_rml_ofi_la_LDFLAGS = \
-		$(orte_rml_ofi_LDFLAGS) \
-		-module -avoid-version
-libmca_rml_ofi_la_LIBADD = $(orte_rml_ofi_LIBS)
+libmca_rml_ofi_la_LDFLAGS = -module -avoid-version

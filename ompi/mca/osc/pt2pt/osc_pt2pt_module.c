@@ -13,6 +13,9 @@
  * Copyright (c) 2012-2013 Sandia National Laboratories.  All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      The University of Tennessee and The University
+ *                         of Tennessee Research Foundation.  All rights
+ *                         reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -55,8 +58,8 @@ int ompi_osc_pt2pt_free(ompi_win_t *win)
 
         /* finish with a barrier */
         if (ompi_group_size(win->w_group) > 1) {
-            (void) module->comm->c_coll.coll_barrier (module->comm,
-                                                      module->comm->c_coll.coll_barrier_module);
+            (void) module->comm->c_coll->coll_barrier (module->comm,
+                                                      module->comm->c_coll->coll_barrier_module);
         }
 
         /* remove from component information */
@@ -77,6 +80,7 @@ int ompi_osc_pt2pt_free(ompi_win_t *win)
     /* it is erroneous to close a window with active operations on it so we should
      * probably produce an error here instead of cleaning up */
     OPAL_LIST_DESTRUCT(&module->pending_acc);
+    OBJ_DESTRUCT(&module->pending_acc_lock);
 
     osc_pt2pt_gc_clean (module);
     OPAL_LIST_DESTRUCT(&module->buffer_gc);

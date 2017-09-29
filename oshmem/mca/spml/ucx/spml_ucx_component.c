@@ -101,6 +101,10 @@ static int mca_spml_ucx_component_register(void)
                                     "How may disconnects go in parallel",
                                     &mca_spml_ucx.num_disconnect);
 
+    mca_spml_ucx_param_register_int("heap_reg_nb", 0,
+                                    "Use non-blocking memory registration for shared heap",
+                                    &mca_spml_ucx.heap_reg_nb);
+
     return OSHMEM_SUCCESS;
 }
 
@@ -122,8 +126,9 @@ static int mca_spml_ucx_component_open(void)
     }
 
     memset(&params, 0, sizeof(params));
-    params.field_mask = UCP_PARAM_FIELD_FEATURES;
+    params.field_mask = UCP_PARAM_FIELD_FEATURES|UCP_PARAM_FIELD_ESTIMATED_NUM_EPS;
     params.features   = UCP_FEATURE_RMA|UCP_FEATURE_AMO32|UCP_FEATURE_AMO64;
+    params.estimated_num_eps = ompi_proc_world_size();
 
     err = ucp_init(&params, ucp_config, &mca_spml_ucx.ucp_context);
     ucp_config_release(ucp_config);
@@ -145,9 +150,13 @@ static int mca_spml_ucx_component_close(void)
 
 static int spml_ucx_init(void)
 {
+    ucp_worker_params_t params;
     ucs_status_t err;
 
-    err = ucp_worker_create(mca_spml_ucx.ucp_context, UCS_THREAD_MODE_SINGLE,
+    params.field_mask  = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
+    params.thread_mode = UCS_THREAD_MODE_SINGLE;
+
+    err = ucp_worker_create(mca_spml_ucx.ucp_context, &params,
                             &mca_spml_ucx.ucp_worker);
     if (UCS_OK != err) {
         return OSHMEM_ERROR;

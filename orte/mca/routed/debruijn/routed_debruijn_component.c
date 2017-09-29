@@ -4,6 +4,7 @@
  *                         All rights reserved.
  * Copyright (c) 2004-2008 The Trustees of Indiana University.
  *                         All rights reserved.
+ * Copyright (c) 2016-2017 Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -29,7 +30,7 @@ orte_routed_component_t mca_routed_debruijn_component = {
          information about the component itself */
 
     .base_version = {
-        ORTE_ROUTED_BASE_VERSION_2_0_0,
+        ORTE_ROUTED_BASE_VERSION_3_0_0,
 
         .mca_component_name = "debruijn",
         MCA_BASE_MAKE_VERSION(component, ORTE_MAJOR_VERSION, ORTE_MINOR_VERSION,
@@ -47,13 +48,8 @@ static int orte_routed_debruijn_component_query(mca_base_module_t **module, int 
     /* Debruijn shall be our default, especially for large systems. For smaller
      * systems, we will allow other options that have even fewer hops to
      * support wireup
-     *
-     * XXX: set this to 0 until we can figure out what's going on with
-     * it within undersubscribed allocations. Once debruijn is fixed,
-     * revert back to priority 70. Note: this component seems to work fine within
-     * fully utilized allocations.
      */
-    *priority = 0;
+    *priority = 10;
     *module = (mca_base_module_t *) &orte_routed_debruijn_module;
     return ORTE_SUCCESS;
 }

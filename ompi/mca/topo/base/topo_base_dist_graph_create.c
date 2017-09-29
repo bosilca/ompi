@@ -3,13 +3,14 @@
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
  * Copyright (c) 2009      Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2011-2013 The University of Tennessee and The University
+ * Copyright (c) 2011-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2011-2013 Inria.  All rights reserved.
  * Copyright (c) 2011-2013 Université Bordeaux 1
  * Copyright (c) 2014-2015 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation.  All rights reserved.
  */
 
 #include "ompi_config.h"
@@ -113,9 +114,9 @@ int mca_topo_base_dist_graph_distribute(mca_topo_base_module_t* module,
         }
     }
 
-    err = comm->c_coll.coll_reduce_scatter_block( MPI_IN_PLACE, idx, 2,
+    err = comm->c_coll->coll_reduce_scatter_block( MPI_IN_PLACE, idx, 2,
                                                   (ompi_datatype_t*)&ompi_mpi_int, MPI_SUM, comm,
-                                                  comm->c_coll.coll_allreduce_module);
+                                                  comm->c_coll->coll_reduce_scatter_block_module);
     /**
      * At this point in the indexes array we have:
      * - idx[0].in  total number of IN  edges
@@ -283,7 +284,7 @@ int mca_topo_base_dist_graph_create(mca_topo_base_module_t* module,
                                     int n, const int nodes[],
                                     const int degrees[], const int targets[],
                                     const int weights[],
-                                    ompi_info_t *info, int reorder,
+                                    opal_info_t *info, int reorder,
                                     ompi_communicator_t **newcomm)
 {
     int err;
@@ -293,6 +294,14 @@ int mca_topo_base_dist_graph_create(mca_topo_base_module_t* module,
                                                 newcomm)) ) {
         OBJ_RELEASE(module);
         return err;
+    }
+    // But if there is an info object, the above call didn't make use
+    // of it, so we'll do a dup-with-info to get the final comm and
+    // free the above intermediate newcomm:
+    if (info && info != &(MPI_INFO_NULL->super)) {
+        ompi_communicator_t *intermediate_comm = *newcomm;
+        ompi_comm_dup_with_info (intermediate_comm, info, newcomm);
+        ompi_comm_free(&intermediate_comm);
     }
 
     assert(NULL == (*newcomm)->c_topo);

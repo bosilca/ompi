@@ -10,14 +10,15 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2006-2015 Los Alamos National Security, LLC. All rights
+ * Copyright (c) 2006-2017 Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2009-2015 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2011      Oak Ridge National Labs.  All rights reserved.
- * Copyright (c) 2013-2016 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
  * Copyright (c) 2014      NVIDIA Corporation.  All rights reserved.
- * Copyright (c) 2015-2016 Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -61,6 +62,8 @@
 #include "opal/util/argv.h"
 #include "opal/class/opal_hash_table.h"
 #include "opal/class/opal_list.h"
+#include "opal/mca/event/event.h"
+#include "opal/runtime/opal_progress_threads.h"
 
 #include "orte/mca/errmgr/errmgr.h"
 #include "orte/mca/ess/ess.h"
@@ -71,15 +74,16 @@
 #include "orte/util/name_fns.h"
 #include "orte/util/parse_options.h"
 #include "orte/util/show_help.h"
+#include "orte/util/threads.h"
 #include "orte/runtime/orte_globals.h"
 #include "orte/runtime/orte_wait.h"
 
 #include "orte/mca/oob/tcp/oob_tcp.h"
+#include "orte/mca/oob/tcp/oob_tcp_common.h"
 #include "orte/mca/oob/tcp/oob_tcp_component.h"
 #include "orte/mca/oob/tcp/oob_tcp_peer.h"
 #include "orte/mca/oob/tcp/oob_tcp_connection.h"
 #include "orte/mca/oob/tcp/oob_tcp_listener.h"
-#include "orte/mca/oob/tcp/oob_tcp_ping.h"
 /*
  * Local utility functions
  */
@@ -95,7 +99,7 @@ static int component_send(orte_rml_send_t *msg);
 static char* component_get_addr(void);
 static int component_set_addr(orte_process_name_t *peer,
                               char **uris);
-static bool component_is_reachable(orte_process_name_t *peer);
+static bool component_is_reachable(char *rtmod, orte_process_name_t *peer);
 static orte_rml_pathway_t* component_query_transports(void);
 #if OPAL_ENABLE_FT_CR == 1
 static int component_ft_event(int state);
@@ -139,7 +143,13 @@ mca_oob_tcp_component_t mca_oob_tcp_component = {
  */
 static int tcp_component_open(void)
 {
-    /* initialize state */
+    mca_oob_tcp_component.next_base = 0;
+    OBJ_CONSTRUCT(&mca_oob_tcp_component.peers, opal_hash_table_t);
+    opal_hash_table_init(&mca_oob_tcp_component.peers, 32);
+    OBJ_CONSTRUCT(&mca_oob_tcp_component.ev_bases, opal_pointer_array_t);
+    opal_pointer_array_init(&mca_oob_tcp_component.ev_bases,
+                            orte_oob_base.num_threads, 256, 8);
+
     OBJ_CONSTRUCT(&mca_oob_tcp_component.listeners, opal_list_t);
     if (ORTE_PROC_IS_HNP) {
         OBJ_CONSTRUCT(&mca_oob_tcp_component.listen_thread, opal_thread_t);
@@ -174,8 +184,10 @@ static int tcp_component_open(void)
  */
 static int tcp_component_close(void)
 {
-   /* cleanup listen event list */
-    OBJ_DESTRUCT(&mca_oob_tcp_component.listeners);
+    /* cleanup listen event list */
+    OPAL_LIST_DESTRUCT(&mca_oob_tcp_component.listeners);
+
+    OBJ_DESTRUCT(&mca_oob_tcp_component.peers);
 
     if (NULL != mca_oob_tcp_component.ipv4conns) {
         opal_argv_free(mca_oob_tcp_component.ipv4conns);
@@ -193,14 +205,14 @@ static int tcp_component_close(void)
     }
 #endif
 
+    OBJ_DESTRUCT(&mca_oob_tcp_component.ev_bases);
+
     return ORTE_SUCCESS;
 }
-#if ORTE_ENABLE_STATIC_PORTS
 static char *static_port_string;
 #if OPAL_ENABLE_IPV6
 static char *static_port_string6;
 #endif // OPAL_ENABLE_IPV6
-#endif // OPAL_ENABLE_STATIC_PORTS
 
 static char *dyn_port_string;
 #if OPAL_ENABLE_IPV6
@@ -229,17 +241,17 @@ static int tcp_component_register(void)
                                           MCA_BASE_VAR_SCOPE_LOCAL,
                                           &mca_oob_tcp_component.max_retries);
 
-    mca_oob_tcp_component.tcp_sndbuf = 128 * 1024;
+    mca_oob_tcp_component.tcp_sndbuf = 0;
     (void)mca_base_component_var_register(component, "sndbuf",
-                                          "TCP socket send buffering size (in bytes)",
+                                          "TCP socket send buffering size (in bytes, 0 => leave system default)",
                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
                                           OPAL_INFO_LVL_4,
                                           MCA_BASE_VAR_SCOPE_LOCAL,
                                           &mca_oob_tcp_component.tcp_sndbuf);
 
-    mca_oob_tcp_component.tcp_rcvbuf = 128 * 1024;
+    mca_oob_tcp_component.tcp_rcvbuf = 0;
     (void)mca_base_component_var_register(component, "rcvbuf",
-                                          "TCP socket receive buffering size (in bytes)",
+                                          "TCP socket receive buffering size (in bytes, 0 => leave system default)",
                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
                                           OPAL_INFO_LVL_4,
                                           MCA_BASE_VAR_SCOPE_LOCAL,
@@ -276,7 +288,6 @@ static int tcp_component_register(void)
         return ORTE_ERR_NOT_AVAILABLE;
     }
 
-#if ORTE_ENABLE_STATIC_PORTS
     static_port_string = NULL;
     (void)mca_base_component_var_register(component, "static_ipv4_ports",
                                           "Static ports for daemons and procs (IPv4)",
@@ -315,14 +326,18 @@ static int tcp_component_register(void)
     } else {
         mca_oob_tcp_component.tcp6_static_ports = NULL;
     }
-    if (NULL == mca_oob_tcp_component.tcp_static_ports &&
-        NULL == mca_oob_tcp_component.tcp6_static_ports) {
-        orte_static_ports = false;
-    } else {
+#endif // OPAL_ENABLE_IPV6
+
+    if (NULL != mca_oob_tcp_component.tcp_static_ports ||
+        NULL != mca_oob_tcp_component.tcp6_static_ports) {
+        /* can't fwd mpirun port _and_ have static ports */
+        if (ORTE_PROC_IS_HNP && orte_fwd_mpirun_port) {
+            orte_show_help("help-oob-tcp.txt", "static-fwd", true);
+            return ORTE_ERR_NOT_AVAILABLE;
+        }
         orte_static_ports = true;
     }
-#endif // OPAL_ENABLE_IPV6
-#endif // OPAL_ENABLE_STATIC_PORTS
+
     dyn_port_string = NULL;
     (void)mca_base_component_var_register(component, "dynamic_ipv4_ports",
                                           "Range of ports to be dynamically used by daemons and procs (IPv4)",
@@ -408,8 +423,8 @@ static int tcp_component_register(void)
                                           &mca_oob_tcp_component.disable_ipv6_family);
 #endif // OPAL_ENABLE_IPV6
 
-    // Default to keepalives every 60 seconds
-    mca_oob_tcp_component.keepalive_time = 60;
+    // Wait for this amount of time before sending the first keepalive probe
+    mca_oob_tcp_component.keepalive_time = 300;
     (void)mca_base_component_var_register(component, "keepalive_time",
                                           "Idle time in seconds before starting to send keepalives (keepalive_time <= 0 disables keepalive functionality)",
                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
@@ -417,8 +432,8 @@ static int tcp_component_register(void)
                                           MCA_BASE_VAR_SCOPE_READONLY,
                                           &mca_oob_tcp_component.keepalive_time);
 
-    // Default to keepalive retry interval time of 5 seconds
-    mca_oob_tcp_component.keepalive_intvl = 5;
+    // Resend keepalive probe every INT seconds
+    mca_oob_tcp_component.keepalive_intvl = 20;
     (void)mca_base_component_var_register(component, "keepalive_intvl",
                                           "Time between successive keepalive pings when peer has not responded, in seconds (ignored if keepalive_time <= 0)",
                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
@@ -426,9 +441,8 @@ static int tcp_component_register(void)
                                           MCA_BASE_VAR_SCOPE_READONLY,
                                           &mca_oob_tcp_component.keepalive_intvl);
 
-    // Default to retrying a keepalive 3 times before declaring the
-    // peer kaput
-    mca_oob_tcp_component.keepalive_probes = 3;
+    // After sending PR probes every INT seconds consider the connection dead
+    mca_oob_tcp_component.keepalive_probes = 9;
     (void)mca_base_component_var_register(component, "keepalive_probes",
                                           "Number of keepalives that can be missed before declaring error (ignored if keepalive_time <= 0)",
                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
@@ -611,10 +625,6 @@ static int component_available(void)
         return ORTE_ERR_NOT_AVAILABLE;
     }
 
-    /* set the module event base - this is where we would spin off a separate
-     * progress thread if so desired */
-    mca_oob_tcp_module.ev_base = orte_event_base;
-
     return ORTE_SUCCESS;
 }
 
@@ -653,14 +663,25 @@ static orte_rml_pathway_t* component_query_transports(void)
 static int component_startup(void)
 {
     int rc = ORTE_SUCCESS;
+    int i;
+    char *tmp;
+    opal_event_base_t *evb;
 
     opal_output_verbose(2, orte_oob_base_framework.framework_output,
                         "%s TCP STARTUP",
                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME));
 
-    /* start the module */
-    if (NULL != mca_oob_tcp_module.api.init) {
-        mca_oob_tcp_module.api.init();
+    /* initialize state */
+    if (0 == orte_oob_base.num_threads) {
+        opal_pointer_array_add(&mca_oob_tcp_component.ev_bases, orte_oob_base.ev_base);
+    } else {
+        for (i=0; i < orte_oob_base.num_threads; i++) {
+            asprintf(&tmp, "OOB-TCP-%d", i);
+            evb = opal_progress_thread_init(tmp);
+            opal_pointer_array_add(&mca_oob_tcp_component.ev_bases, evb);
+            opal_argv_append_nosize(&mca_oob_tcp_component.ev_threads, tmp);
+            free(tmp);
+        }
     }
 
     /* if we are a daemon/HNP, or we are a standalone app,
@@ -679,26 +700,24 @@ static int component_startup(void)
     return rc;
 }
 
-static void cleanup(int sd, short args, void *cbdata)
-{
-    opal_list_item_t * item;
-    bool *active = (bool*)cbdata;
-    while (NULL != (item = opal_list_remove_first(&mca_oob_tcp_component.listeners))) {
-        OBJ_RELEASE(item);
-    }
-    if (NULL != active) {
-        *active = false;
-    }
-}
-
 static void component_shutdown(void)
 {
-    int i = 0;
-    bool active;
+    mca_oob_tcp_peer_t *peer;
+    int i = 0, rc;
+    uint64_t key;
+    void *node;
 
     opal_output_verbose(2, orte_oob_base_framework.framework_output,
                         "%s TCP SHUTDOWN",
                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME));
+
+    if (0 < orte_oob_base.num_threads) {
+        for (i=0; i < orte_oob_base.num_threads; i++) {
+            opal_progress_thread_finalize(mca_oob_tcp_component.ev_threads[i]);
+            opal_pointer_array_set_item(&mca_oob_tcp_component.ev_bases, i, NULL);
+        }
+        opal_argv_free(mca_oob_tcp_component.ev_threads);
+    }
 
     if (ORTE_PROC_IS_HNP && mca_oob_tcp_component.listen_thread_active) {
         mca_oob_tcp_component.listen_thread_active = false;
@@ -710,29 +729,21 @@ static void component_shutdown(void)
                         "no hnp or not active");
     }
 
-    /* because the listeners are in a separate
-     * async thread for apps, we can't just release them here.
-     * Instead, we push it into that event thread and release
-     * them there */
-     if (ORTE_PROC_IS_APP) {
-        opal_event_t ev;
-        active = true;
-        opal_event_set(orte_event_base, &ev, -1,
-                       OPAL_EV_WRITE, cleanup, &active);
-        opal_event_set_priority(&ev, ORTE_ERROR_PRI);
-        opal_event_active(&ev, OPAL_EV_WRITE, 1);
-        ORTE_WAIT_FOR_COMPLETION(active);
-     } else {
-        /* we can call the destruct directly */
-        cleanup(0, 0, NULL);
-     }
-    opal_output_verbose(2, orte_oob_base_framework.framework_output,
-                    "all listeners released");
-
-    /* shutdown the module */
-    if (NULL != mca_oob_tcp_module.api.finalize) {
-        mca_oob_tcp_module.api.finalize();
+    /* release all peers from the hash table */
+    rc = opal_hash_table_get_first_key_uint64(&mca_oob_tcp_component.peers, &key,
+                                              (void **)&peer, &node);
+    while (OPAL_SUCCESS == rc) {
+        if (NULL != peer) {
+            OBJ_RELEASE(peer);
+            rc = opal_hash_table_set_value_uint64(&mca_oob_tcp_component.peers, key, NULL);
+            if (OPAL_SUCCESS != rc) {
+                ORTE_ERROR_LOG(rc);
+            }
+        }
+        rc = opal_hash_table_get_next_key_uint64(&mca_oob_tcp_component.peers, &key,
+                                                 (void **) &peer, node, &node);
     }
+
     opal_output_verbose(2, orte_oob_base_framework.framework_output,
                         "%s TCP SHUTDOWN done",
                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME));
@@ -745,17 +756,14 @@ static int component_send(orte_rml_send_t *msg)
                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
                         ORTE_NAME_PRINT(&msg->dst), msg->tag, msg->seq_num );
 
-    /* the module is potentially running on its own event
-     * base, so all it can do is push our send request
-     * onto an event - it cannot tell us if it will
-     * succeed. The module will first see if it knows
+    /* The module will first see if it knows
      * of a way to send the data to the target, and then
      * attempt to send the data. It  will call the cbfunc
      * with the status upon completion - if it can't do it for
-     * some reason, it will call the component error
-     * function so we can do something about it
+     * some reason, it will pass the error to our fn below so
+     * it can do something about it
      */
-    mca_oob_tcp_module.api.send_nb(msg);
+    mca_oob_tcp_module.send_nb(msg);
     return ORTE_SUCCESS;
 }
 
@@ -806,15 +814,54 @@ static char* component_get_addr(void)
     return cptr;
 }
 
+/* the host in this case is always in "dot" notation, and
+ * thus we do not need to do a DNS lookup to convert it */
+static int parse_uri(const uint16_t af_family,
+                     const char* host,
+                     const char *port,
+                     struct sockaddr_storage* inaddr)
+{
+    struct sockaddr_in *in;
+
+    if (AF_INET == af_family) {
+        memset(inaddr, 0, sizeof(struct sockaddr_in));
+        in = (struct sockaddr_in*) inaddr;
+        in->sin_family = AF_INET;
+        in->sin_addr.s_addr = inet_addr(host);
+        if (in->sin_addr.s_addr == INADDR_NONE) {
+            return ORTE_ERR_BAD_PARAM;
+        }
+        ((struct sockaddr_in*) inaddr)->sin_port = htons(atoi(port));
+    }
+#if OPAL_ENABLE_IPV6
+    else if (AF_INET6 == af_family) {
+        struct sockaddr_in6 *in6;
+        memset(inaddr, 0, sizeof(struct sockaddr_in6));
+        in6 = (struct sockaddr_in6*) inaddr;
+
+        if (0 == inet_pton(AF_INET6, host, (void*)&in6->sin6_addr)) {
+            opal_output (0, "oob_tcp_parse_uri: Could not convert %s\n", host);
+            return ORTE_ERR_BAD_PARAM;
+        }
+    }
+#endif
+    else {
+        return ORTE_ERR_NOT_SUPPORTED;
+    }
+    return ORTE_SUCCESS;
+}
+
 static int component_set_addr(orte_process_name_t *peer,
                               char **uris)
 {
     char **addrs, *hptr;
     char *tcpuri=NULL, *host, *ports;
-    int i, j;
+    int i, j, rc;
     uint16_t af_family = AF_UNSPEC;
     uint64_t ui64;
     bool found;
+    mca_oob_tcp_peer_t *pr;
+    mca_oob_tcp_addr_t *maddr;
 
     memcpy(&ui64, (char*)peer, sizeof(uint64_t));
     /* cycle across component parts and see if one belongs to us */
@@ -911,17 +958,40 @@ static int component_set_addr(orte_process_name_t *peer,
                 host = addrs[j];
             }
 
-            /* pass this proc, and its ports, to the
-             * module for handling - this module will be responsible
-             * for communicating with the proc via this network.
-             * Note that the modules are *not* necessarily running
-             * on our event base - thus, the modules will push this
-             * call into their own event base for processing.
-             */
-            opal_output_verbose(OOB_TCP_DEBUG_CONNECT, orte_oob_base_framework.framework_output,
-                                "%s PASSING ADDR %s TO MODULE",
-                                ORTE_NAME_PRINT(ORTE_PROC_MY_NAME), host);
-            mca_oob_tcp_module.api.set_peer(peer, af_family, host, ports);
+            if (NULL == (pr = mca_oob_tcp_peer_lookup(peer))) {
+                pr = OBJ_NEW(mca_oob_tcp_peer_t);
+                pr->name.jobid = peer->jobid;
+                pr->name.vpid = peer->vpid;
+                opal_output_verbose(20, orte_oob_base_framework.framework_output,
+                                    "%s SET_PEER ADDING PEER %s",
+                                    ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
+                                    ORTE_NAME_PRINT(peer));
+                if (OPAL_SUCCESS != opal_hash_table_set_value_uint64(&mca_oob_tcp_component.peers, ui64, pr)) {
+                    OBJ_RELEASE(pr);
+                    return ORTE_ERR_TAKE_NEXT_OPTION;
+                }
+            }
+
+            maddr = OBJ_NEW(mca_oob_tcp_addr_t);
+            if (ORTE_SUCCESS != (rc = parse_uri(af_family, host, ports, (struct sockaddr_storage*) &(maddr->addr)))) {
+                ORTE_ERROR_LOG(rc);
+                OBJ_RELEASE(maddr);
+                rc = opal_hash_table_set_value_uint64(&mca_oob_tcp_component.peers, ui64, NULL);
+                if (ORTE_SUCCESS != rc) {
+                    ORTE_ERROR_LOG(rc);
+                }
+                OBJ_RELEASE(pr);
+                return ORTE_ERR_TAKE_NEXT_OPTION;
+            }
+
+            opal_output_verbose(20, orte_oob_base_framework.framework_output,
+                                "%s set_peer: peer %s is listening on net %s port %s",
+                                ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
+                                ORTE_NAME_PRINT(peer),
+                                (NULL == host) ? "NULL" : host,
+                                (NULL == ports) ? "NULL" : ports);
+            opal_list_append(&pr->addrs, &maddr->super);
+
             found = true;
         }
         opal_argv_free(addrs);
@@ -936,12 +1006,12 @@ static int component_set_addr(orte_process_name_t *peer,
     return ORTE_ERR_TAKE_NEXT_OPTION;
 }
 
-static bool component_is_reachable(orte_process_name_t *peer)
+static bool component_is_reachable(char *rtmod, orte_process_name_t *peer)
 {
     orte_process_name_t hop;
 
     /* if we have a route to this peer, then we can reach it */
-    hop = orte_routed.get_route(peer);
+    hop = orte_routed.get_route(rtmod, peer);
     if (ORTE_JOBID_INVALID == hop.jobid ||
         ORTE_VPID_INVALID == hop.vpid) {
         opal_output_verbose(OOB_TCP_DEBUG_CONNECT, orte_oob_base_framework.framework_output,
@@ -976,6 +1046,8 @@ void mca_oob_tcp_component_set_module(int fd, short args, void *cbdata)
     int rc;
     orte_oob_base_peer_t *bpr;
 
+    ORTE_ACQUIRE_OBJECT(pop);
+
     opal_output_verbose(OOB_TCP_DEBUG_CONNECT, orte_oob_base_framework.framework_output,
                         "%s tcp:set_module called for peer %s",
                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
@@ -1007,6 +1079,8 @@ void mca_oob_tcp_component_lost_connection(int fd, short args, void *cbdata)
     orte_oob_base_peer_t *bpr;
     int rc;
 
+    ORTE_ACQUIRE_OBJECT(pop);
+
     opal_output_verbose(OOB_TCP_DEBUG_CONNECT, orte_oob_base_framework.framework_output,
                         "%s tcp:lost connection called for peer %s",
                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
@@ -1014,11 +1088,11 @@ void mca_oob_tcp_component_lost_connection(int fd, short args, void *cbdata)
 
     /* Mark that we no longer support this peer */
     memcpy(&ui64, (char*)&pop->peer, sizeof(uint64_t));
-    if (OPAL_SUCCESS != opal_hash_table_get_value_uint64(&orte_oob_base.peers,
-                                                         ui64, (void**)&bpr) || NULL == bpr) {
-        bpr = OBJ_NEW(orte_oob_base_peer_t);
+    if (OPAL_SUCCESS == opal_hash_table_get_value_uint64(&orte_oob_base.peers,
+                                                         ui64, (void**)&bpr) && NULL != bpr) {
+        opal_bitmap_clear_bit(&bpr->addressable, mca_oob_tcp_component.super.idx);
+        OBJ_RELEASE(bpr);
     }
-    opal_bitmap_clear_bit(&bpr->addressable, mca_oob_tcp_component.super.idx);
     if (OPAL_SUCCESS != (rc = opal_hash_table_set_value_uint64(&orte_oob_base.peers,
                                                                ui64, NULL))) {
         ORTE_ERROR_LOG(rc);
@@ -1026,7 +1100,7 @@ void mca_oob_tcp_component_lost_connection(int fd, short args, void *cbdata)
 
     if (!orte_finalizing) {
         /* activate the proc state */
-        if (ORTE_SUCCESS != orte_routed.route_lost(&pop->peer)) {
+        if (ORTE_SUCCESS != orte_routed.route_lost(pop->rtmod, &pop->peer)) {
             ORTE_ACTIVATE_PROC_STATE(&pop->peer, ORTE_PROC_STATE_LIFELINE_LOST);
         } else {
             ORTE_ACTIVATE_PROC_STATE(&pop->peer, ORTE_PROC_STATE_COMM_FAILED);
@@ -1041,6 +1115,8 @@ void mca_oob_tcp_component_no_route(int fd, short args, void *cbdata)
     uint64_t ui64;
     int rc;
     orte_oob_base_peer_t *bpr;
+
+    ORTE_ACQUIRE_OBJECT(mop);
 
     opal_output_verbose(OOB_TCP_DEBUG_CONNECT, orte_oob_base_framework.framework_output,
                         "%s tcp:no route called for peer %s",
@@ -1062,14 +1138,9 @@ void mca_oob_tcp_component_no_route(int fd, short args, void *cbdata)
     /* report the error back to the OOB and let it try other components
      * or declare a problem
      */
-    if (!orte_finalizing && !orte_abnormal_term_ordered) {
-        /* if this was a lifeline, then alert */
-        if (ORTE_SUCCESS != orte_routed.route_lost(&mop->hop)) {
-            ORTE_ACTIVATE_PROC_STATE(&mop->hop, ORTE_PROC_STATE_LIFELINE_LOST);
-        } else {
-            ORTE_ACTIVATE_PROC_STATE(&mop->hop, ORTE_PROC_STATE_COMM_FAILED);
-        }
-    }
+    mop->rmsg->retries++;
+    /* activate the OOB send state */
+    ORTE_OOB_SEND(mop->rmsg);
 
     OBJ_RELEASE(mop);
 }
@@ -1080,6 +1151,8 @@ void mca_oob_tcp_component_hop_unknown(int fd, short args, void *cbdata)
     uint64_t ui64;
     orte_rml_send_t *snd;
     orte_oob_base_peer_t *bpr;
+
+    ORTE_ACQUIRE_OBJECT(mop);
 
     opal_output_verbose(OOB_TCP_DEBUG_CONNECT, orte_oob_base_framework.framework_output,
                         "%s tcp:unknown hop called for peer %s",
@@ -1132,6 +1205,7 @@ void mca_oob_tcp_component_hop_unknown(int fd, short args, void *cbdata)
      */
     MCA_OOB_TCP_HDR_NTOH(&mop->snd->hdr);
     snd = OBJ_NEW(orte_rml_send_t);
+    snd->retries = mop->rmsg->retries + 1;
     snd->dst = mop->snd->hdr.dst;
     snd->origin = mop->snd->hdr.origin;
     snd->tag = mop->snd->hdr.tag;
@@ -1140,6 +1214,7 @@ void mca_oob_tcp_component_hop_unknown(int fd, short args, void *cbdata)
     snd->count = mop->snd->hdr.nbytes;
     snd->cbfunc.iov = NULL;
     snd->cbdata = NULL;
+    snd->routed = strdup(mop->snd->hdr.routed);
     /* activate the OOB send state */
     ORTE_OOB_SEND(snd);
     /* protect the data */
@@ -1151,6 +1226,8 @@ void mca_oob_tcp_component_hop_unknown(int fd, short args, void *cbdata)
 void mca_oob_tcp_component_failed_to_connect(int fd, short args, void *cbdata)
 {
     mca_oob_tcp_peer_op_t *pop = (mca_oob_tcp_peer_op_t*)cbdata;
+
+    ORTE_ACQUIRE_OBJECT(pop);
 
     opal_output_verbose(OOB_TCP_DEBUG_CONNECT, orte_oob_base_framework.framework_output,
                         "%s tcp:failed_to_connect called for peer %s",
@@ -1169,12 +1246,7 @@ void mca_oob_tcp_component_failed_to_connect(int fd, short args, void *cbdata)
                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
                         ORTE_NAME_PRINT(&pop->peer));
 
-    /* if this was a lifeline, then alert */
-    if (ORTE_SUCCESS != orte_routed.route_lost(&pop->peer)) {
-        ORTE_ACTIVATE_PROC_STATE(&pop->peer, ORTE_PROC_STATE_LIFELINE_LOST);
-    } else {
-        ORTE_ACTIVATE_PROC_STATE(&pop->peer, ORTE_PROC_STATE_COMM_FAILED);
-    }
+    ORTE_ACTIVATE_PROC_STATE(&pop->peer, ORTE_PROC_STATE_FAILED_TO_CONNECT);
     OBJ_RELEASE(pop);
 }
 
@@ -1287,6 +1359,7 @@ static char **split_and_resolve(char **orig_str, char *name)
 
 static void peer_cons(mca_oob_tcp_peer_t *peer)
 {
+    peer->ev_base = NULL;
     peer->auth_method = NULL;
     peer->sd = -1;
     OBJ_CONSTRUCT(&peer->addrs, opal_list_t);
@@ -1341,11 +1414,15 @@ OBJ_CLASS_INSTANCE(mca_oob_tcp_addr_t,
 
 static void pop_cons(mca_oob_tcp_peer_op_t *pop)
 {
+    pop->rtmod = NULL;
     pop->net = NULL;
     pop->port = NULL;
 }
 static void pop_des(mca_oob_tcp_peer_op_t *pop)
 {
+    if (NULL != pop->rtmod) {
+        free(pop->rtmod);
+    }
     if (NULL != pop->net) {
         free(pop->net);
     }
@@ -1362,10 +1439,6 @@ OBJ_CLASS_INSTANCE(mca_oob_tcp_msg_op_t,
                    NULL, NULL);
 
 OBJ_CLASS_INSTANCE(mca_oob_tcp_conn_op_t,
-                   opal_object_t,
-                   NULL, NULL);
-
-OBJ_CLASS_INSTANCE(mca_oob_tcp_ping_t,
                    opal_object_t,
                    NULL, NULL);
 

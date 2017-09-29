@@ -12,7 +12,7 @@
  *                         All rights reserved.
  * Copyright (c) 2011-2015 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2014-2016 Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  *
@@ -47,6 +47,7 @@
 #include "orte/mca/mca.h"
 #include "opal/mca/crs/crs.h"
 #include "opal/mca/crs/base/base.h"
+#include "orte/mca/routed/routed.h"
 
 #include "orte/mca/rml/rml_types.h"
 
@@ -253,6 +254,8 @@ typedef void (*orte_rml_module_purge_fn_t)(orte_process_name_t *peer);
 typedef struct orte_rml_base_module_t {
     /* pointer to the parent component for this module */
     struct orte_rml_component_t                 *component;
+    /* the routed module to be used */
+    char                                        *routed;
     /** Ping process for connectivity check */
     orte_rml_module_ping_fn_t                    ping;
 
@@ -289,44 +292,8 @@ typedef void (*orte_rml_API_close_conduit_fn_t)(orte_rml_conduit_t id);
 */
 typedef int (*orte_rml_API_query_transports_fn_t)(opal_list_t *transports);
 
-/**
- * Get a "contact info" string for the local process
- *
- * Get a "contact info" string that can be used by other processes to
- * share the contact information for the given process.  The "contact
- * info" string includes the process identifier for the given process
- * and uses only basic ascii characters.  It should be quoted when
- * evaluated by a shell, although no special escaping is necessary.
- *
- * @note The function may return a contact info string which contains
- * multiple addresses.
- *
- * @retval non-NULL The contact information for this process
- * @retval NULL     An error occurred when trying to get the current
- *                  process contact info
- */
-typedef char* (*orte_rml_API_get_contact_info_fn_t)(void);
-
-
-/**
- * Update the RML with a remote process's contact info
- *
- * Update the RML with a remote process's contact information, as
- * returned from the get_contact_info() function on the remote
- * process.  Before a send can be initiated to a remote process,
- * either this function must be called for that process or that
- * process must have already established a connection to the local
- * process.
- *
- * @note The user may not always explicitly call this function
- * directly, but may instead cause it to be called through one of the
- * contact setup functions available in
- * orte/mca/rml/base/rml_contact.h.
- *
- * @param[in] contact_info The contact information string of a peer
- */
-typedef void (*orte_rml_API_set_contact_info_fn_t)(const char *contact_info);
-
+/* query the routed module for a given conduit */
+typedef char* (*orte_rml_API_query_routed_fn_t)(orte_rml_conduit_t id);
 
 /**
  * "Ping" another process to determine availability
@@ -344,27 +311,8 @@ typedef void (*orte_rml_API_set_contact_info_fn_t)(const char *contact_info);
  *                     from the local process
  * @retval ORTE_ERROR  An unspecified error occurred during the update
  */
-typedef int (*orte_rml_API_ping_conduit_fn_t)(orte_rml_conduit_t conduit_id,
-                                              const char* contact_info,
-                                              const struct timeval* tv);
-
-/**
- * "Ping" another process to determine availability using the default conduit_id
- *
- * Ping another process to determine if it is available.  This
- * function only verifies that the process is alive and will allow a
- * connection to the local process.  It does *not* qualify as
- * establishing communication with the remote process, as required by
- * the note for set_contact_info().
- *
- * @param[in] contact_info The contact info string for the remote process
- * @param[in] tv           Timeout after which the ping should be failed
- *
- * @retval ORTE_SUCESS The process is available and will allow connections
- *                     from the local process
- * @retval ORTE_ERROR  An unspecified error occurred during the update
- */
-typedef int (*orte_rml_API_ping_fn_t)(const char* contact_info,
+typedef int (*orte_rml_API_ping_fn_t)(orte_rml_conduit_t conduit_id,
+                                      const char* contact_info,
                                       const struct timeval* tv);
 
 
@@ -391,7 +339,8 @@ typedef int (*orte_rml_API_ping_fn_t)(const char* contact_info,
  *                    receiving process is not available
  * @retval ORTE_ERROR  An unspecified error occurred
  */
-typedef int (*orte_rml_API_send_nb_fn_t)(orte_process_name_t* peer,
+typedef int (*orte_rml_API_send_nb_fn_t)(orte_rml_conduit_t conduit_id,
+                                         orte_process_name_t* peer,
                                          struct iovec* msg,
                                          int count,
                                          orte_rml_tag_t tag,
@@ -421,72 +370,12 @@ typedef int (*orte_rml_API_send_nb_fn_t)(orte_process_name_t* peer,
  *                    receiving process is not available
  * @retval ORTE_ERROR  An unspecified error occurred
  */
-typedef int (*orte_rml_API_send_buffer_nb_fn_t)(orte_process_name_t* peer,
+typedef int (*orte_rml_API_send_buffer_nb_fn_t)(orte_rml_conduit_t conduit_id,
+                                                orte_process_name_t* peer,
                                                 struct opal_buffer_t* buffer,
                                                 orte_rml_tag_t tag,
                                                 orte_rml_buffer_callback_fn_t cbfunc,
                                                 void* cbdata);
-
-/**
- * Send an iovec non-blocking message
- *
- * Send an array of iovecs to the specified peer.  The call
- * will return immediately, although the iovecs may not be modified
- * until the completion callback is triggered.  The iovecs *may* be
- * passed to another call to send_nb before the completion callback is
- * triggered.  The callback being triggered does not give any
- * indication of remote completion.
- *
- * @param[in] peer   Name of receiving process
- * @param[in] msg    Pointer to an array of iovecs to be sent
- * @param[in] count  Number of iovecs in array
- * @param[in] tag    User defined tag for matching send/recv
- * @param[in] cbfunc Callback function on message comlpetion
- * @param[in] cbdata User data to provide during completion callback
- *
- * @retval ORTE_SUCCESS The message was successfully started
- * @retval ORTE_ERR_BAD_PARAM One of the parameters was invalid
- * @retval ORTE_ERR_ADDRESSEE_UNKNOWN Contact information for the
- *                    receiving process is not available
- * @retval ORTE_ERROR  An unspecified error occurred
- */
-typedef int (*orte_rml_API_send_nb_conduit_fn_t)(orte_rml_conduit_t conduit_id,
-                                                 orte_process_name_t* peer,
-                                                 struct iovec* msg,
-                                                 int count,
-                                                 orte_rml_tag_t tag,
-                                                 orte_rml_callback_fn_t cbfunc,
-                                                 void* cbdata);
-
-
-/**
- * Send a buffer non-blocking message
- *
- * Send a buffer to the specified peer.  The call
- * will return immediately, although the buffer may not be modified
- * until the completion callback is triggered.  The buffer *may* be
- * passed to another call to send_nb before the completion callback is
- * triggered.  The callback being triggered does not give any
- * indication of remote completion.
- *
- * @param[in] peer   Name of receiving process
- * @param[in] buffer Pointer to buffer to be sent
- * @param[in] tag    User defined tag for matching send/recv
- * @param[in] cbfunc Callback function on message comlpetion
- * @param[in] cbdata User data to provide during completion callback
- *
- * @retval ORTE_SUCCESS The message was successfully started
- * @retval ORTE_ERR_BAD_PARAM One of the parameters was invalid
- * @retval ORTE_ERR_ADDRESSEE_UNKNOWN Contact information for the
- *                    receiving process is not available
- * @retval ORTE_ERROR  An unspecified error occurred
- */
-typedef int (*orte_rml_API_send_buffer_nb_conduit_fn_t)(orte_rml_conduit_t conduit_id,
-                                                        orte_process_name_t* peer,
-                                                        struct opal_buffer_t* buffer,
-                                                        orte_rml_tag_t tag,
-                                                        orte_rml_buffer_callback_fn_t cbfunc,
-                                                        void* cbdata);
 
 /**
  * Purge the RML/OOB of contact info and pending messages
@@ -549,28 +438,14 @@ typedef struct {
     /** Shutdown the conduit and clean up resources */
     orte_rml_API_close_conduit_fn_t             close_conduit;
 
-    /** Get contact information for local process */
-    orte_rml_API_get_contact_info_fn_t          get_contact_info;
-    /** Set contact information for remote process */
-    orte_rml_API_set_contact_info_fn_t          set_contact_info;
-
     /** Ping process for connectivity check */
     orte_rml_API_ping_fn_t                      ping;
 
-    /** Ping process for connectivity check */
-    orte_rml_API_ping_conduit_fn_t              ping_conduit;
-
     /** Send non-blocking iovec message */
-    orte_rml_API_send_nb_fn_t                   send_nb;
+    orte_rml_API_send_nb_fn_t           send_nb;
 
     /** Send non-blocking buffer message */
-    orte_rml_API_send_buffer_nb_fn_t            send_buffer_nb;
-
-    /** Send non-blocking iovec message */
-    orte_rml_API_send_nb_conduit_fn_t           send_nb_conduit;
-
-    /** Send non-blocking buffer message */
-    orte_rml_API_send_buffer_nb_conduit_fn_t    send_buffer_nb_conduit;
+    orte_rml_API_send_buffer_nb_fn_t    send_buffer_nb;
 
     /** Receive non-blocking iovec message */
     orte_rml_API_recv_nb_fn_t                   recv_nb;
@@ -587,6 +462,8 @@ typedef struct {
     /** Query information of transport in system */
     orte_rml_API_query_transports_fn_t          query_transports;
 
+    /* get the routed module for a given conduit */
+    orte_rml_API_query_routed_fn_t              get_routed;
 } orte_rml_base_API_t;
 
 /** Interface for RML communication */
@@ -622,12 +499,6 @@ typedef orte_rml_base_module_t* (*orte_rml_component_open_conduit_fn_t)(opal_lis
  */
 typedef orte_rml_pathway_t* (*orte_rml_component_query_transports_fn_t)(void);
 
-/* Get the contact info for this component */
-typedef char* (*orte_rml_component_get_contact_info_fn_t)(void);
-
-/* Set contact info */
-typedef void (*orte_rml_component_set_contact_info_fn_t)(const char *uri);
-
 /** Close conduit - allow the specific component to
  *  cleanup the module for this conduit
  */
@@ -650,8 +521,6 @@ typedef struct orte_rml_component_t {
     /* Component interface functions */
     orte_rml_component_open_conduit_fn_t        open_conduit;
     orte_rml_component_query_transports_fn_t    query_transports;
-    orte_rml_component_get_contact_info_fn_t    get_contact_info;
-    orte_rml_component_set_contact_info_fn_t    set_contact_info;
     orte_rml_module_close_conduit_fn_t          close_conduit;
 } orte_rml_component_t;
 

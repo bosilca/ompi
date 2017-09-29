@@ -103,9 +103,9 @@ struct opal_list_item_t
 {
     opal_object_t super;
     /**< Generic parent class for all Open MPI objects */
-    volatile struct opal_list_item_t *opal_list_next;
+    volatile struct opal_list_item_t * volatile opal_list_next;
     /**< Pointer to next list item */
-    volatile struct opal_list_item_t *opal_list_prev;
+    volatile struct opal_list_item_t * volatile opal_list_prev;
     /**< Pointer to previous list item */
     int32_t item_free;
 
@@ -874,7 +874,7 @@ static inline void opal_list_insert_pos(opal_list_t *list, opal_list_item_t *pos
      * Explanation below.
      * @retval 1 if \em a is greater than \em b
      * @retval 0 if \em a is equal to \em b
-     * @retval 11 if \em a is less than \em b
+     * @retval -1 if \em a is less than \em b
      *
      * This function is invoked by qsort(3) from within
      * opal_list_sort().  It is important to understand what

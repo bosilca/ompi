@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004-2015 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2015      Research Organization for Information Science
@@ -69,7 +69,7 @@ ompi_coll_tuned_allgather_intra_check_forced_init(coll_tuned_force_algorithm_mca
                                            MCA_BASE_VAR_FLAG_DEFAULT_ONLY,
                                            OPAL_INFO_LVL_5,
                                            MCA_BASE_VAR_SCOPE_CONSTANT,
-                                           &cnt);
+                                           &ompi_coll_tuned_forced_max_algorithms[ALLGATHER]);
 
     /* MPI_T: This variable should eventually be bound to a communicator */
     coll_tuned_allgather_forced_algorithm = 0;
@@ -78,9 +78,9 @@ ompi_coll_tuned_allgather_intra_check_forced_init(coll_tuned_force_algorithm_mca
         mca_base_component_var_register(&mca_coll_tuned_component.super.collm_version,
                                         "allgather_algorithm",
                                         "Which allallgather algorithm is used. Can be locked down to choice of: 0 ignore, 1 basic linear, 2 bruck, 3 recursive doubling, 4 ring, 5 neighbor exchange, 6: two proc only.",
-                                        MCA_BASE_VAR_TYPE_INT, new_enum, 0, 0,
+                                        MCA_BASE_VAR_TYPE_INT, new_enum, 0, MCA_BASE_VAR_FLAG_SETTABLE,
                                         OPAL_INFO_LVL_5,
-                                        MCA_BASE_VAR_SCOPE_READONLY,
+                                        MCA_BASE_VAR_SCOPE_ALL,
                                         &coll_tuned_allgather_forced_algorithm);
     OBJ_RELEASE(new_enum);
     if (mca_param_indices->algorithm_param_index < 0) {
@@ -92,9 +92,9 @@ ompi_coll_tuned_allgather_intra_check_forced_init(coll_tuned_force_algorithm_mca
         mca_base_component_var_register(&mca_coll_tuned_component.super.collm_version,
                                         "allgather_algorithm_segmentsize",
                                         "Segment size in bytes used by default for allgather algorithms. Only has meaning if algorithm is forced and supports segmenting. 0 bytes means no segmentation. Currently, available algorithms do not support segmentation.",
-                                        MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                        MCA_BASE_VAR_TYPE_INT, NULL, 0, MCA_BASE_VAR_FLAG_SETTABLE,
                                         OPAL_INFO_LVL_5,
-                                        MCA_BASE_VAR_SCOPE_READONLY,
+                                        MCA_BASE_VAR_SCOPE_ALL,
                                         &coll_tuned_allgather_segment_size);
 
     coll_tuned_allgather_tree_fanout = ompi_coll_tuned_init_tree_fanout; /* get system wide default */
@@ -102,9 +102,9 @@ ompi_coll_tuned_allgather_intra_check_forced_init(coll_tuned_force_algorithm_mca
         mca_base_component_var_register(&mca_coll_tuned_component.super.collm_version,
                                         "allgather_algorithm_tree_fanout",
                                         "Fanout for n-tree used for allgather algorithms. Only has meaning if algorithm is forced and supports n-tree topo based operation. Currently, available algorithms do not support n-tree topologies.",
-                                        MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                        MCA_BASE_VAR_TYPE_INT, NULL, 0, MCA_BASE_VAR_FLAG_SETTABLE,
                                         OPAL_INFO_LVL_5,
-                                        MCA_BASE_VAR_SCOPE_READONLY,
+                                        MCA_BASE_VAR_SCOPE_ALL,
                                         &coll_tuned_allgather_tree_fanout);
 
     coll_tuned_allgather_chain_fanout = ompi_coll_tuned_init_chain_fanout; /* get system wide default */
@@ -112,64 +112,13 @@ ompi_coll_tuned_allgather_intra_check_forced_init(coll_tuned_force_algorithm_mca
       mca_base_component_var_register(&mca_coll_tuned_component.super.collm_version,
                                       "allgather_algorithm_chain_fanout",
                                       "Fanout for chains used for allgather algorithms. Only has meaning if algorithm is forced and supports chain topo based operation. Currently, available algorithms do not support chain topologies.",
-                                      MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                      MCA_BASE_VAR_TYPE_INT, NULL, 0, MCA_BASE_VAR_FLAG_SETTABLE,
                                       OPAL_INFO_LVL_5,
-                                      MCA_BASE_VAR_SCOPE_READONLY,
+                                      MCA_BASE_VAR_SCOPE_ALL,
                                       &coll_tuned_allgather_chain_fanout);
 
     return (MPI_SUCCESS);
 }
-
-int ompi_coll_tuned_allgather_intra_do_forced(const void *sbuf, int scount,
-                                              struct ompi_datatype_t *sdtype,
-                                              void* rbuf, int rcount,
-                                              struct ompi_datatype_t *rdtype,
-                                              struct ompi_communicator_t *comm,
-                                              mca_coll_base_module_t *module)
-{
-    mca_coll_tuned_module_t *tuned_module = (mca_coll_tuned_module_t*) module;
-
-    OPAL_OUTPUT((ompi_coll_tuned_stream,
-                 "coll:tuned:allgather_intra_do_forced selected algorithm %d",
-                 tuned_module->user_forced[ALLGATHER].algorithm));
-
-    switch (tuned_module->user_forced[ALLGATHER].algorithm) {
-    case (0):
-        return ompi_coll_tuned_allgather_intra_dec_fixed(sbuf, scount, sdtype,
-                                                         rbuf, rcount, rdtype,
-                                                         comm, module);
-    case (1):
-        return ompi_coll_base_allgather_intra_basic_linear(sbuf, scount, sdtype,
-                                                           rbuf, rcount, rdtype,
-                                                           comm, module);
-    case (2):
-        return ompi_coll_base_allgather_intra_bruck(sbuf, scount, sdtype,
-                                                    rbuf, rcount, rdtype,
-                                                    comm, module);
-    case (3):
-        return ompi_coll_base_allgather_intra_recursivedoubling(sbuf, scount, sdtype,
-                                                                rbuf, rcount, rdtype,
-                                                                comm, module);
-    case (4):
-        return ompi_coll_base_allgather_intra_ring(sbuf, scount, sdtype,
-                                                   rbuf, rcount, rdtype,
-                                                   comm, module);
-    case (5):
-        return ompi_coll_base_allgather_intra_neighborexchange(sbuf, scount, sdtype,
-                                                               rbuf, rcount, rdtype,
-                                                               comm, module);
-    case (6):
-        return ompi_coll_base_allgather_intra_two_procs(sbuf, scount, sdtype,
-                                                        rbuf, rcount, rdtype,
-                                                        comm, module);
-    } /* switch */
-    OPAL_OUTPUT((ompi_coll_tuned_stream,
-                 "coll:tuned:allgather_intra_do_forced attempt to select algorithm %d when only 0-%d is valid?",
-                 tuned_module->user_forced[ALLGATHER].algorithm,
-                 ompi_coll_tuned_forced_max_algorithms[ALLGATHER]));
-    return (MPI_ERR_ARG);
-}
-
 
 int ompi_coll_tuned_allgather_intra_do_this(const void *sbuf, int scount,
                                             struct ompi_datatype_t *sdtype,

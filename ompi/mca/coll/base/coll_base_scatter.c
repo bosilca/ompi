@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2015 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -12,7 +12,7 @@
  *                         All rights reserved.
  * Copyright (c) 2013      Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
@@ -49,7 +49,7 @@ ompi_coll_base_scatter_intra_binomial( const void *sbuf, int scount,
     MPI_Status status;
     mca_coll_base_module_t *base_module = (mca_coll_base_module_t*) module;
     mca_coll_base_comm_t *data = base_module->base_data;
-    ptrdiff_t sextent, rextent, ssize, rsize, sgap, rgap;
+    ptrdiff_t sextent, rextent, ssize, rsize, sgap = 0, rgap = 0;
 
 
     size = ompi_comm_size(comm);
@@ -62,16 +62,16 @@ ompi_coll_base_scatter_intra_binomial( const void *sbuf, int scount,
     COLL_BASE_UPDATE_IN_ORDER_BMTREE( comm, base_module, root );
     bmtree = data->cached_in_order_bmtree;
 
-    ompi_datatype_type_extent(sdtype, &sextent);
     ompi_datatype_type_extent(rdtype, &rextent);
 
-    ssize = opal_datatype_span(&sdtype->super, (int64_t)scount * size, &sgap);
     rsize = opal_datatype_span(&rdtype->super, (int64_t)rcount * size, &rgap);
 
     vrank = (rank - root + size) % size;
     ptmp = (char *) rbuf;  /* by default suppose leaf nodes, just use rbuf */
 
     if (rank == root) {
+        ompi_datatype_type_extent(sdtype, &sextent);
+        ssize = opal_datatype_span(&sdtype->super, (int64_t)scount * size, &sgap);
         if (0 == root) {
             /* root on 0, just use the send buffer */
             ptmp = (char *) sbuf;

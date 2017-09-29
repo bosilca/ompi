@@ -12,8 +12,10 @@
  *                         All rights reserved.
  * Copyright (c) 2007      Sun Microsystems, Inc.  All rights reserved.
  * Copyright (c) 2011      Sandia National Laboratories. All rights reserved.
- * Copyright (c) 2011-2015 Los Alamos National Security, LLC. All rights
+ * Copyright (c) 2011-2017 Los Alamos National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2017      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -59,10 +61,6 @@
 #ifdef OPAL_DISABLE_INLINE_ASM
 #undef OPAL_C_GCC_INLINE_ASSEMBLY
 #define OPAL_C_GCC_INLINE_ASSEMBLY 0
-#undef OPAL_C_DEC_INLINE_ASSEMBLY
-#define OPAL_C_DEC_INLINE_ASSEMBLY 0
-#undef OPAL_C_XLC_INLINE_ASSEMBLY
-#define OPAL_C_XLC_INLINE_ASSEMBLY 0
 #endif
 
 /* define OPAL_{GCC,DEC,XLC}_INLINE_ASSEMBLY based on the
@@ -71,12 +69,8 @@
 #if defined(c_plusplus) || defined(__cplusplus)
 /* We no longer support inline assembly for C++ as OPAL is a C-only interface */
 #define OPAL_GCC_INLINE_ASSEMBLY 0
-#define OPAL_DEC_INLINE_ASSEMBLY 0
-#define OPAL_XLC_INLINE_ASSEMBLY 0
 #else
 #define OPAL_GCC_INLINE_ASSEMBLY OPAL_C_GCC_INLINE_ASSEMBLY
-#define OPAL_DEC_INLINE_ASSEMBLY OPAL_C_DEC_INLINE_ASSEMBLY
-#define OPAL_XLC_INLINE_ASSEMBLY OPAL_C_XLC_INLINE_ASSEMBLY
 #endif
 
 
@@ -135,8 +129,8 @@ typedef struct opal_atomic_lock_t opal_atomic_lock_t;
  * Enumeration of lock states
  */
 enum {
-    OPAL_ATOMIC_UNLOCKED = 0,
-    OPAL_ATOMIC_LOCKED = 1
+    OPAL_ATOMIC_LOCK_UNLOCKED = 0,
+    OPAL_ATOMIC_LOCK_LOCKED = 1
 };
 
 /**********************************************************************
@@ -151,10 +145,8 @@ enum {
 #include "opal/sys/sync_builtin/atomic.h"
 #elif OPAL_ASSEMBLY_BUILTIN == OPAL_BUILTIN_GCC
 #include "opal/sys/gcc_builtin/atomic.h"
-#elif OPAL_ASSEMBLY_BUILTIN == OPAL_BUILTIN_OSX
-#include "opal/sys/osx/atomic.h"
-#elif OPAL_ASSEMBLY_ARCH == OPAL_AMD64
-#include "opal/sys/amd64/atomic.h"
+#elif OPAL_ASSEMBLY_ARCH == OPAL_X86_64
+#include "opal/sys/x86_64/atomic.h"
 #elif OPAL_ASSEMBLY_ARCH == OPAL_ARM
 #include "opal/sys/arm/atomic.h"
 #elif OPAL_ASSEMBLY_ARCH == OPAL_ARM64
@@ -285,7 +277,7 @@ void opal_atomic_wmb(void);
 #if OPAL_HAVE_ATOMIC_SPINLOCKS == 0
 static inline
 #endif
-void opal_atomic_init(opal_atomic_lock_t* lock, int32_t value);
+void opal_atomic_lock_init(opal_atomic_lock_t* lock, int32_t value);
 
 
 /**
@@ -455,7 +447,7 @@ int64_t opal_atomic_sub_64(volatile int64_t *addr, int64_t delta);
  */
 #if defined(DOXYGEN) || OPAL_ENABLE_DEBUG
 static inline size_t
-opal_atomic_add_size_t(volatile size_t *addr, int delta)
+opal_atomic_add_size_t(volatile size_t *addr, size_t delta)
 {
 #if SIZEOF_SIZE_T == 4
     return (size_t) opal_atomic_add_32((int32_t*) addr, delta);
@@ -466,7 +458,7 @@ opal_atomic_add_size_t(volatile size_t *addr, int delta)
 #endif
 }
 static inline size_t
-opal_atomic_sub_size_t(volatile size_t *addr, int delta)
+opal_atomic_sub_size_t(volatile size_t *addr, size_t delta)
 {
 #if SIZEOF_SIZE_T == 4
     return (size_t) opal_atomic_sub_32((int32_t*) addr, delta);

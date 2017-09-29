@@ -10,8 +10,8 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2009-2016 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2013-2016 Los Alamos National Security, LLC. All rights
+ * Copyright (c) 2009-2017 Cisco Systems, Inc.  All rights reserved
+ * Copyright (c) 2013-2017 Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2016      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.

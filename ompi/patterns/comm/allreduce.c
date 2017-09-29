@@ -3,8 +3,9 @@
  * Copyright (c) 2009-2012 Oak Ridge National Laboratory.  All rights reserved.
  * Copyright (c) 2012      Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2014      Research Organization for Information Science
+ * Copyright (c) 2014-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -22,13 +23,14 @@
 #include "opal/include/opal/sys/atomic.h"
 #include "ompi/mca/pml/pml.h"
 #include "ompi/patterns/net/netpatterns.h"
+#include "ompi/mca/coll/base/coll_base_util.h"
 #include "coll_ops.h"
 #include "commpatterns.h"
 
 /**
  * All-reduce for contigous primitive types
  */
-OMPI_DECLSPEC int comm_allreduce_pml(void *sbuf, void *rbuf, int count,
+OMPI_DECLSPEC int ompi_comm_allreduce_pml(void *sbuf, void *rbuf, int count,
         ompi_datatype_t *dtype, int my_rank_in_group,
         struct ompi_op_t *op, int n_peers,int *ranks_in_comm,
         ompi_communicator_t *comm)
@@ -42,7 +44,6 @@ OMPI_DECLSPEC int comm_allreduce_pml(void *sbuf, void *rbuf, int count,
     char scratch_bufers[2][MAX_TMP_BUFFER];
     int send_buffer=0,recv_buffer=1;
     char *sbuf_current, *rbuf_current;
-    ompi_request_t *requests[2];
 
     /* get size of data needed - same layout as user data, so that
      *   we can apply the reudction routines directly on these buffers
@@ -51,7 +52,7 @@ OMPI_DECLSPEC int comm_allreduce_pml(void *sbuf, void *rbuf, int count,
     if( OMPI_SUCCESS != rc ) {
         goto Error;
     }
-    rc = ompi_datatype_type_extent(dtype, (OPAL_PTRDIFF_TYPE *)&dt_extent);
+    rc = ompi_datatype_type_extent(dtype, (ptrdiff_t *)&dt_extent);
     if( OMPI_SUCCESS != rc ) {
         goto Error;
     }
@@ -79,7 +80,7 @@ OMPI_DECLSPEC int comm_allreduce_pml(void *sbuf, void *rbuf, int count,
 
     /* get my reduction communication pattern */
     memset(&my_exchange_node, 0, sizeof(netpatterns_pair_exchange_node_t));
-    rc = netpatterns_setup_recursive_doubling_tree_node(n_peers,
+    rc = ompi_netpatterns_setup_recursive_doubling_tree_node(n_peers,
             my_rank_in_group, &my_exchange_node);
     if(OMPI_SUCCESS != rc){
         return rc;
@@ -118,7 +119,7 @@ OMPI_DECLSPEC int comm_allreduce_pml(void *sbuf, void *rbuf, int count,
                             -OMPI_COMMON_TAG_ALLREDUCE, comm,
                             MPI_STATUSES_IGNORE));
                 if( 0 > rc ) {
-                    fprintf(stderr,"  first recv failed in comm_allreduce_pml \n");
+                    fprintf(stderr,"  first recv failed in ompi_comm_allreduce_pml \n");
                     fflush(stderr);
                     goto  Error;
                 }
@@ -144,7 +145,7 @@ OMPI_DECLSPEC int comm_allreduce_pml(void *sbuf, void *rbuf, int count,
                             -OMPI_COMMON_TAG_ALLREDUCE, MCA_PML_BASE_SEND_STANDARD,
                             comm));
                 if( 0 > rc ) {
-                    fprintf(stderr,"  first send failed in comm_allreduce_pml \n");
+                    fprintf(stderr,"  first send failed in ompi_comm_allreduce_pml \n");
                     fflush(stderr);
                     goto  Error;
                 }
@@ -165,31 +166,19 @@ OMPI_DECLSPEC int comm_allreduce_pml(void *sbuf, void *rbuf, int count,
             /* is the remote data read */
             pair_rank=my_exchange_node.rank_exchanges[exchange];
 
-            /* post non-blocking receive */
-            rc=MCA_PML_CALL(irecv(scratch_bufers[recv_buffer],
-                        count_this_stripe,dtype,ranks_in_comm[pair_rank],
-                        -OMPI_COMMON_TAG_ALLREDUCE,
-                        comm,&(requests[0])));
+            rc=ompi_coll_base_sendrecv_actual(scratch_bufers[send_buffer],
+                                              count_this_stripe,dtype, ranks_in_comm[pair_rank],
+                                              -OMPI_COMMON_TAG_ALLREDUCE,
+                                              scratch_bufers[recv_buffer],
+                                              count_this_stripe,dtype,ranks_in_comm[pair_rank],
+                                              -OMPI_COMMON_TAG_ALLREDUCE,
+                                              comm, MPI_STATUS_IGNORE);
             if( 0 > rc ) {
-                fprintf(stderr,"  irecv failed in  comm_allreduce_pml at iterations %d \n",
+                fprintf(stderr,"  irecv failed in  ompi_comm_allreduce_pml at iterations %d \n",
                         exchange);
                 fflush(stderr);
                 goto Error;
             }
-
-            /* post non-blocking send */
-            rc=MCA_PML_CALL(isend(scratch_bufers[send_buffer],
-                        count_this_stripe,dtype, ranks_in_comm[pair_rank],
-                        -OMPI_COMMON_TAG_ALLREDUCE,MCA_PML_BASE_SEND_STANDARD,
-                        comm,&(requests[1])));
-            if( 0 > rc ) {
-                fprintf(stderr,"  isend failed in  comm_allreduce_pml at iterations %d \n",
-                        exchange);
-                fflush(stderr);
-                goto Error;
-            }
-            /* wait on send and receive completion */
-            ompi_request_wait_all(2,requests,MPI_STATUSES_IGNORE);
 
             /* reduce the data */
             if( 0 < count_this_stripe ) {
@@ -217,7 +206,7 @@ OMPI_DECLSPEC int comm_allreduce_pml(void *sbuf, void *rbuf, int count,
                             -OMPI_COMMON_TAG_ALLREDUCE, comm,
                             MPI_STATUSES_IGNORE));
                 if( 0 > rc ) {
-                    fprintf(stderr,"  last recv failed in comm_allreduce_pml \n");
+                    fprintf(stderr,"  last recv failed in ompi_comm_allreduce_pml \n");
                     fflush(stderr);
                     goto  Error;
                 }
@@ -235,7 +224,7 @@ OMPI_DECLSPEC int comm_allreduce_pml(void *sbuf, void *rbuf, int count,
                             -OMPI_COMMON_TAG_ALLREDUCE, MCA_PML_BASE_SEND_STANDARD,
                             comm));
                 if( 0 > rc ) {
-                    fprintf(stderr,"  last send failed in comm_allreduce_pml \n");
+                    fprintf(stderr,"  last send failed in ompi_comm_allreduce_pml \n");
                     fflush(stderr);
                     goto  Error;
                 }
@@ -250,7 +239,7 @@ OMPI_DECLSPEC int comm_allreduce_pml(void *sbuf, void *rbuf, int count,
         count_processed += count_this_stripe;
     }
 
-    netpatterns_cleanup_recursive_doubling_tree_node(&my_exchange_node);
+    ompi_netpatterns_cleanup_recursive_doubling_tree_node(&my_exchange_node);
 
     /* return */
     return OMPI_SUCCESS;

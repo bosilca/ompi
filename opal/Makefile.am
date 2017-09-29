@@ -11,6 +11,8 @@
 #                         All rights reserved.
 # Copyright (c) 2009-2015 Cisco Systems, Inc.  All rights reserved.
 # Copyright (c) 2015-2016 Intel, Inc. All rights reserved.
+# Copyright (c) 2016      Research Organization for Information Science
+#                         and Technology (RIST). All rights reserved.
 # $COPYRIGHT$
 #
 # Additional copyrights may follow
@@ -20,7 +22,6 @@
 
 SUBDIRS = \
 	include \
-	asm \
         datatype \
         etc \
         util \
@@ -35,7 +36,6 @@ SUBDIRS = \
 # therefore make distclean will fail).
 DIST_SUBDIRS = \
 	include \
-	asm \
         datatype \
         etc \
 	util \
@@ -48,19 +48,12 @@ DIST_SUBDIRS = \
 lib_LTLIBRARIES = lib@OPAL_LIB_PREFIX@open-pal.la
 lib@OPAL_LIB_PREFIX@open_pal_la_SOURCES =
 lib@OPAL_LIB_PREFIX@open_pal_la_LIBADD = \
-        asm/libasm.la \
         datatype/libdatatype.la \
         mca/base/libmca_base.la \
         util/libopalutil.la \
 	$(MCA_opal_FRAMEWORK_LIBS)
 lib@OPAL_LIB_PREFIX@open_pal_la_DEPENDENCIES = $(lib@OPAL_LIB_PREFIX@open_pal_la_LIBADD)
 lib@OPAL_LIB_PREFIX@open_pal_la_LDFLAGS = -version-info $(libopen_pal_so_version)
-
-if OPAL_DESTRUCTOR_USE_FINI
-
-lib@OPAL_LIB_PREFIX@open_pal_la_LDFLAGS += -Wl,-fini -Wl,opal_cleanup
-
-endif
 
 # included subdirectory Makefile.am's and appended-to variables
 headers =

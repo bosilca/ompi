@@ -15,6 +15,7 @@
 #include "opal/runtime/opal.h"
 #include "opal/mca/pmix/pmix.h"
 #include "ompi/message/message.h"
+#include "ompi/mca/pml/base/pml_base_bsend.h"
 #include "pml_ucx_request.h"
 
 #include <inttypes.h>
@@ -67,8 +68,8 @@ mca_pml_ucx_module_t ompi_pml_ucx = {
         mca_pml_ucx_mrecv,
         mca_pml_ucx_dump,
         NULL, /* FT */
-        1ul << (PML_UCX_TAG_BITS - 1),
         1ul << (PML_UCX_CONTEXT_BITS),
+        1ul << (PML_UCX_TAG_BITS - 1),
     },
     NULL,   /* ucp_context */
     NULL    /* ucp_worker */
@@ -134,12 +135,17 @@ int mca_pml_ucx_open(void)
                              UCP_PARAM_FIELD_REQUEST_SIZE |
                              UCP_PARAM_FIELD_REQUEST_INIT |
                              UCP_PARAM_FIELD_REQUEST_CLEANUP |
-                             UCP_PARAM_FIELD_TAG_SENDER_MASK;
+                             UCP_PARAM_FIELD_TAG_SENDER_MASK |
+                             UCP_PARAM_FIELD_MT_WORKERS_SHARED |
+                             UCP_PARAM_FIELD_ESTIMATED_NUM_EPS;
     params.features        = UCP_FEATURE_TAG;
     params.request_size    = sizeof(ompi_request_t);
     params.request_init    = mca_pml_ucx_request_init;
     params.request_cleanup = mca_pml_ucx_request_cleanup;
     params.tag_sender_mask = PML_UCX_SPECIFIC_SOURCE_MASK;
+    params.mt_workers_shared = 0; /* we do not need mt support for context
+                                     since it will be protected by worker */
+    params.estimated_num_eps = ompi_proc_world_size();
 
     status = ucp_init(&params, config, &ompi_pml_ucx.ucp_context);
     ucp_config_release(config);
@@ -175,15 +181,44 @@ int mca_pml_ucx_close(void)
 
 int mca_pml_ucx_init(void)
 {
+    ucp_worker_params_t params;
     ucs_status_t status;
+    ucp_worker_attr_t attr;
     int rc;
 
     PML_UCX_VERBOSE(1, "mca_pml_ucx_init");
 
     /* TODO check MPI thread mode */
-    status = ucp_worker_create(ompi_pml_ucx.ucp_context, UCS_THREAD_MODE_SINGLE,
+    params.field_mask  = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
+    params.thread_mode = UCS_THREAD_MODE_SINGLE;
+    if (ompi_mpi_thread_multiple) {
+        params.thread_mode = UCS_THREAD_MODE_MULTI;
+    } else {
+        params.thread_mode = UCS_THREAD_MODE_SINGLE;
+    }
+
+    status = ucp_worker_create(ompi_pml_ucx.ucp_context, &params,
                                &ompi_pml_ucx.ucp_worker);
     if (UCS_OK != status) {
+        PML_UCX_ERROR("Failed to create UCP worker");
+        return OMPI_ERROR;
+    }
+
+    attr.field_mask = UCP_WORKER_ATTR_FIELD_THREAD_MODE;
+    status = ucp_worker_query(ompi_pml_ucx.ucp_worker, &attr);
+    if (UCS_OK != status) {
+        ucp_worker_destroy(ompi_pml_ucx.ucp_worker);
+        ompi_pml_ucx.ucp_worker = NULL;
+        PML_UCX_ERROR("Failed to query UCP worker thread level");
+        return OMPI_ERROR;
+    }
+
+    if (ompi_mpi_thread_multiple && attr.thread_mode != UCS_THREAD_MODE_MULTI) {
+        /* UCX does not support multithreading, disqualify current PML for now */
+        /* TODO: we should let OMPI to fallback to THREAD_SINGLE mode */
+        ucp_worker_destroy(ompi_pml_ucx.ucp_worker);
+        ompi_pml_ucx.ucp_worker = NULL;
+        PML_UCX_ERROR("UCP worker does not support MPI_THREAD_MULTIPLE");
         return OMPI_ERROR;
     }
 
@@ -231,6 +266,7 @@ int mca_pml_ucx_cleanup(void)
 
 ucp_ep_h mca_pml_ucx_add_proc(ompi_communicator_t *comm, int dst)
 {
+    ucp_ep_params_t ep_params;
     ucp_address_t *address;
     ucs_status_t status;
     size_t addrlen;
@@ -254,7 +290,11 @@ ucp_ep_h mca_pml_ucx_add_proc(ompi_communicator_t *comm, int dst)
     }
 
     PML_UCX_VERBOSE(2, "connecting to proc. %d", proc_peer->super.proc_name.vpid);
-    status = ucp_ep_create(ompi_pml_ucx.ucp_worker, address, &ep);
+
+    ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
+    ep_params.address    = address;
+
+    status = ucp_ep_create(ompi_pml_ucx.ucp_worker, &ep_params, &ep);
     free(address);
     if (UCS_OK != status) {
         PML_UCX_ERROR("Failed to connect to proc: %d, %s", proc_peer->super.proc_name.vpid,
@@ -269,6 +309,7 @@ ucp_ep_h mca_pml_ucx_add_proc(ompi_communicator_t *comm, int dst)
 
 int mca_pml_ucx_add_procs(struct ompi_proc_t **procs, size_t nprocs)
 {
+    ucp_ep_params_t ep_params;
     ucp_address_t *address;
     ucs_status_t status;
     ompi_proc_t *proc;
@@ -299,7 +340,11 @@ int mca_pml_ucx_add_procs(struct ompi_proc_t **procs, size_t nprocs)
         }
 
         PML_UCX_VERBOSE(2, "connecting to proc. %d", proc->super.proc_name.vpid);
-        status = ucp_ep_create(ompi_pml_ucx.ucp_worker, address, &ep);
+
+        ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
+        ep_params.address    = address;
+
+        status = ucp_ep_create(ompi_pml_ucx.ucp_worker, &ep_params, &ep);
         free(address);
 
         if (UCS_OK != status) {
@@ -319,7 +364,7 @@ static void mca_pml_ucx_waitall(void **reqs, size_t *count_p)
     ucs_status_t status;
     size_t i;
 
-    PML_UCX_VERBOSE(2, "waiting for %d disconnect requests", *count_p);
+    PML_UCX_VERBOSE(2, "waiting for %d disconnect requests", (int)*count_p);
     for (i = 0; i < *count_p; ++i) {
         do {
             opal_progress();
@@ -329,7 +374,7 @@ static void mca_pml_ucx_waitall(void **reqs, size_t *count_p)
             PML_UCX_ERROR("disconnect request failed: %s",
                           ucs_status_string(status));
         }
-        ucp_request_release(reqs[i]);
+        ucp_request_free(reqs[i]);
         reqs[i] = NULL;
     }
 
@@ -377,7 +422,7 @@ int mca_pml_ucx_del_procs(struct ompi_proc_t **procs, size_t nprocs)
 
         proc->proc_endpoints[OMPI_PROC_ENDPOINT_TAG_PML] = NULL;
 
-        if (num_reqs >= ompi_pml_ucx.num_disconnect) {
+        if ((int)num_reqs >= ompi_pml_ucx.num_disconnect) {
             mca_pml_ucx_waitall(dreqs, &num_reqs);
         }
     }
@@ -480,7 +525,7 @@ int mca_pml_ucx_recv(void *buf, size_t count, ompi_datatype_t *datatype, int src
     PML_UCX_TRACE_RECV("%s", buf, count, datatype, src, tag, comm, "recv");
 
     PML_UCX_MAKE_RECV_TAG(ucp_tag, ucp_tag_mask, tag, src, comm);
-    req = alloca(ompi_pml_ucx.request_size) + ompi_pml_ucx.request_size;
+    req = (char *)alloca(ompi_pml_ucx.request_size) + ompi_pml_ucx.request_size;
     status = ucp_tag_recv_nbr(ompi_pml_ucx.ucp_worker, buf, count,
                               mca_pml_ucx_get_datatype(datatype),
                               ucp_tag, ucp_tag_mask, req);
@@ -542,13 +587,95 @@ int mca_pml_ucx_isend_init(const void *buf, size_t count, ompi_datatype_t *datat
     req->flags          = MCA_PML_UCX_REQUEST_FLAG_SEND;
     req->buffer         = (void *)buf;
     req->count          = count;
-    req->datatype       = mca_pml_ucx_get_datatype(datatype);
     req->tag            = PML_UCX_MAKE_SEND_TAG(tag, comm);
     req->send.mode      = mode;
     req->send.ep        = ep;
+    if (MCA_PML_BASE_SEND_BUFFERED == mode) {
+        req->ompi_datatype = datatype;
+        OBJ_RETAIN(datatype);
+    } else {
+        req->datatype = mca_pml_ucx_get_datatype(datatype);
+    }
 
     *request = &req->ompi;
     return OMPI_SUCCESS;
+}
+
+static ucs_status_ptr_t
+mca_pml_ucx_bsend(ucp_ep_h ep, const void *buf, size_t count, 
+                  ompi_datatype_t *datatype, uint64_t pml_tag)
+{
+    ompi_request_t *req;
+    void *packed_data;
+    size_t packed_length;
+    size_t offset;
+    uint32_t iov_count;
+    struct iovec iov;
+    opal_convertor_t opal_conv;
+
+    OBJ_CONSTRUCT(&opal_conv, opal_convertor_t);
+    opal_convertor_copy_and_prepare_for_send(ompi_proc_local_proc->super.proc_convertor,
+                                             &datatype->super, count, buf, 0,
+                                             &opal_conv);
+    opal_convertor_get_packed_size(&opal_conv, &packed_length);
+
+    packed_data = mca_pml_base_bsend_request_alloc_buf(packed_length);
+    if (OPAL_UNLIKELY(NULL == packed_data)) {
+        OBJ_DESTRUCT(&opal_conv);
+        PML_UCX_ERROR("bsend: failed to allocate buffer");
+        return UCS_STATUS_PTR(OMPI_ERROR);
+    }
+    
+    iov_count    = 1;
+    iov.iov_base = packed_data;
+    iov.iov_len  = packed_length;
+
+    PML_UCX_VERBOSE(8, "bsend of packed buffer %p len %zu", packed_data, packed_length);
+    offset = 0;
+    opal_convertor_set_position(&opal_conv, &offset);
+    if (0 > opal_convertor_pack(&opal_conv, &iov, &iov_count, &packed_length)) {
+        mca_pml_base_bsend_request_free(packed_data);
+        OBJ_DESTRUCT(&opal_conv);
+        PML_UCX_ERROR("bsend: failed to pack user datatype");
+        return UCS_STATUS_PTR(OMPI_ERROR);
+    }
+
+    OBJ_DESTRUCT(&opal_conv);
+
+    req = (ompi_request_t*)ucp_tag_send_nb(ep, packed_data, packed_length,
+                                           ucp_dt_make_contig(1), pml_tag,
+                                           mca_pml_ucx_bsend_completion);
+    if (NULL == req) {
+        /* request was completed in place */
+        mca_pml_base_bsend_request_free(packed_data);
+        return NULL;
+    }
+
+    if (OPAL_UNLIKELY(UCS_PTR_IS_ERR(req))) {
+        mca_pml_base_bsend_request_free(packed_data);
+        PML_UCX_ERROR("ucx bsend failed: %s", ucs_status_string(UCS_PTR_STATUS(req)));
+        return UCS_STATUS_PTR(OMPI_ERROR);
+    }
+
+    req->req_complete_cb_data = packed_data;
+    return NULL;
+}
+
+static inline ucs_status_ptr_t mca_pml_ucx_common_send(ucp_ep_h ep, const void *buf,
+                                                       size_t count,
+                                                       ompi_datatype_t *datatype,
+                                                       ucp_datatype_t ucx_datatype,
+                                                       ucp_tag_t tag,
+                                                       mca_pml_base_send_mode_t mode,
+                                                       ucp_send_callback_t cb)
+{
+    if (OPAL_UNLIKELY(MCA_PML_BASE_SEND_BUFFERED == mode)) {
+        return mca_pml_ucx_bsend(ep, buf, count, datatype, tag);
+    } else if (OPAL_UNLIKELY(MCA_PML_BASE_SEND_SYNCHRONOUS == mode)) {
+        return ucp_tag_send_sync_nb(ep, buf, count, ucx_datatype, tag, cb);
+    } else {
+        return ucp_tag_send_nb(ep, buf, count, ucx_datatype, tag, cb);
+    }
 }
 
 int mca_pml_ucx_isend(const void *buf, size_t count, ompi_datatype_t *datatype,
@@ -559,10 +686,10 @@ int mca_pml_ucx_isend(const void *buf, size_t count, ompi_datatype_t *datatype,
     ompi_request_t *req;
     ucp_ep_h ep;
 
-    PML_UCX_TRACE_SEND("isend request *%p", buf, count, datatype, dst, tag, mode,
-                       comm, (void*)request)
-
-    /* TODO special care to sync/buffered send */
+    PML_UCX_TRACE_SEND("i%ssend request *%p", 
+                       buf, count, datatype, dst, tag, mode, comm, 
+                       mode == MCA_PML_BASE_SEND_BUFFERED ? "b" : "",
+                       (void*)request)
 
     ep = mca_pml_ucx_get_ep(comm, dst);
     if (OPAL_UNLIKELY(NULL == ep)) {
@@ -570,10 +697,11 @@ int mca_pml_ucx_isend(const void *buf, size_t count, ompi_datatype_t *datatype,
         return OMPI_ERROR;
     }
 
-    req = (ompi_request_t*)ucp_tag_send_nb(ep, buf, count,
-                                           mca_pml_ucx_get_datatype(datatype),
-                                           PML_UCX_MAKE_SEND_TAG(tag, comm),
-                                           mca_pml_ucx_send_completion);
+    req = (ompi_request_t*)mca_pml_ucx_common_send(ep, buf, count, datatype,
+                                                   mca_pml_ucx_get_datatype(datatype),
+                                                   PML_UCX_MAKE_SEND_TAG(tag, comm), mode,
+                                                   mca_pml_ucx_send_completion);
+
     if (req == NULL) {
         PML_UCX_VERBOSE(8, "returning completed request");
         *request = &ompi_pml_ucx.completed_send_req;
@@ -595,9 +723,8 @@ int mca_pml_ucx_send(const void *buf, size_t count, ompi_datatype_t *datatype, i
     ompi_request_t *req;
     ucp_ep_h ep;
 
-    PML_UCX_TRACE_SEND("%s", buf, count, datatype, dst, tag, mode, comm, "send");
-
-    /* TODO special care to sync/buffered send */
+    PML_UCX_TRACE_SEND("%s", buf, count, datatype, dst, tag, mode, comm, 
+                       mode == MCA_PML_BASE_SEND_BUFFERED ? "bsend" : "send");
 
     ep = mca_pml_ucx_get_ep(comm, dst);
     if (OPAL_UNLIKELY(NULL == ep)) {
@@ -605,10 +732,11 @@ int mca_pml_ucx_send(const void *buf, size_t count, ompi_datatype_t *datatype, i
         return OMPI_ERROR;
     }
 
-    req = (ompi_request_t*)ucp_tag_send_nb(ep, buf, count,
-                                           mca_pml_ucx_get_datatype(datatype),
-                                           PML_UCX_MAKE_SEND_TAG(tag, comm),
-                                           mca_pml_ucx_send_completion);
+    req = (ompi_request_t*)mca_pml_ucx_common_send(ep, buf, count, datatype,
+                                                   mca_pml_ucx_get_datatype(datatype),
+                                                   PML_UCX_MAKE_SEND_TAG(tag, comm),
+                                                   mode, mca_pml_ucx_send_completion);
+
     if (OPAL_LIKELY(req == NULL)) {
         return OMPI_SUCCESS;
     } else if (!UCS_PTR_IS_ERR(req)) {
@@ -781,12 +909,14 @@ int mca_pml_ucx_start(size_t count, ompi_request_t** requests)
         mca_pml_ucx_request_reset(&preq->ompi);
 
         if (preq->flags & MCA_PML_UCX_REQUEST_FLAG_SEND) {
-            /* TODO special care to sync/buffered send */
-            PML_UCX_VERBOSE(8, "start send request %p", (void*)preq);
-            tmp_req = (ompi_request_t*)ucp_tag_send_nb(preq->send.ep, preq->buffer,
-                                                       preq->count, preq->datatype,
-                                                       preq->tag,
-                                                       mca_pml_ucx_psend_completion);
+            tmp_req = (ompi_request_t*)mca_pml_ucx_common_send(preq->send.ep,
+                                                               preq->buffer,
+                                                               preq->count,
+                                                               preq->ompi_datatype,
+                                                               preq->datatype,
+                                                               preq->tag,
+                                                               preq->send.mode,
+                                                               mca_pml_ucx_psend_completion);
         } else {
             PML_UCX_VERBOSE(8, "start recv request %p", (void*)preq);
             tmp_req = (ompi_request_t*)ucp_tag_recv_nb(ompi_pml_ucx.ucp_worker,

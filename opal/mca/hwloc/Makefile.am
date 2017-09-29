@@ -1,5 +1,7 @@
 #
-# Copyright (c) 2011      Cisco Systems, Inc.  All rights reserved.
+# Copyright (c) 2011-2017 Cisco Systems, Inc.  All rights reserved
+# Copyright (c) 2016      Research Organization for Information Science
+#                         and Technology (RIST). All rights reserved.
 # $COPYRIGHT$
 #
 # Additional copyrights may follow
@@ -7,12 +9,14 @@
 # $HEADER$
 #
 
+EXTRA_DIST = autogen.options
+
 # main library setup
 noinst_LTLIBRARIES = libmca_hwloc.la
 libmca_hwloc_la_SOURCES =
 
 # local files
-headers = hwloc.h
+headers = hwloc-internal.h
 libmca_hwloc_la_SOURCES += $(headers)
 
 # Conditionally install the header files

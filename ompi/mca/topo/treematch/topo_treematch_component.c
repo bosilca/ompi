@@ -4,6 +4,7 @@
  *                         reserved.
  * Copyright (c) 2011-2015 INRIA.  All rights reserved.
  * Copyright (c) 2011-2015 Université Bordeaux 1
+ * Copyright (c) 2016      Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow

@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 #
 # Copyright (c) 2010-2014 Cisco Systems, Inc.  All rights reserved.
-# Copyright (c) 2016      Intel, Inc. All rights reserved.
+# Copyright (c) 2016-2017 Intel, Inc. All rights reserved.
+# Copyright (c) 2017      IBM Corporation. All rights reserved.
 # $COPYRIGHT$
 #
 
@@ -66,12 +67,23 @@ my $HELP = 0;
 # Defaults
 my $my_search_name = "Cisco";
 my $my_formal_name = "Cisco Systems, Inc.  All rights reserved.";
+my $my_manual_list = "";
+
+# Protected directories
+my @protected = qw(
+    opal\\/mca\\/pmix\\/pmix.+?\\/pmix\\/
+    opal\\/mca\\/hwloc\\/hwloc.+?\\/hwloc\\/
+    opal\\/mca\\/event\\/libevent.+?\\/libevent\\/
+    contrib\\/update-my-copyright.pl
+);
 
 # Override the defaults if some values are set in the environment
 $my_search_name = $ENV{OMPI_COPYRIGHT_SEARCH_NAME}
     if (defined($ENV{OMPI_COPYRIGHT_SEARCH_NAME}));
 $my_formal_name = $ENV{OMPI_COPYRIGHT_FORMAL_NAME}
     if (defined($ENV{OMPI_COPYRIGHT_FORMAL_NAME}));
+$my_manual_list = $ENV{OMPI_COPYRIGHT_MANUAL_LIST}
+    if (defined($ENV{OMPI_COPYRIGHT_MANUAL_LIST}));
 
 GetOptions(
     "help" => \$HELP,
@@ -79,6 +91,7 @@ GetOptions(
     "check-only" => \$CHECK_ONLY,
     "search-name=s" => \$my_search_name,
     "formal-name=s" => \$my_formal_name,
+    "manual-list=s" => \$my_manual_list,
 ) or die "unable to parse options, stopped";
 
 if ($HELP) {
@@ -90,6 +103,7 @@ $0 [options]
 --check-only         exit(111) if there are files with copyrights to edit
 --search-name=NAME   Set search name to NAME
 --formal-same=NAME   Set formal name to NAME
+--manual-list=FNAME  Use specified file as list of files to mod copyright
 EOT
     exit(0);
 }
@@ -112,18 +126,18 @@ my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime;
 $year += 1900;
 quiet_print "==> This year: $year\n";
 
-# Find the top-level OMPI source tree dir
+# Find the top-level source tree dir in a git repo
 my $start = cwd();
 my $top = $start;
-while (! -f "$top/Makefile.ompi-rules") {
+while (! -d "$top/.git") {
     chdir("..");
     $top = cwd();
-    die "Can't find top-level Open MPI directory"
+    die "Can't find top-level repository directory"
         if ($top eq "/");
 }
 chdir($start);
 
-quiet_print "==> Top-level Open MPI dir: $top\n";
+quiet_print "==> Top-level repository dir: $top\n";
 quiet_print "==> Current directory: $start\n";
 
 # Select VCS used to obtain modification info.  Choose in increasing priority
@@ -135,6 +149,8 @@ $vcs = "hg"
     if (-d "$top/.hg");
 $vcs = "svn"
     if (-d "$top/.svn");
+$vcs = "manual"
+    if ("$my_manual_list" ne "");
 
 my @files = find_modified_files($vcs);
 
@@ -145,6 +161,22 @@ if ($#files < 0) {
 
 # Examine each of the files and see if they need an updated copyright
 foreach my $f (@files) {
+
+    # ignore embedded copies of external codes as we shouldn't
+    # be overwriting their copyrights - if someone actually
+    # modified any of those files, they can manually update
+    # the copyright
+    my $ignore = 0;
+    foreach my $p (@protected) {
+        if (eval("\$f =~ /$p/")) {
+            quiet_print "Ignoring protected file $f\n";
+            $ignore = 1;
+            last;
+        }
+    }
+    if (1 == $ignore) {
+        next;
+    }
     quiet_print "Processing added/changed file: $f\n";
     open(FILE, $f) || die "Can't open file: $f";
 
@@ -338,6 +370,9 @@ sub find_modified_files {
             }
         }
         close(CMD);
+    }
+    elsif ($vcs eq "manual") {
+        @files = split(/\n/, `cat $my_manual_list`);
     }
     else {
         die "unknown VCS '$vcs', stopped";

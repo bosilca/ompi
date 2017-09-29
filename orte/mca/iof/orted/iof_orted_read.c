@@ -12,7 +12,7 @@
  * Copyright (c) 2007      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2011-2013 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2016      Intel, Inc. All rights reserved.
+ * Copyright (c) 2016-2017 Intel, Inc. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -35,6 +35,7 @@
 #include "orte/mca/errmgr/errmgr.h"
 #include "orte/mca/odls/odls_types.h"
 #include "orte/util/name_fns.h"
+#include "orte/util/threads.h"
 #include "orte/mca/state/state.h"
 #include "orte/runtime/orte_globals.h"
 
@@ -42,18 +43,6 @@
 #include "orte/mca/iof/base/base.h"
 
 #include "iof_orted.h"
-
-/*
- * Callback when non-blocking RML send completes.
- */
-static void send_cb(int status, orte_process_name_t *peer,
-                    opal_buffer_t *buf, orte_rml_tag_t tag,
-                    void *cbdata)
-{
-    /* nothing to do here - just release buffer and return */
-    OBJ_RELEASE(buf);
-}
-
 
 void orte_iof_orted_read_handler(int fd, short event, void *cbdata)
 {
@@ -63,6 +52,13 @@ void orte_iof_orted_read_handler(int fd, short event, void *cbdata)
     int rc;
     int32_t numbytes;
     orte_iof_proc_t *proct = (orte_iof_proc_t*)rev->proc;
+
+    ORTE_ACQUIRE_OBJECT(rev);
+
+    /* As we may use timer events, fd can be bogus (-1)
+     * use the right one here
+     */
+    fd = rev->fd;
 
     /* read up to the fragment size */
 #if !defined(__WINDOWS__)
@@ -92,7 +88,7 @@ void orte_iof_orted_read_handler(int fd, short event, void *cbdata)
             /* either we have a connection error or it was a non-blocking read */
             if (EAGAIN == errno || EINTR == errno) {
                 /* non-blocking, retry */
-                opal_event_add(rev->ev, 0);
+                ORTE_IOF_READ_ACTIVATE(rev);
                 return;
             }
 
@@ -112,7 +108,7 @@ void orte_iof_orted_read_handler(int fd, short event, void *cbdata)
     }
     if (!proct->copy) {
         /* re-add the event */
-        opal_event_add(rev->ev, 0);
+        ORTE_IOF_READ_ACTIVATE(rev);
         return;
     }
 
@@ -144,11 +140,12 @@ void orte_iof_orted_read_handler(int fd, short event, void *cbdata)
                          "%s iof:orted:read handler sending %d bytes to HNP",
                          ORTE_NAME_PRINT(ORTE_PROC_MY_NAME), numbytes));
 
-    orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, buf, ORTE_RML_TAG_IOF_HNP,
-                            send_cb, NULL);
+    orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                    ORTE_PROC_MY_HNP, buf, ORTE_RML_TAG_IOF_HNP,
+                                    orte_rml_send_callback, NULL);
 
     /* re-add the event */
-    opal_event_add(rev->ev, 0);
+    ORTE_IOF_READ_ACTIVATE(rev);
 
     return;
 
@@ -178,9 +175,7 @@ void orte_iof_orted_read_handler(int fd, short event, void *cbdata)
         NULL == proct->revstderr &&
         NULL == proct->revstddiag) {
         /* this proc's iof is complete */
-        opal_list_remove_item(&mca_iof_orted_component.procs, &proct->super);
         ORTE_ACTIVATE_PROC_STATE(&proct->name, ORTE_PROC_STATE_IOF_COMPLETE);
-        OBJ_RELEASE(proct);
     }
     if (NULL != buf) {
         OBJ_RELEASE(buf);

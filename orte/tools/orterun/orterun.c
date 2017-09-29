@@ -10,11 +10,11 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2006-2015 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2006-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2007-2009 Sun Microsystems, Inc. All rights reserved.
- * Copyright (c) 2007-2016 Los Alamos National Security, LLC.  All rights
+ * Copyright (c) 2007-2017 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2013-2016 Intel, Inc. All rights reserved.
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
@@ -86,7 +86,9 @@
 #include "orte/mca/rml/rml.h"
 #include "orte/mca/state/state.h"
 #include "orte/util/proc_info.h"
+#include "orte/util/session_dir.h"
 #include "orte/util/show_help.h"
+#include "orte/util/threads.h"
 
 #include "orte/runtime/runtime.h"
 #include "orte/runtime/orte_globals.h"
@@ -130,6 +132,8 @@ int orterun(int argc, char *argv[])
 {
     orte_submit_status_t launchst, completest;
 
+    /* orte_submit_init() will also check if the user is running as
+       root (and may issue a warning/exit). */
     if (ORTE_SUCCESS != orte_submit_init(argc, argv, NULL)) {
         exit(1);
     }
@@ -140,7 +144,7 @@ int orterun(int argc, char *argv[])
      */
     if (0 == geteuid() && !orte_cmd_options.run_as_root) {
         fprintf(stderr, "--------------------------------------------------------------------------\n");
-        if (orte_cmd_options.help) {
+        if (NULL != orte_cmd_options.help) {
             fprintf(stderr, "%s cannot provide the help message when run as root.\n", orte_basename);
         } else {
             /* show_help is not yet available, so print an error manually */
@@ -170,9 +174,14 @@ int orterun(int argc, char *argv[])
             ORTE_UPDATE_EXIT_STATUS(1);
             goto DONE;
         }
-        while (1) {
+        while (orte_event_base_active) {
            opal_event_loop(orte_event_base, OPAL_EVLOOP_ONCE);
         }
+        /* we are terminated when the DVM master shuts down, thereby
+         * closing our connection to them. This looks like an error,
+         * but is not - so correct our exit status here */
+        orte_exit_status = 0;
+        goto DONE;
     } else {
         /* spawn the job and its daemons */
         memset(&launchst, 0, sizeof(launchst));
@@ -191,6 +200,7 @@ int orterun(int argc, char *argv[])
     while (orte_event_base_active && launchst.active) {
         opal_event_loop(orte_event_base, OPAL_EVLOOP_ONCE);
     }
+    ORTE_ACQUIRE_OBJECT(orte_event_base_active);
     if (orte_debug_flag) {
         opal_output(0, "Job %s has launched",
                    (NULL == launchst.jdata) ? "UNKNOWN" : ORTE_JOBID_PRINT(launchst.jdata->jobid));
@@ -202,6 +212,7 @@ int orterun(int argc, char *argv[])
     while (orte_event_base_active && completest.active) {
         opal_event_loop(orte_event_base, OPAL_EVLOOP_ONCE);
     }
+    ORTE_ACQUIRE_OBJECT(orte_event_base_active);
 
     if (ORTE_PROC_IS_HNP) {
         /* ensure all local procs are dead */
@@ -212,6 +223,9 @@ int orterun(int argc, char *argv[])
     /* cleanup and leave */
     orte_submit_finalize();
     orte_finalize();
+    orte_session_dir_cleanup(ORTE_JOBID_WILDCARD);
+    /* cleanup the process info */
+    orte_proc_info_finalize();
 
     if (orte_debug_flag) {
         fprintf(stderr, "exiting with status %d\n", orte_exit_status);

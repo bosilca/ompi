@@ -12,7 +12,9 @@
  *                         All rights reserved.
  * Copyright (c) 2011      Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2014-2015 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2017      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -84,6 +86,10 @@ int orte_plm_base_comm_start(void)
                                 ORTE_RML_TAG_REPORT_REMOTE_LAUNCH,
                                 ORTE_RML_PERSISTENT,
                                 orte_plm_base_daemon_failed, NULL);
+        orte_rml.recv_buffer_nb(ORTE_NAME_WILDCARD,
+                                ORTE_RML_TAG_TOPOLOGY_REPORT,
+                                ORTE_RML_PERSISTENT,
+                                orte_plm_base_daemon_topology, NULL);
     }
     recv_issued = true;
 
@@ -104,6 +110,8 @@ int orte_plm_base_comm_stop(void)
     orte_rml.recv_cancel(ORTE_NAME_WILDCARD, ORTE_RML_TAG_PLM);
     if (ORTE_PROC_IS_HNP) {
         orte_rml.recv_cancel(ORTE_NAME_WILDCARD, ORTE_RML_TAG_ORTED_CALLBACK);
+        orte_rml.recv_cancel(ORTE_NAME_WILDCARD, ORTE_RML_TAG_REPORT_REMOTE_LAUNCH);
+        orte_rml.recv_cancel(ORTE_NAME_WILDCARD, ORTE_RML_TAG_TOPOLOGY_REPORT);
     }
     recv_issued = false;
 
@@ -269,7 +277,8 @@ void orte_plm_base_recv(int status, orte_process_name_t* sender,
         }
 
         /* send the response back to the sender */
-        if (0 > (ret = orte_rml.send_buffer_nb(sender, answer, ORTE_RML_TAG_LAUNCH_RESP,
+        if (0 > (ret = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                               sender, answer, ORTE_RML_TAG_LAUNCH_RESP,
                                                orte_rml_send_callback, NULL))) {
             ORTE_ERROR_LOG(ret);
             OBJ_RELEASE(answer);
@@ -332,6 +341,7 @@ void orte_plm_base_recv(int status, orte_process_name_t* sender,
                     if (NULL == (proc = (orte_proc_t*)opal_pointer_array_get_item(jdata->procs, vpid))) {
                         ORTE_ERROR_LOG(ORTE_ERR_NOT_FOUND);
                         ORTE_FORCED_TERMINATE(ORTE_ERROR_DEFAULT_EXIT_CODE);
+                        goto CLEANUP;
                     }
                     /* NEVER update the proc state before activating the state machine - let
                      * the state cbfunc update it as it may need to compare this
@@ -365,14 +375,14 @@ void orte_plm_base_recv(int status, orte_process_name_t* sender,
         count=1;
         if (ORTE_SUCCESS != (rc = opal_dss.unpack(buffer, &job, &count, ORTE_JOBID))) {
             ORTE_ERROR_LOG(rc);
-            goto DEPART;
+            goto CLEANUP;
         }
         name.jobid = job;
         /* get the job object */
         if (NULL == (jdata = orte_get_job_data_object(job))) {
             ORTE_ERROR_LOG(ORTE_ERR_NOT_FOUND);
             rc = ORTE_ERR_NOT_FOUND;
-            goto DEPART;
+            goto CLEANUP;
         }
         count=1;
         while (ORTE_SUCCESS == opal_dss.unpack(buffer, &vpid, &count, ORTE_VPID)) {
@@ -388,12 +398,7 @@ void orte_plm_base_recv(int status, orte_process_name_t* sender,
         break;
     }
 
- CLEANUP:
-    if (ORTE_SUCCESS != rc) {
-        goto DEPART;
-    }
-
- DEPART:
+  CLEANUP:
     /* see if an error occurred - if so, wakeup the HNP so we can exit */
     if (ORTE_PROC_IS_HNP && ORTE_SUCCESS != rc) {
         jdata = NULL;

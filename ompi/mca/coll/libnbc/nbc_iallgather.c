@@ -5,10 +5,14 @@
  *                         Corporation.  All rights reserved.
  * Copyright (c) 2006      The Technical University of Chemnitz. All
  *                         rights reserved.
- * Copyright (c) 2014-2015 Research Organization for Information Science
+ * Copyright (c) 2014-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015      Los Alamos National Security, LLC.  All rights
  *                         reserved.
+ * Copyright (c) 2017      IBM Corporation.  All rights reserved.
+ * $COPYRIGHT$
+ *
+ * Additional copyrights may follow
  *
  * Author(s): Torsten Hoefler <htor@cs.indiana.edu>
  *
@@ -41,7 +45,7 @@ int NBC_Allgather_args_compare(NBC_Allgather_args *a, NBC_Allgather_args *b, voi
  * each node receives from it's left (modulo p) neighbor */
 int ompi_coll_libnbc_iallgather(const void* sendbuf, int sendcount, MPI_Datatype sendtype, void* recvbuf, int recvcount,
                                 MPI_Datatype recvtype, struct ompi_communicator_t *comm, ompi_request_t ** request,
-                                struct mca_coll_base_module_2_1_0_t *module)
+                                struct mca_coll_base_module_2_2_0_t *module)
 {
   int rank, p, res;
   MPI_Aint rcvext;
@@ -50,7 +54,6 @@ int ompi_coll_libnbc_iallgather(const void* sendbuf, int sendcount, MPI_Datatype
 #ifdef NBC_CACHE_SCHEDULE
   NBC_Allgather_args *args, *found, search;
 #endif
-  NBC_Handle *handle;
   ompi_coll_libnbc_module_t *libnbc_module = (ompi_coll_libnbc_module_t*) module;
 
   NBC_IN_PLACE(sendbuf, recvbuf, inplace);
@@ -73,6 +76,10 @@ int ompi_coll_libnbc_iallgather(const void* sendbuf, int sendcount, MPI_Datatype
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
       return res;
     }
+  }
+  if (1 == p) {
+    *request = &ompi_request_empty;
+    return OMPI_SUCCESS;
   }
 
 #ifdef NBC_CACHE_SCHEDULE
@@ -104,7 +111,7 @@ int ompi_coll_libnbc_iallgather(const void* sendbuf, int sendcount, MPI_Datatype
         }
 
         /* send to rank r - not from the sendbuf to optimize MPI_IN_PLACE */
-        res = NBC_Sched_send (sbuf, false, sendcount, sendtype, r, schedule, false);
+        res = NBC_Sched_send (sbuf, false, recvcount, recvtype, r, schedule, false);
         if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
           OBJ_RELEASE(schedule);
           return res;
@@ -147,32 +154,23 @@ int ompi_coll_libnbc_iallgather(const void* sendbuf, int sendcount, MPI_Datatype
   }
 #endif
 
-  res = NBC_Init_handle (comm, &handle, libnbc_module);
+  res = NBC_Schedule_request(schedule, comm, libnbc_module, request, NULL);
   if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
     OBJ_RELEASE(schedule);
     return res;
   }
-
-  res = NBC_Start (handle, schedule);
-  if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
-    OMPI_COLL_LIBNBC_REQUEST_RETURN(handle);
-    return res;
-  }
-
-  *request = (ompi_request_t *) handle;
 
   return OMPI_SUCCESS;
 }
 
 int ompi_coll_libnbc_iallgather_inter(const void* sendbuf, int sendcount, MPI_Datatype sendtype, void* recvbuf, int recvcount,
 				      MPI_Datatype recvtype, struct ompi_communicator_t *comm, ompi_request_t ** request,
-				      struct mca_coll_base_module_2_1_0_t *module)
+				      struct mca_coll_base_module_2_2_0_t *module)
 {
   int res, rsize;
   MPI_Aint rcvext;
   NBC_Schedule *schedule;
   char *rbuf;
-  NBC_Handle *handle;
   ompi_coll_libnbc_module_t *libnbc_module = (ompi_coll_libnbc_module_t*) module;
 
   res = ompi_datatype_type_extent(recvtype, &rcvext);
@@ -213,19 +211,11 @@ int ompi_coll_libnbc_iallgather_inter(const void* sendbuf, int sendcount, MPI_Da
     return res;
   }
 
-  res = NBC_Init_handle (comm, &handle, libnbc_module);
+  res = NBC_Schedule_request(schedule, comm, libnbc_module, request, NULL);
   if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
     OBJ_RELEASE(schedule);
     return res;
   }
-
-  res = NBC_Start (handle, schedule);
-  if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
-    OMPI_COLL_LIBNBC_REQUEST_RETURN(handle);
-    return res;
-  }
-
-  *request = (ompi_request_t *) handle;
 
   return OMPI_SUCCESS;
 }

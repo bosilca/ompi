@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2011-2012 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2017      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
  *
  * $COPYRIGHT$
  *
@@ -29,7 +31,7 @@ int opal_hwloc_pack(opal_buffer_t *buffer, const void *src,
         t = tarray[i];
 
         /* extract an xml-buffer representation of the tree */
-        if (0 != hwloc_topology_export_xmlbuffer(t, &xmlbuffer, &len)) {
+        if (0 != opal_hwloc_base_topology_export_xmlbuffer(t, &xmlbuffer, &len)) {
             return OPAL_ERROR;
         }
 
@@ -104,9 +106,7 @@ int opal_hwloc_unpack(opal_buffer_t *buffer, void *dest,
         /* since we are loading this from an external source, we have to
          * explicitly set a flag so hwloc sets things up correctly
          */
-        if (0 != hwloc_topology_set_flags(t, (HWLOC_TOPOLOGY_FLAG_IS_THISSYSTEM |
-                                              HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM |
-                                              HWLOC_TOPOLOGY_FLAG_IO_DEVICES))) {
+        if (0 != opal_hwloc_base_topology_set_flags(t, HWLOC_TOPOLOGY_FLAG_IS_THISSYSTEM, true)) {
             rc = OPAL_ERROR;
             hwloc_topology_destroy(t);
             goto cleanup;
@@ -135,11 +135,6 @@ int opal_hwloc_unpack(opal_buffer_t *buffer, void *dest,
             goto cleanup;
         }
 
-        /* filter the cpus thru any default cpu set */
-        if (OPAL_SUCCESS != (rc = opal_hwloc_base_filter_cpus(t))) {
-            goto cleanup;
-        }
-
         /* pass it back */
         tarray[i] = t;
 
@@ -154,8 +149,14 @@ int opal_hwloc_unpack(opal_buffer_t *buffer, void *dest,
 
 int opal_hwloc_copy(hwloc_topology_t *dest, hwloc_topology_t src, opal_data_type_t type)
 {
+#ifdef HAVE_HWLOC_TOPOLOGY_DUP
     /* use the hwloc dup function */
     return hwloc_topology_dup(dest, src);
+#else
+    /* hwloc_topology_dup() was introduced in hwloc v1.8.0.
+     * Note that as of March 2017, opal_hwloc_copy() is not (yet?) used in the code base anywhere. */
+    return OPAL_ERR_NOT_SUPPORTED;
+#endif
 }
 
 int opal_hwloc_compare(const hwloc_topology_t topo1,
@@ -189,10 +190,10 @@ int opal_hwloc_compare(const hwloc_topology_t topo1,
      * where we really need to do a tree-wise search so we only compare
      * the things we care about, and ignore stuff like MAC addresses
      */
-    if (0 != hwloc_topology_export_xmlbuffer(t1, &x1, &l1)) {
+    if (0 != opal_hwloc_base_topology_export_xmlbuffer(t1, &x1, &l1)) {
         return OPAL_EQUAL;
     }
-    if (0 != hwloc_topology_export_xmlbuffer(t2, &x2, &l2)) {
+    if (0 != opal_hwloc_base_topology_export_xmlbuffer(t2, &x2, &l2)) {
         free(x1);
         return OPAL_EQUAL;
     }
@@ -258,18 +259,6 @@ static void print_hwloc_obj(char **output, char *prefix,
     if (NULL != obj->cpuset) {
         hwloc_bitmap_snprintf(string, OPAL_HWLOC_MAX_STRING, obj->cpuset);
         asprintf(&tmp2, "%s%sCpuset:  %s", tmp, pfx, string);
-        free(tmp);
-        tmp = tmp2;
-    }
-    if (NULL != obj->online_cpuset) {
-        hwloc_bitmap_snprintf(string, OPAL_HWLOC_MAX_STRING, obj->online_cpuset);
-        asprintf(&tmp2, "%s%sOnline:  %s", tmp, pfx, string);
-        free(tmp);
-        tmp = tmp2;
-    }
-    if (NULL != obj->allowed_cpuset) {
-        hwloc_bitmap_snprintf(string, OPAL_HWLOC_MAX_STRING, obj->allowed_cpuset);
-        asprintf(&tmp2, "%s%sAllowed: %s", tmp, pfx, string);
         free(tmp);
         tmp = tmp2;
     }

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2013      Mellanox Technologies, Inc.
  *                         All rights reserved.
+ * Copyright (c) 2017      ARM, Inc. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -13,40 +14,39 @@
 #include "opal/datatype/opal_convertor.h"
 #include "orte/include/orte/types.h"
 #include "orte/runtime/orte_globals.h"
-#include "oshmem/mca/spml/yoda/spml_yoda.h"
 #include "oshmem/proc/proc.h"
 #include "oshmem/mca/spml/base/base.h"
-#include "oshmem/mca/spml/yoda/spml_yoda_putreq.h"
-#include "oshmem/mca/spml/yoda/spml_yoda_getreq.h"
 #include "opal/mca/btl/btl.h"
 
-#define SPML_BASE_DO_CMP(res, addr, op, val) \
-    switch((op)) { \
+#define SPML_BASE_DO_CMP(_res, _addr, _op, _val) \
+    switch((_op)) { \
         case SHMEM_CMP_EQ: \
-            res = *(addr) == (val) ? 1 : 0; \
+            _res = *(_addr) == (_val) ? 1 : 0; \
             break; \
         case SHMEM_CMP_NE: \
-            res = *(addr) != (val) ? 1 : 0; \
+            _res = *(_addr) != (_val) ? 1 : 0; \
             break; \
         case SHMEM_CMP_GT: \
-            res =  *(addr) > (val) ? 1 : 0; \
+            _res =  *(_addr) > (_val) ? 1 : 0; \
             break; \
         case SHMEM_CMP_LE: \
-            res = *(addr) <= (val) ? 1 : 0; \
+            _res = *(_addr) <= (_val) ? 1 : 0; \
             break; \
         case SHMEM_CMP_LT: \
-            res = *(addr) < (val) ? 1: 0; \
+            _res = *(_addr) < (_val) ?  1 : 0; \
             break; \
         case SHMEM_CMP_GE: \
-            res = *(addr) >= (val) ? 1 : 0; \
+            _res = *(_addr) >= (_val) ? 1 : 0; \
             break; \
     }
 
-#define SPML_BASE_DO_WAIT(cond, val, addr, op) \
-    do { \
-        SPML_BASE_DO_CMP(cond, val,addr,op); \
-        opal_progress(); \
-    } while (cond == 0) ;
+#define SPML_BASE_DO_WAIT(_res, _addr, _op, _val)  \
+    do {                                           \
+        SPML_BASE_DO_CMP(_res, _addr, _op, _val);  \
+        if (_res == 0) {                           \
+            opal_progress();                       \
+        }                                          \
+    } while (_res == 0);
 
 /**
  * Wait for data delivery.
@@ -54,15 +54,24 @@
  */
 int mca_spml_base_wait(void* addr, int cmp, void* value, int datatype)
 {
-    int *int_addr, int_value;
-    long *long_addr, long_value;
-    short *short_addr, short_value;
-    long long *longlong_addr, longlong_value;
-    int32_t *int32_addr, int32_value;
-    int64_t *int64_addr, int64_value;
+    volatile int *int_addr;
+    volatile long *long_addr;
+    volatile short *short_addr;
+    volatile long long *longlong_addr;
+    volatile int32_t *int32_addr;
+    volatile int64_t *int64_addr;
+
+    int int_value;
+    long long_value;
+    short short_value;
+    long long longlong_value;
+    int32_t int32_value;
+    int64_t int64_value;
+
     ompi_fortran_integer_t *fint_addr, fint_value;
     ompi_fortran_integer4_t *fint4_addr, fint4_value;
     ompi_fortran_integer8_t *fint8_addr, fint8_value;
+
     int res = 0;
 
     switch (datatype) {
@@ -153,17 +162,22 @@ int mca_spml_base_wait_nb(void* handle)
     return OSHMEM_SUCCESS;
 }
 
-int mca_spml_base_oob_get_mkeys(int pe, uint32_t seg, sshmem_mkey_t *mkeys)
+int mca_spml_base_oob_get_mkeys(int pe, uint32_t segno, sshmem_mkey_t *mkeys)
 {
     return OSHMEM_ERROR;
 }
 
-void mca_spml_base_rmkey_unpack(sshmem_mkey_t *mkey, int pe)
+void mca_spml_base_rmkey_unpack(sshmem_mkey_t *mkey, uint32_t segno, int pe, int tr_id)
 {
 }
 
 void mca_spml_base_rmkey_free(sshmem_mkey_t *mkey)
 {
+}
+
+void *mca_spml_base_rmkey_ptr(const void *dst_addr, sshmem_mkey_t *mkey, int pe)
+{
+    return NULL;
 }
 
 int mca_spml_base_put_nb(void *dst_addr, size_t size,
@@ -176,4 +190,8 @@ int mca_spml_base_get_nb(void *dst_addr, size_t size,
                          void *src_addr, int src, void **handle)
 {
     return OSHMEM_ERROR;
+}
+
+void mca_spml_base_memuse_hook(void *addr, size_t length)
+{
 }

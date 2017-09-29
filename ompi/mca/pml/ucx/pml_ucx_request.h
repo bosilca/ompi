@@ -26,15 +26,15 @@ enum {
 /*
  * UCX tag structure:
  *
- * 01234567 01234567 01234567 01234567 01234567 01234567 01234567 01234567
- *                           |                          |
- *      message tag (24)     |     source rank (24)     |  context id (16)
- *                           |                          |
+ * 01234567 01234567 01234567 01234567 01234567 0123 4567 01234567 01234567
+ *                           |                      |
+ *      message tag (24)     |   source rank (20)   |     context id (20)
+ *                           |                      |
  */
 #define PML_UCX_TAG_BITS                       24
-#define PML_UCX_RANK_BITS                      24
-#define PML_UCX_CONTEXT_BITS                   16
-#define PML_UCX_ANY_SOURCE_MASK                0x800000000000fffful
+#define PML_UCX_RANK_BITS                      20
+#define PML_UCX_CONTEXT_BITS                   20
+#define PML_UCX_ANY_SOURCE_MASK                0x80000000000ffffful
 #define PML_UCX_SPECIFIC_SOURCE_MASK           0x800000fffffffffful
 #define PML_UCX_TAG_MASK                       0x7fffff0000000000ul
 
@@ -89,7 +89,7 @@ enum {
 #define PML_UCX_MESSAGE_RELEASE(_message) \
     { \
         ompi_message_return(*(_message)); \
-        *(_message) = NULL; \
+        *(_message) = MPI_MESSAGE_NULL; \
     }
 
 
@@ -99,7 +99,10 @@ struct pml_ucx_persistent_request {
     unsigned                          flags;
     void                              *buffer;
     size_t                            count;
-    ucp_datatype_t                    datatype;
+    union {
+        ucp_datatype_t                datatype;
+        ompi_datatype_t              *ompi_datatype;
+    };
     ucp_tag_t                         tag;
     struct {
         mca_pml_base_send_mode_t      mode;
@@ -117,6 +120,8 @@ void mca_pml_ucx_recv_completion(void *request, ucs_status_t status,
                                  ucp_tag_recv_info_t *info);
 
 void mca_pml_ucx_psend_completion(void *request, ucs_status_t status);
+
+void mca_pml_ucx_bsend_completion(void *request, ucs_status_t status);
 
 void mca_pml_ucx_precv_completion(void *request, ucs_status_t status,
                                   ucp_tag_recv_info_t *info);
@@ -144,14 +149,14 @@ static inline ucp_ep_h mca_pml_ucx_get_ep(ompi_communicator_t *comm, int dst)
 static inline void mca_pml_ucx_request_reset(ompi_request_t *req)
 {
     req->req_complete          = REQUEST_PENDING;
-    req->req_status._cancelled = false;
 }
 
 static void mca_pml_ucx_set_send_status(ompi_status_public_t* mpi_status,
                                         ucs_status_t status)
 {
-    if (status == UCS_OK) {
+    if (OPAL_LIKELY(status == UCS_OK)) {
         mpi_status->MPI_ERROR  = MPI_SUCCESS;
+        mpi_status->_cancelled = false;
     } else if (status == UCS_ERR_CANCELED) {
         mpi_status->_cancelled = true;
     } else {
@@ -165,11 +170,12 @@ static inline void mca_pml_ucx_set_recv_status(ompi_status_public_t* mpi_status,
 {
     int64_t tag;
 
-    if (ucp_status == UCS_OK) {
+    if (OPAL_LIKELY(ucp_status == UCS_OK)) {
         tag = info->sender_tag;
         mpi_status->MPI_ERROR  = MPI_SUCCESS;
         mpi_status->MPI_SOURCE = PML_UCX_TAG_GET_SOURCE(tag);
         mpi_status->MPI_TAG    = PML_UCX_TAG_GET_MPI_TAG(tag);
+        mpi_status->_cancelled = false;
         mpi_status->_ucount    = info->length;
     } else if (ucp_status == UCS_ERR_MESSAGE_TRUNCATED) {
         mpi_status->MPI_ERROR = MPI_ERR_TRUNCATE;

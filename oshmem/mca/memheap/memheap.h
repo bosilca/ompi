@@ -35,8 +35,7 @@ typedef struct memheap_context
 /**
  * Component initialize
  */
-typedef struct mca_memheap_base_module_t* (*mca_memheap_base_component_init_fn_t)(memheap_context_t *,
-                                                                                  int *priority);
+typedef int (*mca_memheap_base_component_init_fn_t)(memheap_context_t *);
 
 /*
  * Symmetric heap allocation. Malloc like interface
@@ -59,10 +58,6 @@ typedef int (*mca_memheap_base_module_free_fn_t)(void*);
 /**
  * Service functions
  */
-typedef uint64_t (*mca_memheap_base_module_find_offset_fn_t)(int pe,
-                                                             int tr_id,
-                                                             void* va,
-                                                             void* rva);
 
 typedef sshmem_mkey_t * (*mca_memheap_base_module_get_local_mkey_fn_t)(void* va,
                                                                          int transport_id);
@@ -109,7 +104,6 @@ struct mca_memheap_base_module_t {
     mca_memheap_base_module_free_fn_t               memheap_private_free;
 
     mca_memheap_base_module_get_local_mkey_fn_t     memheap_get_local_mkey;
-    mca_memheap_base_module_find_offset_fn_t        memheap_find_offset;
     mca_memheap_base_is_memheap_addr_fn_t           memheap_is_symmetric_addr;
     mca_memheap_base_mkey_exchange_fn_t             memheap_get_all_mkeys;
 
@@ -144,13 +138,18 @@ typedef struct mca_memheap_base_module_t mca_memheap_base_module_t;
 
 OSHMEM_DECLSPEC extern mca_memheap_base_module_t mca_memheap;
 
+static inline int mca_memheap_base_mkey_is_shm(sshmem_mkey_t *mkey)
+{
+    return (0 == mkey->len) && (MAP_SEGMENT_SHM_INVALID != (int)mkey->u.key);
+}
+
 /**
  * check if memcpy() can be used to copy data to dst_addr
  * must be memheap address and segment must be mapped
  */
 static inline int mca_memheap_base_can_local_copy(sshmem_mkey_t *mkey, void *dst_addr) {
     return mca_memheap.memheap_is_symmetric_addr(dst_addr) &&
-        (0 == mkey->len) && (MAP_SEGMENT_SHM_INVALID != (int)mkey->u.key);
+        mca_memheap_base_mkey_is_shm(mkey);
 }
 
 

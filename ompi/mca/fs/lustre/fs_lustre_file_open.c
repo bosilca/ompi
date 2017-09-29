@@ -2,7 +2,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2011 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -12,6 +12,7 @@
  * Copyright (c) 2008-2015 University of Houston. All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -59,7 +60,7 @@ int
 mca_fs_lustre_file_open (struct ompi_communicator_t *comm,
                      const char* filename,
                      int access_mode,
-                     struct ompi_info_t *info,
+                     struct opal_info_t *info,
                      mca_io_ompio_file_t *fh)
 {
     int amode;
@@ -94,12 +95,12 @@ mca_fs_lustre_file_open (struct ompi_communicator_t *comm,
         amode = amode | O_EXCL;
 
 
-    ompi_info_get (info, "stripe_size", MPI_MAX_INFO_VAL, char_stripe, &flag);
+    opal_info_get (info, "stripe_size", MPI_MAX_INFO_VAL, char_stripe, &flag);
     if ( flag ) {
         sscanf ( char_stripe, "%d", &fs_lustre_stripe_size );
     }
 
-    ompi_info_get (info, "stripe_width", MPI_MAX_INFO_VAL, char_stripe, &flag);
+    opal_info_get (info, "stripe_width", MPI_MAX_INFO_VAL, char_stripe, &flag);
     if ( flag ) {
         sscanf ( char_stripe, "%d", &fs_lustre_stripe_width );
     }
@@ -129,8 +130,8 @@ mca_fs_lustre_file_open (struct ompi_communicator_t *comm,
             }
             close (fh->fd);
         }
-        fh->f_comm->c_coll.coll_barrier (fh->f_comm,
-                                         fh->f_comm->c_coll.coll_barrier_module);
+        fh->f_comm->c_coll->coll_barrier (fh->f_comm,
+                                         fh->f_comm->c_coll->coll_barrier_module);
     }
 
     fh->fd = open (filename, amode, perm);

@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2011-2012 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2014-2015 Intel, Inc. All rights reserved
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -26,6 +26,7 @@
 #include "orte/mca/rmaps/base/base.h"
 #include "orte/mca/routed/routed.h"
 #include "orte/util/session_dir.h"
+#include "orte/util/threads.h"
 #include "orte/runtime/orte_quit.h"
 
 #include "orte/mca/state/state.h"
@@ -196,11 +197,14 @@ static int finalize(void)
 static void allocation_complete(int fd, short args, void *cbdata)
 {
     orte_state_caddy_t *state = (orte_state_caddy_t*)cbdata;
-    orte_job_t *jdata = state->jdata;
+    orte_job_t *jdata;
     orte_job_t *daemons;
     orte_topology_t *t;
     orte_node_t *node;
     int i;
+
+    ORTE_ACQUIRE_OBJECT(caddy);
+    jdata = state->jdata;
 
     jdata->state = ORTE_JOB_STATE_ALLOCATION_COMPLETE;
 
@@ -213,7 +217,6 @@ static void allocation_complete(int fd, short args, void *cbdata)
     /* mark that we are not using a VM */
     orte_set_attribute(&daemons->attributes, ORTE_JOB_NO_VM, ORTE_ATTR_GLOBAL, NULL, OPAL_BOOL);
 
-
     /* ensure that all nodes point to our topology - we
      * cannot support hetero nodes with this state machine
      */
@@ -222,7 +225,23 @@ static void allocation_complete(int fd, short args, void *cbdata)
         if (NULL == (node = (orte_node_t*)opal_pointer_array_get_item(orte_node_pool, i))) {
             continue;
         }
-        node->topology = t->topo;
+        node->topology = t;
+    }
+    if (!orte_managed_allocation) {
+        if (NULL != orte_set_slots &&
+            0 != strncmp(orte_set_slots, "none", strlen(orte_set_slots))) {
+            for (i=0; i < orte_node_pool->size; i++) {
+                if (NULL == (node = (orte_node_t*)opal_pointer_array_get_item(orte_node_pool, i))) {
+                    continue;
+                }
+                if (!ORTE_FLAG_TEST(node, ORTE_NODE_FLAG_SLOTS_GIVEN)) {
+                    OPAL_OUTPUT_VERBOSE((5, orte_plm_base_framework.framework_output,
+                                         "%s plm:base:setting slots for node %s by %s",
+                                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME), node->name, orte_set_slots));
+                    orte_plm_base_set_slots(node);
+                }
+            }
+        }
     }
 
     /* move to the map stage */
@@ -237,7 +256,10 @@ static void allocation_complete(int fd, short args, void *cbdata)
 static void map_complete(int fd, short args, void *cbdata)
 {
     orte_state_caddy_t *state = (orte_state_caddy_t*)cbdata;
-    orte_job_t *jdata = state->jdata;
+    orte_job_t *jdata;
+
+    ORTE_ACQUIRE_OBJECT(caddy);
+    jdata = state->jdata;
 
     jdata->state = ORTE_JOB_STATE_MAP_COMPLETE;
     /* move to the map stage */
@@ -250,7 +272,10 @@ static void map_complete(int fd, short args, void *cbdata)
 static void vm_ready(int fd, short args, void *cbdata)
 {
     orte_state_caddy_t *state = (orte_state_caddy_t*)cbdata;
-    orte_job_t *jdata = state->jdata;
+    orte_job_t *jdata;
+
+    ORTE_ACQUIRE_OBJECT(caddy);
+    jdata = state->jdata;
 
     /* now that the daemons are launched, we are ready
      * to roll

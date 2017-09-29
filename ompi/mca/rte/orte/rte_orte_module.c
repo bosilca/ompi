@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2012-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2013-2015 Intel, Inc. All rights reserved
+ * Copyright (c) 2013-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2012-2014 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
@@ -39,6 +39,7 @@
 #include "orte/mca/routed/routed.h"
 #include "orte/util/name_fns.h"
 #include "orte/util/session_dir.h"
+#include "orte/util/show_help.h"
 #include "orte/runtime/orte_globals.h"
 #include "orte/runtime/orte_wait.h"
 #include "orte/runtime/orte_data_server.h"
@@ -131,8 +132,10 @@ static void _register_fn(int status,
 void ompi_rte_wait_for_debugger(void)
 {
     int debugger;
-    opal_list_t *codes;
+    opal_list_t *codes, directives;
     opal_value_t *kv;
+    char *evar;
+    int time;
 
     /* See lengthy comment in orte/tools/orterun/debuggers.c about
        orte_in_parallel_debugger */
@@ -151,6 +154,12 @@ void ompi_rte_wait_for_debugger(void)
      * the correct plug-ins
      */
     ompi_debugger_setup_dlls();
+
+    if (NULL != (evar = getenv("ORTE_TEST_DEBUGGER_SLEEP"))) {
+        time = strtol(evar, NULL, 10);
+        sleep(time);
+        return;
+    }
 
     if (orte_standalone_operation) {
         /* spin until debugger attaches and releases us */
@@ -171,9 +180,17 @@ void ompi_rte_wait_for_debugger(void)
         kv->data.integer = ORTE_ERR_DEBUGGER_RELEASE;
         opal_list_append(codes, &kv->super);
 
-        opal_pmix.register_evhandler(codes, NULL, _release_fn, _register_fn, codes);
+        OBJ_CONSTRUCT(&directives, opal_list_t);
+        kv = OBJ_NEW(opal_value_t);
+        kv->key = strdup(OPAL_PMIX_EVENT_HDLR_NAME);
+        kv->type = OPAL_STRING;
+        kv->data.string = strdup("MPI-DEBUGGER-ATTACH");
+        opal_list_append(&directives, &kv->super);
+
+        opal_pmix.register_evhandler(codes, &directives, _release_fn, _register_fn, codes);
         /* let the MPI progress engine run while we wait for registration to complete */
         OMPI_WAIT_FOR_COMPLETION(debugger_register_active);
+        OPAL_LIST_DESTRUCT(&directives);
 
         /* let the MPI progress engine run while we wait for debugger release */
         OMPI_WAIT_FOR_COMPLETION(debugger_event_active);
@@ -181,4 +198,48 @@ void ompi_rte_wait_for_debugger(void)
         /* deregister the event handler */
         opal_pmix.deregister_evhandler(handler, NULL, NULL);
     }
+}
+
+bool ompi_rte_connect_accept_support(const char *port)
+{
+    char *ptr, *tmp;
+    orte_process_name_t name;
+
+    /* were we launched by mpirun, or are we calling
+     * without a defined port? */
+    if (NULL == orte_process_info.my_hnp_uri ||
+        NULL == port || 0 == strlen(port)) {
+        return true;
+    }
+
+    /* is the job family in the port different than my own? */
+    tmp = strdup(port);  // protect input
+    if (NULL == (ptr = strchr(tmp, ':'))) {
+        /* this port didn't come from us! */
+        orte_show_help("help-orterun.txt", "orterun:malformedport", true);
+        free(tmp);
+        return false;
+    }
+    *ptr = '\0';
+    if (ORTE_SUCCESS != orte_util_convert_string_to_process_name(&name, tmp)) {
+        free(tmp);
+        orte_show_help("help-orterun.txt", "orterun:malformedport", true);
+        return false;
+    }
+    free(tmp);
+    if (ORTE_JOB_FAMILY(ORTE_PROC_MY_NAME->jobid) == ORTE_JOB_FAMILY(name.jobid)) {
+        /* same job family, so our infrastructure is adequate */
+        return true;
+    }
+
+    /* if the job family of the port is different than our own
+     * and we were launched by mpirun, then we require ompi-server
+     * support */
+    if (NULL == orte_data_server_uri) {
+        /* print a pretty help message */
+        orte_show_help("help-orterun.txt", "orterun:server-unavailable", true);
+        return false;
+    }
+
+    return true;
 }

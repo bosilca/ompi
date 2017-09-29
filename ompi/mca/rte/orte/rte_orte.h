@@ -1,11 +1,12 @@
 /*
  * Copyright (c) 2012-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2013-2015 Intel, Inc. All rights reserved
+ * Copyright (c) 2013-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2014      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2014-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015      Intel, Inc. All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -37,7 +38,6 @@ struct opal_proc_t;
 #include "orte/util/name_fns.h"
 #include "orte/util/proc_info.h"
 
-#include "ompi/info/info.h"
 struct ompi_proc_t;
 struct ompi_communicator_t;
 
@@ -115,6 +115,9 @@ static inline orte_process_name_t * OMPI_CAST_RTE_NAME(opal_process_name_t * nam
     return (orte_process_name_t *)name;
 }
 #endif
+
+/* check dynamics support */
+OMPI_DECLSPEC bool ompi_rte_connect_accept_support(const char *port);
 
 END_C_DECLS
 

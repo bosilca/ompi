@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2011 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2008 High Performance Computing Center Stuttgart,
@@ -20,6 +20,8 @@
  * Copyright (c) 2013-2016 Intel, Inc.  All rights reserved.
  * Copyright (c) 2014-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016      IBM Corporation.  All rights reserved.
+ * Copyright (c) 2017      Mellanox Technologies. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -210,6 +212,7 @@ static ompi_comm_cid_context_t *mca_comm_cid_context_alloc (ompi_communicator_t 
 
     context->send_first = send_first;
     context->iter = 0;
+    context->ok = 1;
 
     return context;
 }
@@ -301,6 +304,7 @@ static int ompi_comm_allreduce_getnextcid (ompi_comm_request_t *request)
     ompi_request_t *subreq;
     bool flag;
     int ret;
+    int participate = (context->newcomm->c_local_group->grp_my_rank != MPI_UNDEFINED);
 
     if (OPAL_THREAD_TRYLOCK(&ompi_cid_lock)) {
         return ompi_comm_request_schedule_append (request, ompi_comm_allreduce_getnextcid, NULL, 0);
@@ -316,39 +320,47 @@ static int ompi_comm_allreduce_getnextcid (ompi_comm_request_t *request)
     /**
      * This is the real algorithm described in the doc
      */
-    flag = false;
-    context->nextlocal_cid = mca_pml.pml_max_contextid;
-    for (unsigned int i = context->start ; i < mca_pml.pml_max_contextid ; ++i) {
-        flag = opal_pointer_array_test_and_set_item (&ompi_mpi_communicators, i,
-                                                     context->comm);
-        if (true == flag) {
-            context->nextlocal_cid = i;
-            break;
+    if( participate ){
+        flag = false;
+        context->nextlocal_cid = mca_pml.pml_max_contextid;
+        for (unsigned int i = context->start ; i < mca_pml.pml_max_contextid ; ++i) {
+            flag = opal_pointer_array_test_and_set_item (&ompi_mpi_communicators, i,
+                                                         context->comm);
+            if (true == flag) {
+                context->nextlocal_cid = i;
+                break;
+            }
         }
+    } else {
+        context->nextlocal_cid = 0;
     }
 
     ret = context->allreduce_fn (&context->nextlocal_cid, &context->nextcid, 1, MPI_MAX,
                                  context, &subreq);
+    /* there was a failure during non-blocking collective
+     * all we can do is abort
+     */
     if (OMPI_SUCCESS != ret) {
-        ompi_comm_cid_lowest_id = INT64_MAX;
-        OPAL_THREAD_UNLOCK(&ompi_cid_lock);
-        return ret;
+        goto err_exit;
     }
 
-    if ((unsigned int) context->nextlocal_cid == mca_pml.pml_max_contextid) {
-        /* at least one peer ran out of CIDs */
-        if (flag) {
-            opal_pointer_array_test_and_set_item(&ompi_mpi_communicators, context->nextlocal_cid, NULL);
-        }
-
-        ompi_comm_cid_lowest_id = INT64_MAX;
-        OPAL_THREAD_UNLOCK(&ompi_cid_lock);
-        return OMPI_ERR_OUT_OF_RESOURCE;
+    if ( ((unsigned int) context->nextlocal_cid == mca_pml.pml_max_contextid) ) {
+        /* Our local CID space is out, others already aware (allreduce above) */
+        ret = OMPI_ERR_OUT_OF_RESOURCE;
+        goto err_exit;
     }
     OPAL_THREAD_UNLOCK(&ompi_cid_lock);
 
     /* next we want to verify that the resulting commid is ok */
     return ompi_comm_request_schedule_append (request, ompi_comm_checkcid, &subreq, 1);
+err_exit:
+    if (participate && flag) {
+        opal_pointer_array_test_and_set_item(&ompi_mpi_communicators, context->nextlocal_cid, NULL);
+    }
+    ompi_comm_cid_lowest_id = INT64_MAX;
+    OPAL_THREAD_UNLOCK(&ompi_cid_lock);
+    return ret;
+
 }
 
 static int ompi_comm_checkcid (ompi_comm_request_t *request)
@@ -356,18 +368,22 @@ static int ompi_comm_checkcid (ompi_comm_request_t *request)
     ompi_comm_cid_context_t *context = (ompi_comm_cid_context_t *) request->context;
     ompi_request_t *subreq;
     int ret;
+    int participate = (context->newcomm->c_local_group->grp_my_rank != MPI_UNDEFINED);
 
     if (OPAL_THREAD_TRYLOCK(&ompi_cid_lock)) {
         return ompi_comm_request_schedule_append (request, ompi_comm_checkcid, NULL, 0);
     }
 
-    context->flag = (context->nextcid == context->nextlocal_cid);
+    if( !participate ){
+        context->flag = 1;
+    } else {
+        context->flag = (context->nextcid == context->nextlocal_cid);
+        if ( participate && !context->flag) {
+            opal_pointer_array_set_item(&ompi_mpi_communicators, context->nextlocal_cid, NULL);
 
-    if (!context->flag) {
-        opal_pointer_array_set_item(&ompi_mpi_communicators, context->nextlocal_cid, NULL);
-
-        context->flag = opal_pointer_array_test_and_set_item (&ompi_mpi_communicators,
-                                                              context->nextcid, context->comm);
+            context->flag = opal_pointer_array_test_and_set_item (&ompi_mpi_communicators,
+                                                                  context->nextcid, context->comm);
+        }
     }
 
     ++context->iter;
@@ -375,22 +391,45 @@ static int ompi_comm_checkcid (ompi_comm_request_t *request)
     ret = context->allreduce_fn (&context->flag, &context->rflag, 1, MPI_MIN, context, &subreq);
     if (OMPI_SUCCESS == ret) {
         ompi_comm_request_schedule_append (request, ompi_comm_nextcid_check_flag, &subreq, 1);
+    } else {
+        if (participate && context->flag ) {
+            opal_pointer_array_test_and_set_item(&ompi_mpi_communicators, context->nextlocal_cid, NULL);
+        }
+        ompi_comm_cid_lowest_id = INT64_MAX;
     }
 
     OPAL_THREAD_UNLOCK(&ompi_cid_lock);
-
     return ret;
 }
 
 static int ompi_comm_nextcid_check_flag (ompi_comm_request_t *request)
 {
     ompi_comm_cid_context_t *context = (ompi_comm_cid_context_t *) request->context;
+    int participate = (context->newcomm->c_local_group->grp_my_rank != MPI_UNDEFINED);
 
     if (OPAL_THREAD_TRYLOCK(&ompi_cid_lock)) {
         return ompi_comm_request_schedule_append (request, ompi_comm_nextcid_check_flag, NULL, 0);
     }
 
     if (1 == context->rflag) {
+        if( !participate ) {
+            /* we need to provide something sane here
+             * but we cannot use `nextcid` as we may have it
+             * in-use, go ahead with next locally-available CID
+             */
+            context->nextlocal_cid = mca_pml.pml_max_contextid;
+            for (unsigned int i = context->start ; i < mca_pml.pml_max_contextid ; ++i) {
+                bool flag;
+                flag = opal_pointer_array_test_and_set_item (&ompi_mpi_communicators, i,
+                                                                context->comm);
+                if (true == flag) {
+                    context->nextlocal_cid = i;
+                    break;
+                }
+            }
+            context->nextcid = context->nextlocal_cid;
+        }
+
         /* set the according values to the newcomm */
         context->newcomm->c_contextid = context->nextcid;
         opal_pointer_array_set_item (&ompi_mpi_communicators, context->nextcid, context->newcomm);
@@ -403,7 +442,7 @@ static int ompi_comm_nextcid_check_flag (ompi_comm_request_t *request)
         return OMPI_SUCCESS;
     }
 
-    if (1 == context->flag) {
+    if (participate && (1 == context->flag)) {
         /* we could use this cid, but other don't agree */
         opal_pointer_array_set_item (&ompi_mpi_communicators, context->nextcid, NULL);
         context->start = context->nextcid + 1; /* that's where we can start the next round */
@@ -589,8 +628,8 @@ static int ompi_comm_allreduce_intra_nb (int *inbuf, int *outbuf, int count, str
 {
     ompi_communicator_t *comm = context->comm;
 
-    return comm->c_coll.coll_iallreduce (inbuf, outbuf, count, MPI_INT, op, comm,
-                                         req, comm->c_coll.coll_iallreduce_module);
+    return comm->c_coll->coll_iallreduce (inbuf, outbuf, count, MPI_INT, op, comm,
+                                         req, comm->c_coll->coll_iallreduce_module);
 }
 
 /* Non-blocking version of ompi_comm_allreduce_inter */
@@ -639,9 +678,9 @@ static int ompi_comm_allreduce_inter_nb (int *inbuf, int *outbuf,
 
     /* Execute the inter-allreduce: the result from the local will be in the buffer of the remote group
      * and vise-versa. */
-    rc = intercomm->c_local_comm->c_coll.coll_ireduce (inbuf, context->tmpbuf, count, MPI_INT, op, 0,
+    rc = intercomm->c_local_comm->c_coll->coll_ireduce (inbuf, context->tmpbuf, count, MPI_INT, op, 0,
                                                        intercomm->c_local_comm, &subreq,
-                                                       intercomm->c_local_comm->c_coll.coll_ireduce_module);
+                                                       intercomm->c_local_comm->c_coll->coll_ireduce_module);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
         ompi_comm_request_return (request);
         return rc;
@@ -702,8 +741,8 @@ static int ompi_comm_allreduce_inter_bcast (ompi_comm_request_t *request)
     int rc;
 
     /* both roots have the same result. broadcast to the local group */
-    rc = comm->c_coll.coll_ibcast (context->outbuf, context->count, MPI_INT, 0, comm,
-                                   &subreq, comm->c_coll.coll_ibcast_module);
+    rc = comm->c_coll->coll_ibcast (context->outbuf, context->count, MPI_INT, 0, comm,
+                                   &subreq, comm->c_coll->coll_ibcast_module);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
         return rc;
     }
@@ -718,9 +757,9 @@ static int ompi_comm_allreduce_bridged_schedule_bcast (ompi_comm_request_t *requ
     ompi_request_t *subreq;
     int rc;
 
-    rc = comm->c_coll.coll_ibcast (context->outbuf, context->count, MPI_INT,
+    rc = comm->c_coll->coll_ibcast (context->outbuf, context->count, MPI_INT,
                                    context->cid_context->local_leader, comm,
-                                   &subreq, comm->c_coll.coll_ibcast_module);
+                                   &subreq, comm->c_coll->coll_ibcast_module);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
         return rc;
     }
@@ -801,9 +840,9 @@ static int ompi_comm_allreduce_intra_bridge_nb (int *inbuf, int *outbuf,
     }
 
     /* step 1: reduce to the local leader */
-    rc = comm->c_coll.coll_ireduce (inbuf, context->tmpbuf, count, MPI_INT, op,
+    rc = comm->c_coll->coll_ireduce (inbuf, context->tmpbuf, count, MPI_INT, op,
                                     cid_context->local_leader, comm, &subreq,
-                                    comm->c_coll.coll_ireduce_module);
+                                    comm->c_coll->coll_ireduce_module);
     if ( OMPI_SUCCESS != rc ) {
         ompi_comm_request_return (request);
         return rc;
@@ -840,12 +879,15 @@ static int ompi_comm_allreduce_pmix_reduce_complete (ompi_comm_request_t *reques
     opal_pmix_pdata_t pdat;
     opal_buffer_t sbuf;
     int rc;
+    int bytes_written;
+    const int output_id = 0;
+    const int verbosity_level = 1;
 
     OBJ_CONSTRUCT(&sbuf, opal_buffer_t);
 
     if (OPAL_SUCCESS != (rc = opal_dss.pack(&sbuf, context->tmpbuf, (int32_t)context->count, OPAL_INT))) {
         OBJ_DESTRUCT(&sbuf);
-        fprintf (stderr, "pack failed. rc  %d\n", rc);
+        opal_output_verbose (verbosity_level, output_id, "pack failed. rc  %d\n", rc);
         return rc;
     }
 
@@ -858,16 +900,36 @@ static int ompi_comm_allreduce_pmix_reduce_complete (ompi_comm_request_t *reques
     opal_dss.unload(&sbuf, (void**)&info.data.bo.bytes, &info.data.bo.size);
     OBJ_DESTRUCT(&sbuf);
 
-    if (cid_context->send_first) {
-        (void)asprintf(&info.key, "%s:%s:send:%d", cid_context->port_string, cid_context->pmix_tag,
-                       cid_context->iter);
-        (void)asprintf(&pdat.value.key, "%s:%s:recv:%d", cid_context->port_string, cid_context->pmix_tag,
-                       cid_context->iter);
+    bytes_written = asprintf(&info.key,
+                             cid_context->send_first ? "%s:%s:send:%d"
+                                                     : "%s:%s:recv:%d",
+                             cid_context->port_string,
+                             cid_context->pmix_tag,
+                             cid_context->iter);
+
+    if (bytes_written == -1) {
+        opal_output_verbose (verbosity_level, output_id, "writing info.key failed\n");
     } else {
-        (void)asprintf(&info.key, "%s:%s:recv:%d", cid_context->port_string, cid_context->pmix_tag,
-                       cid_context->iter);
-        (void)asprintf(&pdat.value.key, "%s:%s:send:%d", cid_context->port_string, cid_context->pmix_tag,
-                       cid_context->iter);
+        bytes_written = asprintf(&pdat.value.key,
+                                 cid_context->send_first ? "%s:%s:recv:%d"
+                                                         : "%s:%s:send:%d",
+                                 cid_context->port_string,
+                                 cid_context->pmix_tag,
+                                 cid_context->iter);
+
+        if (bytes_written == -1) {
+            opal_output_verbose (verbosity_level, output_id, "writing pdat.value.key failed\n");
+        }
+    }
+
+    if (bytes_written == -1) {
+        // write with separate calls,
+        // just in case the args are the cause of failure
+        opal_output_verbose (verbosity_level, output_id, "send first: %d\n", cid_context->send_first);
+        opal_output_verbose (verbosity_level, output_id, "port string: %s\n", cid_context->port_string);
+        opal_output_verbose (verbosity_level, output_id, "pmix tag: %s\n", cid_context->pmix_tag);
+        opal_output_verbose (verbosity_level, output_id, "iter: %d\n", cid_context->iter);
+        return OMPI_ERR_OUT_OF_RESOURCE;
     }
 
     /* this macro is not actually non-blocking. if a non-blocking version becomes available this function
@@ -930,9 +992,9 @@ static int ompi_comm_allreduce_intra_pmix_nb (int *inbuf, int *outbuf,
     request->context = &context->super;
 
     /* comm is an intra-communicator */
-    rc = comm->c_coll.coll_ireduce (inbuf, context->tmpbuf, count, MPI_INT, op,
+    rc = comm->c_coll->coll_ireduce (inbuf, context->tmpbuf, count, MPI_INT, op,
                                     cid_context->local_leader, comm,
-                                    &subreq, comm->c_coll.coll_ireduce_module);
+                                    &subreq, comm->c_coll->coll_ireduce_module);
     if ( OMPI_SUCCESS != rc ) {
         ompi_comm_request_return (request);
         return rc;

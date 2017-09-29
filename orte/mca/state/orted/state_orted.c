@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2011-2012 Los Alamos National Security, LLC.
+ * Copyright (c) 2011-2017 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2014-2016 Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -19,12 +19,17 @@
 
 #include "opal/util/output.h"
 #include "opal/dss/dss.h"
+#include "opal/mca/pmix/pmix.h"
 
 #include "orte/mca/errmgr/errmgr.h"
-#include "orte/mca/iof/iof.h"
+#include "orte/mca/iof/base/base.h"
+#include "orte/mca/rmaps/rmaps_types.h"
 #include "orte/mca/rml/rml.h"
 #include "orte/mca/routed/routed.h"
 #include "orte/util/session_dir.h"
+#include "orte/util/threads.h"
+#include "orte/orted/pmix/pmix_server_internal.h"
+#include "orte/runtime/orte_data_server.h"
 #include "orte/runtime/orte_quit.h"
 
 #include "orte/mca/state/state.h"
@@ -161,6 +166,8 @@ static void track_jobs(int fd, short argc, void *cbdata)
     orte_proc_t *child;
     orte_vpid_t null=ORTE_VPID_INVALID;
 
+    ORTE_ACQUIRE_OBJECT(caddy);
+
     if (ORTE_JOB_STATE_LOCAL_LAUNCH_COMPLETE == caddy->job_state) {
         OPAL_OUTPUT_VERBOSE((5, orte_state_base_framework.framework_output,
                             "%s state:orted:track_jobs sending local launch complete for job %s",
@@ -231,7 +238,8 @@ static void track_jobs(int fd, short argc, void *cbdata)
         }
 
         /* send it */
-        if (0 > (rc = orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, alert,
+        if (0 > (rc = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                              ORTE_PROC_MY_HNP, alert,
                                               ORTE_RML_TAG_PLM,
                                               orte_rml_send_callback, NULL))) {
             ORTE_ERROR_LOG(rc);
@@ -246,13 +254,22 @@ static void track_jobs(int fd, short argc, void *cbdata)
 static void track_procs(int fd, short argc, void *cbdata)
 {
     orte_state_caddy_t *caddy = (orte_state_caddy_t*)cbdata;
-    orte_process_name_t *proc = &caddy->name;
-    orte_proc_state_t state = caddy->proc_state;
+    orte_process_name_t *proc;
+    orte_proc_state_t state;
     orte_job_t *jdata;
     orte_proc_t *pdata, *pptr;
     opal_buffer_t *alert;
     int rc, i;
     orte_plm_cmd_flag_t cmd;
+    char *rtmod;
+    orte_std_cntr_t index;
+    orte_job_map_t *map;
+    orte_node_t *node;
+    orte_process_name_t target;
+
+    ORTE_ACQUIRE_OBJECT(caddy);
+    proc = &caddy->name;
+    state = caddy->proc_state;
 
     OPAL_OUTPUT_VERBOSE((5, orte_state_base_framework.framework_output,
                          "%s state:orted:track_procs called for proc %s state %s",
@@ -308,7 +325,8 @@ static void track_procs(int fd, short argc, void *cbdata)
                 }
             }
             /* send it */
-            if (0 > (rc = orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, alert,
+            if (0 > (rc = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                                  ORTE_PROC_MY_HNP, alert,
                                                   ORTE_RML_TAG_PLM,
                                                   orte_rml_send_callback, NULL))) {
                 ORTE_ERROR_LOG(rc);
@@ -330,7 +348,7 @@ static void track_procs(int fd, short argc, void *cbdata)
          * to check to see if all procs from the job are actually terminated
          */
         if (NULL != orte_iof.close) {
-            orte_iof.close(proc, ORTE_IOF_STDIN);
+            orte_iof.close(proc, ORTE_IOF_STDALL);
         }
         if (ORTE_FLAG_TEST(pdata, ORTE_PROC_FLAG_WAITPID) &&
             !ORTE_FLAG_TEST(pdata, ORTE_PROC_FLAG_RECORDED)) {
@@ -365,8 +383,9 @@ static void track_procs(int fd, short argc, void *cbdata)
          * gone, then terminate ourselves IF no local procs
          * remain (might be some from another job)
          */
+        rtmod = orte_rml.get_routed(orte_mgmt_conduit);
         if (orte_orteds_term_ordered &&
-            0 == orte_routed.num_routes()) {
+            0 == orte_routed.num_routes(rtmod)) {
             for (i=0; i < orte_local_children->size; i++) {
                 if (NULL != (pdata = (orte_proc_t*)opal_pointer_array_get_item(orte_local_children, i)) &&
                     ORTE_FLAG_TEST(pdata, ORTE_PROC_FLAG_ALIVE)) {
@@ -404,17 +423,97 @@ static void track_procs(int fd, short argc, void *cbdata)
                                  "%s state:orted: SENDING JOB LOCAL TERMINATION UPDATE FOR JOB %s",
                                  ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
                                  ORTE_JOBID_PRINT(jdata->jobid)));
-            if (0 > (rc = orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, alert,
+            if (0 > (rc = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                                  ORTE_PROC_MY_HNP, alert,
                                                   ORTE_RML_TAG_PLM,
                                                   orte_rml_send_callback, NULL))) {
                 ORTE_ERROR_LOG(rc);
             }
             /* mark that we sent it so we ensure we don't do it again */
             orte_set_attribute(&jdata->attributes, ORTE_JOB_TERM_NOTIFIED, ORTE_ATTR_LOCAL, NULL, OPAL_BOOL);
+            /* cleanup the procs as these are gone */
+            for (i=0; i < orte_local_children->size; i++) {
+                if (NULL == (pptr = (orte_proc_t*)opal_pointer_array_get_item(orte_local_children, i))) {
+                    continue;
+                }
+                /* if this child is part of the job... */
+                if (pptr->name.jobid == jdata->jobid) {
+                    /* clear the entry in the local children */
+                    opal_pointer_array_set_item(orte_local_children, i, NULL);
+                    OBJ_RELEASE(pptr);  // maintain accounting
+                }
+            }
+            /* tell the IOF that the job is complete */
+            if (NULL != orte_iof.complete) {
+                orte_iof.complete(jdata);
+            }
+
+            /* tell the PMIx subsystem the job is complete */
+            if (NULL != opal_pmix.server_deregister_nspace) {
+                opal_pmix.server_deregister_nspace(jdata->jobid, NULL, NULL);
+            }
+
+            /* release the resources */
+            if (NULL != jdata->map) {
+                map = jdata->map;
+                for (index = 0; index < map->nodes->size; index++) {
+                    if (NULL == (node = (orte_node_t*)opal_pointer_array_get_item(map->nodes, index))) {
+                        continue;
+                    }
+                    OPAL_OUTPUT_VERBOSE((2, orte_state_base_framework.framework_output,
+                                         "%s state:orted releasing procs from node %s",
+                                         ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
+                                         node->name));
+                    for (i = 0; i < node->procs->size; i++) {
+                        if (NULL == (pptr = (orte_proc_t*)opal_pointer_array_get_item(node->procs, i))) {
+                            continue;
+                        }
+                        if (pptr->name.jobid != jdata->jobid) {
+                            /* skip procs from another job */
+                            continue;
+                        }
+                        node->slots_inuse--;
+                        node->num_procs--;
+                        OPAL_OUTPUT_VERBOSE((2, orte_state_base_framework.framework_output,
+                                             "%s state:orted releasing proc %s from node %s",
+                                             ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
+                                             ORTE_NAME_PRINT(&pptr->name), node->name));
+                        /* set the entry in the node array to NULL */
+                        opal_pointer_array_set_item(node->procs, i, NULL);
+                        /* release the proc once for the map entry */
+                        OBJ_RELEASE(pptr);
+                    }
+                    /* set the node location to NULL */
+                    opal_pointer_array_set_item(map->nodes, index, NULL);
+                    /* maintain accounting */
+                    OBJ_RELEASE(node);
+                    /* flag that the node is no longer in a map */
+                    ORTE_FLAG_UNSET(node, ORTE_NODE_FLAG_MAPPED);
+                }
+                OBJ_RELEASE(map);
+                jdata->map = NULL;
+            }
+
+            /* if requested, check fd status for leaks */
+            if (orte_state_base_run_fdcheck) {
+                orte_state_base_check_fds(jdata);
+            }
+
+            /* if ompi-server is around, then notify it to purge
+             * any session-related info */
+            if (NULL != orte_data_server_uri) {
+                target.jobid = jdata->jobid;
+                target.vpid = ORTE_VPID_WILDCARD;
+                orte_state_base_notify_data_server(&target);
+            }
+
+            /* cleanup the job info */
+            opal_hash_table_set_value_uint32(orte_job_data, jdata->jobid, NULL);
+            OBJ_RELEASE(jdata);
         }
     }
 
- cleanup:
+  cleanup:
     OBJ_RELEASE(caddy);
 }
 

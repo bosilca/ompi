@@ -12,6 +12,8 @@
  * Copyright (c) 2008-2011 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2012-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
+ * Copyright (c) 2016-2017 Intel, Inc. All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -82,7 +84,7 @@ typedef struct {
 
 static void tuple_list_item_constructor(tuple_list_item_t *obj);
 static void tuple_list_item_destructor(tuple_list_item_t *obj);
-OBJ_CLASS_INSTANCE(tuple_list_item_t, opal_list_item_t,
+static OBJ_CLASS_INSTANCE(tuple_list_item_t, opal_list_item_t,
                    tuple_list_item_constructor,
                    tuple_list_item_destructor);
 
@@ -691,13 +693,13 @@ int orte_show_help_norender(const char *filename, const char *topic,
         /* if we are a daemon, then send it via RML to the HNP */
         if (ORTE_PROC_IS_DAEMON) {
             /* send it to the HNP */
-            if (ORTE_SUCCESS != (rc = orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, buf,
+            if (ORTE_SUCCESS != (rc = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                                              ORTE_PROC_MY_HNP, buf,
                                                               ORTE_RML_TAG_SHOW_HELP,
                                                               orte_rml_send_callback, NULL))) {
-                ORTE_ERROR_LOG(rc);
                 OBJ_RELEASE(buf);
-                /* okay, that didn't work, just process locally error, just ignore return  */
-                show_help(filename, topic, NULL, ORTE_PROC_MY_NAME);
+                /* okay, that didn't work, output locally  */
+                opal_output(orte_help_output, "%s", output);
             } else {
                 rc = ORTE_SUCCESS;
             }
@@ -707,7 +709,7 @@ int orte_show_help_norender(const char *filename, const char *topic,
             if (NULL != opal_pmix.log) {
                 OBJ_CONSTRUCT(&info, opal_list_t);
                 kv = OBJ_NEW(opal_value_t),
-                kv->key = strdup(OPAL_PMIX_LOG_STDERR);
+                kv->key = strdup(OPAL_PMIX_LOG_MSG);
                 kv->type = OPAL_BYTE_OBJECT;
                 opal_dss.unload(buf, (void**)&kv->data.bo.bytes, &kv->data.bo.size);
                 opal_list_append(&info, &kv->super);
@@ -784,7 +786,8 @@ int orte_show_help_suppress(const char *filename, const char *topic)
             /* pack the flag that we DO NOT have a string */
             opal_dss.pack(buf, &have_output, 1, OPAL_INT8);
             /* send it to the HNP */
-            if (ORTE_SUCCESS != (rc = orte_rml.send_buffer_nb(ORTE_PROC_MY_HNP, buf,
+            if (ORTE_SUCCESS != (rc = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                                              ORTE_PROC_MY_HNP, buf,
                                                               ORTE_RML_TAG_SHOW_HELP,
                                                               orte_rml_send_callback, NULL))) {
                 ORTE_ERROR_LOG(rc);

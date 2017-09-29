@@ -1,9 +1,11 @@
 /* -*- Mode: C; c-basic-offset:4 ; indent-tabs-mode:nil -*- */
 /*
- * Copyright (c) 2014-2016 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2014-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2017      Los Alamos National Security, LLC. All
+ *                         rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -31,7 +33,7 @@
 #include "opal/mca/pmix/base/pmix_base_hash.h"
 #include "pmix_s1.h"
 
-static int s1_init(void);
+static int s1_init(opal_list_t *ilist);
 static int s1_fini(void);
 static int s1_initialized(void);
 static int s1_abort(int flag, const char msg[],
@@ -141,7 +143,7 @@ static int kvs_put(const char key[], const char value[])
     return rc;
 }
 
-static int s1_init(void)
+static int s1_init(opal_list_t *ilist)
 {
     PMI_BOOL initialized;
     int spawned;
@@ -154,6 +156,11 @@ static int s1_init(void)
     opal_process_name_t ldr;
     char **localranks=NULL;
     opal_process_name_t wildcard_rank;
+
+    if (0 < pmix_init_count) {
+        ++pmix_init_count;
+        return OPAL_SUCCESS;
+    }
 
     if (PMI_SUCCESS != (rc = PMI_Initialized(&initialized))) {
         OPAL_PMI_ERROR(rc, "PMI_Initialized");
@@ -332,7 +339,7 @@ static int s1_init(void)
     kv.key = strdup(OPAL_PMIX_LOCALLDR);
     kv.type = OPAL_UINT64;
     kv.data.uint64 = *(uint64_t*)&ldr;
-    if (OPAL_SUCCESS != (ret = opal_pmix_base_store(&OPAL_PROC_MY_NAME, &kv))) {
+    if (OPAL_SUCCESS != (ret = opal_pmix_base_store(&wildcard_rank, &kv))) {
         OPAL_ERROR_LOG(ret);
         OBJ_DESTRUCT(&kv);
         goto err_exit;
@@ -442,10 +449,9 @@ static int s1_fini(void) {
 
     if (0 == --pmix_init_count) {
         PMI_Finalize ();
+        // teardown hash table
+        opal_pmix_base_hash_finalize();
     }
-
-    // teardown hash table
-    opal_pmix_base_hash_finalize();
 
     return OPAL_SUCCESS;
 }

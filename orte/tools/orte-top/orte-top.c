@@ -13,7 +13,7 @@
  * Copyright (c) 2007-2012 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2007-2016 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2015      Intel, Inc. All rights reserved.
+ * Copyright (c) 2015-2017 Intel, Inc. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -45,10 +45,12 @@
 #include "opal/util/opal_environ.h"
 #include "opal/dss/dss.h"
 #include "opal/mca/base/base.h"
+#include "opal/mca/pmix/pmix.h"
 #include "opal/runtime/opal.h"
 #include "opal/mca/event/event.h"
 
 #include "orte/mca/errmgr/errmgr.h"
+#include "orte/mca/iof/base/base.h"
 #include "orte/mca/rml/rml.h"
 #include "orte/mca/odls/odls_types.h"
 #include "orte/mca/routed/routed.h"
@@ -57,6 +59,7 @@
 #include "orte/util/name_fns.h"
 #include "orte/util/show_help.h"
 #include "orte/util/proc_info.h"
+#include "orte/util/threads.h"
 #include "orte/runtime/orte_wait.h"
 #include "orte/mca/rml/base/rml_contact.h"
 #include "orte/runtime/orte_quit.h"
@@ -184,9 +187,10 @@ static void send_cmd(int fd, short dummy, void *arg)
     num_recvd = 0;
     buf = OBJ_NEW(opal_buffer_t);
     opal_dss.copy_payload(buf, &cmdbuf);
-    if (0 > (ret = orte_rml.send_buffer_nb(&(target_hnp->name), buf,
-                                           ORTE_RML_TAG_DAEMON,
-                                           orte_rml_send_callback, NULL))) {
+    if (0 > (ret = orte_rml.send_buffer_nb(orte_mgmt_conduit,
+                                                   &(target_hnp->name), buf,
+                                                   ORTE_RML_TAG_DAEMON,
+                                                   orte_rml_send_callback, NULL))) {
         ORTE_ERROR_LOG(ret);
         OBJ_RELEASE(buf);
         orte_quit(0,0,NULL);
@@ -207,6 +211,8 @@ main(int argc, char *argv[])
     int i;
     orte_vpid_t vstart, vend;
     int vint;
+    char *rtmod;
+    opal_value_t val;
 
     /***************
      * Initialize
@@ -272,6 +278,9 @@ main(int argc, char *argv[])
         orte_finalize();
         return 1;
     }
+
+    /* get our routed module */
+    rtmod = orte_rml.get_routed(orte_mgmt_conduit);
 
    /* setup the list for recvd stats */
     OBJ_CONSTRUCT(&recvd_stats, opal_list_t);
@@ -414,16 +423,32 @@ main(int argc, char *argv[])
             target_hnp = OBJ_NEW(orte_hnp_contact_t);
             target_hnp->rml_uri = strdup(hnpuristr);
         }
-        /* set the info in our contact table */
-        orte_rml.set_contact_info(target_hnp->rml_uri);
         /* extract the name */
         if (ORTE_SUCCESS != orte_rml_base_parse_uris(target_hnp->rml_uri, &target_hnp->name, NULL)) {
             orte_show_help("help-orte-top.txt", "orte-top:hnp-uri-bad", true, target_hnp->rml_uri);
             orte_finalize();
             exit(1);
         }
+        /* set the info in our contact table */
+        OBJ_CONSTRUCT(&val, opal_value_t);
+        val.key = OPAL_PMIX_PROC_URI;
+        val.type = OPAL_STRING;
+        val.data.string = target_hnp->rml_uri;
+        if (OPAL_SUCCESS != (ret = opal_pmix.store_local(&target_hnp->name, &val))) {
+            ORTE_ERROR_LOG(ret);
+            val.key = NULL;
+            val.data.string = NULL;
+            OBJ_DESTRUCT(&val);
+            orte_show_help("help-orte-top.txt", "orte-top:hnp-uri-bad", true, target_hnp->rml_uri);
+            orte_finalize();
+            exit(1);
+        }
+        val.key = NULL;
+        val.data.string = NULL;
+        OBJ_DESTRUCT(&val);
+
         /* set the route to be direct */
-        if (ORTE_SUCCESS != orte_routed.update_route(&target_hnp->name, &target_hnp->name)) {
+        if (ORTE_SUCCESS != orte_routed.update_route(rtmod, &target_hnp->name, &target_hnp->name)) {
             orte_show_help("help-orte-top.txt", "orte-top:hnp-uri-bad", true, target_hnp->rml_uri);
             orte_finalize();
             exit(1);
@@ -435,7 +460,7 @@ main(int argc, char *argv[])
     }
 
     /* set the target hnp as our lifeline so we will terminate if it exits */
-    orte_routed.set_lifeline(&target_hnp->name);
+    orte_routed.set_lifeline(rtmod, &target_hnp->name);
 
     /* if an output file was specified, open it */
     if (NULL != logfile) {
@@ -526,6 +551,7 @@ SEND:
     while (orte_event_base_active) {
         opal_event_loop(orte_event_base, OPAL_EVLOOP_ONCE);
     }
+    ORTE_ACQUIRE_OBJECT(orte_event_base_active);
 
     /***************
      * Cleanup

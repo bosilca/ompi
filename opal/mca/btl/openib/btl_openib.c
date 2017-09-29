@@ -10,7 +10,7 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2007-2013 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2007-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2006-2015 Mellanox Technologies. All rights reserved.
  * Copyright (c) 2006-2016 Los Alamos National Security, LLC.  All rights
  *                         reserved.
@@ -84,7 +84,7 @@
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
-#include "opal/mca/hwloc/hwloc.h"
+#include "opal/mca/hwloc/hwloc-internal.h"
 
 #ifndef MIN
 #define MIN(a,b) ((a)<(b)?(a):(b))
@@ -226,7 +226,7 @@ static int adjust_cq(mca_btl_openib_device_t *device, const int cq)
         rc = ibv_resize_cq(device->ib_cq[cq], cq_size);
         /* For ConnectX the resize CQ is not implemented and verbs returns -ENOSYS
          * but should return ENOSYS. So it is reason for abs */
-        if(rc && ENOSYS != abs(rc)) {
+        if(rc && ENOSYS != abs(rc) && EOPNOTSUPP != abs(rc)) {
             BTL_ERROR(("cannot resize completion queue, error: %d", rc));
             return OPAL_ERROR;
         }
@@ -1850,23 +1850,13 @@ int mca_btl_openib_sendi( struct mca_btl_base_module_t* btl,
         assert(max_data == payload_size);
     }
 
-#if BTL_OPENIB_FAILOVER_ENABLED
-    send_signaled = 1;
-#else
     send_signaled = qp_need_signal(ep, qp, payload_size + header_size, do_rdma);
-#endif
     ib_rc = post_send(ep, to_send_frag(item), do_rdma, send_signaled);
 
     if (!ib_rc) {
         if (0 == send_signaled) {
             MCA_BTL_IB_FRAG_RETURN(frag);
         }
-#if BTL_OPENIB_FAILOVER_ENABLED
-        else {
-            /* Return up in case needed for failover */
-            *descriptor = (struct mca_btl_base_descriptor_t *) frag;
-        }
-#endif
         OPAL_THREAD_UNLOCK(&ep->endpoint_lock);
 
         return OPAL_SUCCESS;

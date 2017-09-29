@@ -10,7 +10,10 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2012 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2012      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2016      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -66,7 +69,7 @@ ompi_coll_base_bcast_intra_generic( void* buffer,
     tmpbuf = (char *) buffer;
 
     if( tree->tree_nextsize != 0 ) {
-        send_reqs = coll_base_comm_get_reqs(module->base_data, tree->tree_nextsize);
+        send_reqs = ompi_coll_base_comm_get_reqs(module->base_data, tree->tree_nextsize);
         if( NULL == send_reqs ) { err = OMPI_ERR_OUT_OF_RESOURCE; line = __LINE__; goto error_hndl; }
     }
 
@@ -651,6 +654,8 @@ ompi_coll_base_bcast_intra_basic_linear(void *buff, int count,
 
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"ompi_coll_base_bcast_intra_basic_linear rank %d root %d", rank, root));
 
+    if (1 == size) return OMPI_SUCCESS;
+
     /* Non-root receive the data. */
 
     if (rank != root) {
@@ -660,7 +665,7 @@ ompi_coll_base_bcast_intra_basic_linear(void *buff, int count,
     }
 
     /* Root sends data to all others. */
-    preq = reqs = coll_base_comm_get_reqs(module->base_data, size-1);
+    preq = reqs = ompi_coll_base_comm_get_reqs(module->base_data, size-1);
     if( NULL == reqs ) { err = OMPI_ERR_OUT_OF_RESOURCE; goto err_hndl; }
 
     for (i = 0; i < size; ++i) {

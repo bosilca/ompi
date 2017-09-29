@@ -10,6 +10,8 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
+ * Copyright (c) 2016-2017 Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2011 Cisco Systems, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
@@ -45,6 +47,7 @@ extern FILE *orte_util_hostfile_in;
 extern int   orte_util_hostfile_line;
 extern bool  orte_util_hostfile_done;
 extern orte_hostfile_value_t  orte_util_hostfile_value;
+extern int orte_util_hostfile_lex_destroy (void );
 
 /*
  * Make lex-generated files not issue compiler warnings
@@ -78,5 +81,6 @@ extern orte_hostfile_value_t  orte_util_hostfile_value;
 #define ORTE_HOSTFILE_CORES_PER_SOCKET      19
 /* ensure we can handle a rank_file input */
 #define ORTE_HOSTFILE_RANK                  20
+#define ORTE_HOSTFILE_PORT                  21
 
 #endif

@@ -8,10 +8,14 @@
  * Copyright (c) 2013      The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
- * Copyright (c) 2014-2015 Research Organization for Information Science
+ * Copyright (c) 2014-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015      Los Alamos National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2017      IBM Corporation.  All rights reserved.
+ * $COPYRIGHT$
+ *
+ * Additional copyrights may follow
  *
  * Author(s): Torsten Hoefler <htor@cs.indiana.edu>
  *
@@ -42,17 +46,17 @@ int NBC_Gather_args_compare(NBC_Gather_args *a, NBC_Gather_args *b, void *param)
 int ompi_coll_libnbc_igather(const void* sendbuf, int sendcount, MPI_Datatype sendtype, void* recvbuf,
                              int recvcount, MPI_Datatype recvtype, int root,
                              struct ompi_communicator_t *comm, ompi_request_t ** request,
-                             struct mca_coll_base_module_2_1_0_t *module) {
+                             struct mca_coll_base_module_2_2_0_t *module) {
   int rank, p, res;
   MPI_Aint rcvext = 0;
   NBC_Schedule *schedule;
-  char *rbuf, inplace;
-  NBC_Handle *handle;
+  char *rbuf, inplace = 0;
   ompi_coll_libnbc_module_t *libnbc_module = (ompi_coll_libnbc_module_t*) module;
 
-  NBC_IN_PLACE(sendbuf, recvbuf, inplace);
-
   rank = ompi_comm_rank (comm);
+  if (root == rank) {
+    NBC_IN_PLACE(sendbuf, recvbuf, inplace);
+  }
   p = ompi_comm_size (comm);
 
   if (rank == root) {
@@ -156,19 +160,11 @@ int ompi_coll_libnbc_igather(const void* sendbuf, int sendcount, MPI_Datatype se
   }
 #endif
 
-  res = NBC_Init_handle (comm, &handle, libnbc_module);
+  res = NBC_Schedule_request(schedule, comm, libnbc_module, request, NULL);
   if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
     OBJ_RELEASE(schedule);
     return res;
   }
-
-  res = NBC_Start (handle, schedule);
-  if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
-    NBC_Return_handle (handle);
-    return res;
-  }
-
-  *request = (ompi_request_t *) handle;
 
   return OMPI_SUCCESS;
 }
@@ -176,12 +172,11 @@ int ompi_coll_libnbc_igather(const void* sendbuf, int sendcount, MPI_Datatype se
 int ompi_coll_libnbc_igather_inter (const void* sendbuf, int sendcount, MPI_Datatype sendtype, void* recvbuf,
                                     int recvcount, MPI_Datatype recvtype, int root,
                                     struct ompi_communicator_t *comm, ompi_request_t ** request,
-                                    struct mca_coll_base_module_2_1_0_t *module) {
+                                    struct mca_coll_base_module_2_2_0_t *module) {
     int res, rsize;
     MPI_Aint rcvext = 0;
     NBC_Schedule *schedule;
     char *rbuf;
-    NBC_Handle *handle;
     ompi_coll_libnbc_module_t *libnbc_module = (ompi_coll_libnbc_module_t*) module;
 
     rsize = ompi_comm_remote_size (comm);
@@ -225,19 +220,11 @@ int ompi_coll_libnbc_igather_inter (const void* sendbuf, int sendcount, MPI_Data
       return res;
     }
 
-    res = NBC_Init_handle (comm, &handle, libnbc_module);
+    res = NBC_Schedule_request(schedule, comm, libnbc_module, request, NULL);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
       OBJ_RELEASE(schedule);
       return res;
     }
-
-    res = NBC_Start (handle, schedule);
-    if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
-      NBC_Return_handle (handle);
-      return res;
-    }
-
-    *request = (ompi_request_t *) handle;
 
     return OMPI_SUCCESS;
 }

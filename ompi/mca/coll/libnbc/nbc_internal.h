@@ -10,7 +10,7 @@
  *
  * Copyright (c) 2012      Oracle and/or its affiliates.  All rights reserved.
  * Copyright (c) 2014      NVIDIA Corporation.  All rights reserved.
- * Copyright (c) 2015-2016 Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015      Los Alamos National Security, LLC. All rights
  *                         reserved.
@@ -261,6 +261,7 @@ void NBC_SchedCache_args_delete_key_dummy(void *k);
 
 int NBC_Start(NBC_Handle *handle, NBC_Schedule *schedule);
 int NBC_Init_handle(struct ompi_communicator_t *comm, ompi_coll_libnbc_request_t **request, ompi_coll_libnbc_module_t *module);
+int NBC_Schedule_request(NBC_Schedule *schedule, ompi_communicator_t *comm, ompi_coll_libnbc_module_t *module, ompi_request_t **request, void *tmpbuf);
 void NBC_Return_handle(ompi_coll_libnbc_request_t *request);
 static inline int NBC_Type_intrinsic(MPI_Datatype type);
 int NBC_Create_fortran_handle(int *fhandle, NBC_Handle **handle);
@@ -539,7 +540,7 @@ static inline int NBC_Copy(const void *src, int srccount, MPI_Datatype srctype, 
 
 static inline int NBC_Unpack(void *src, int srccount, MPI_Datatype srctype, void *tgt, MPI_Comm comm) {
   int size, pos, res;
-  OPAL_PTRDIFF_TYPE ext, lb;
+  ptrdiff_t ext, lb;
 
 #if OPAL_CUDA_SUPPORT
   if(NBC_Type_intrinsic(srctype) && !(opal_cuda_check_bufs((char *)tgt, (char *)src))) {

@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2004-2007 The Trustees of Indiana University.
  *                         All rights reserved.
- * Copyright (c) 2004-2008 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -16,6 +16,7 @@
  * Copyright (c) 2012-2013 Sandia National Laboratories.  All rights reserved.
  * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -38,10 +39,10 @@ static int component_register(void);
 static int component_init(bool enable_progress_threads, bool enable_mpi_threads);
 static int component_finalize(void);
 static int component_query(struct ompi_win_t *win, void **base, size_t size, int disp_unit,
-                           struct ompi_communicator_t *comm, struct ompi_info_t *info,
+                           struct ompi_communicator_t *comm, struct opal_info_t *info,
                            int flavor);
 static int component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit,
-                            struct ompi_communicator_t *comm, struct ompi_info_t *info,
+                            struct ompi_communicator_t *comm, struct opal_info_t *info,
                             int flavor, int *model);
 
 ompi_osc_pt2pt_component_t mca_osc_pt2pt_component = {
@@ -103,9 +104,6 @@ ompi_osc_pt2pt_module_t ompi_osc_pt2pt_module_template = {
         ompi_osc_pt2pt_flush_all,
         ompi_osc_pt2pt_flush_local,
         ompi_osc_pt2pt_flush_local_all,
-
-        ompi_osc_pt2pt_set_info,
-        ompi_osc_pt2pt_get_info
     }
 };
 
@@ -114,11 +112,11 @@ bool ompi_osc_pt2pt_no_locks = false;
 /* look up parameters for configuring this window.  The code first
    looks in the info structure passed by the user, then through mca
    parameters. */
-static bool check_config_value_bool(char *key, ompi_info_t *info, bool result)
+static bool check_config_value_bool(char *key, opal_info_t *info, bool result)
 {
     int flag;
 
-    (void) ompi_info_get_bool (info, key, &result, &flag);
+    (void) opal_info_get_bool (info, key, &result, &flag);
     return result;
 }
 
@@ -282,7 +280,7 @@ component_finalize(void)
 
 static int
 component_query(struct ompi_win_t *win, void **base, size_t size, int disp_unit,
-                struct ompi_communicator_t *comm, struct ompi_info_t *info,
+                struct ompi_communicator_t *comm, struct opal_info_t *info,
                 int flavor)
 {
     if (MPI_WIN_FLAVOR_SHARED == flavor) return -1;
@@ -293,7 +291,7 @@ component_query(struct ompi_win_t *win, void **base, size_t size, int disp_unit,
 
 static int
 component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit,
-                 struct ompi_communicator_t *comm, struct ompi_info_t *info,
+                 struct ompi_communicator_t *comm, struct opal_info_t *info,
                  int flavor, int *model)
 {
     ompi_osc_pt2pt_module_t *module = NULL;
@@ -314,12 +312,13 @@ component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit
            sizeof(ompi_osc_base_module_t));
 
     /* initialize the objects, so that always free in cleanup */
-    OBJ_CONSTRUCT(&module->lock, opal_mutex_t);
+    OBJ_CONSTRUCT(&module->lock, opal_recursive_mutex_t);
     OBJ_CONSTRUCT(&module->cond, opal_condition_t);
     OBJ_CONSTRUCT(&module->locks_pending, opal_list_t);
     OBJ_CONSTRUCT(&module->locks_pending_lock, opal_mutex_t);
     OBJ_CONSTRUCT(&module->outstanding_locks, opal_hash_table_t);
     OBJ_CONSTRUCT(&module->pending_acc, opal_list_t);
+    OBJ_CONSTRUCT(&module->pending_acc_lock, opal_mutex_t);
     OBJ_CONSTRUCT(&module->buffer_gc, opal_list_t);
     OBJ_CONSTRUCT(&module->gc_lock, opal_mutex_t);
     OBJ_CONSTRUCT(&module->all_sync, ompi_osc_pt2pt_sync_t);
@@ -413,8 +412,8 @@ component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit
 
     /* barrier to prevent arrival of lock requests before we're
        fully created */
-    ret = module->comm->c_coll.coll_barrier(module->comm,
-                                            module->comm->c_coll.coll_barrier_module);
+    ret = module->comm->c_coll->coll_barrier(module->comm,
+                                            module->comm->c_coll->coll_barrier_module);
     if (OMPI_SUCCESS != ret) goto cleanup;
 
     if (!mca_osc_pt2pt_component.progress_enable) {
@@ -441,21 +440,21 @@ component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit
 
 
 int
-ompi_osc_pt2pt_set_info(struct ompi_win_t *win, struct ompi_info_t *info)
+ompi_osc_pt2pt_set_info(struct ompi_win_t *win, struct opal_info_t *info)
 {
     ompi_osc_pt2pt_module_t *module =
         (ompi_osc_pt2pt_module_t*) win->w_osc_module;
 
     /* enforce collectiveness... */
-    return module->comm->c_coll.coll_barrier(module->comm,
-                                             module->comm->c_coll.coll_barrier_module);
+    return module->comm->c_coll->coll_barrier(module->comm,
+                                             module->comm->c_coll->coll_barrier_module);
 }
 
 
 int
-ompi_osc_pt2pt_get_info(struct ompi_win_t *win, struct ompi_info_t **info_used)
+ompi_osc_pt2pt_get_info(struct ompi_win_t *win, struct opal_info_t **info_used)
 {
-    ompi_info_t *info = OBJ_NEW(ompi_info_t);
+    opal_info_t *info = OBJ_NEW(opal_info_t);
     if (NULL == info) return OMPI_ERR_TEMP_OUT_OF_RESOURCE;
 
     *info_used = info;

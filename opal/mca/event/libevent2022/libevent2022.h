@@ -4,7 +4,8 @@
  * Copyright (c) 2012-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
  * Copyright (c) 2015      Intel, Inc. All rights reserved.
- *
+ * Copyright (c) 2017      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -86,6 +87,8 @@ OPAL_DECLSPEC opal_event_base_t* opal_event_base_create(void);
 
 OPAL_DECLSPEC int opal_event_init(void);
 
+OPAL_DECLSPEC int opal_event_finalize(void);
+
 #define opal_event_reinit(b) event_reinit((b))
 
 #define opal_event_base_init_common_timeout (b, t) event_base_init_common_timeout((b), (t))
@@ -106,6 +109,8 @@ OPAL_DECLSPEC int opal_event_init(void);
 #define opal_event_enable_debug_mode() event_enable_debug_mode()
 
 #define opal_event_set(b, x, fd, fg, cb, arg) event_assign((x), (b), (fd), (fg), (event_callback_fn) (cb), (arg))
+
+#define opal_event_assign(x, b, fd, fg, cb, arg) event_assign((x), (b), (fd), (fg), (event_callback_fn) (cb), (arg))
 
 #define opal_event_add(ev, tv) event_add((ev), (tv))
 

@@ -12,9 +12,10 @@
  *                         reserved.
  * Copyright (c) 2010      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2012-2013 Sandia National Laboratories.  All rights reserved.
- * Copyright (c) 2015-2016 Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016      FUJITSU LIMITED.  All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -118,7 +119,7 @@ struct ompi_osc_pt2pt_peer_t {
     opal_list_t queued_frags;
 
     /** number of fragments incomming (negative - expected, positive - unsynchronized) */
-    int32_t passive_incoming_frag_count;
+    volatile int32_t passive_incoming_frag_count;
 
     /** peer flags */
     volatile int32_t flags;
@@ -198,7 +199,7 @@ struct ompi_osc_pt2pt_module_t {
     int disp_unit;
 
     /** Mutex lock protecting module data */
-    opal_mutex_t lock;
+    opal_recursive_mutex_t lock;
 
     /** condition variable associated with lock */
     opal_condition_t cond;
@@ -214,19 +215,13 @@ struct ompi_osc_pt2pt_module_t {
     uint32_t *epoch_outgoing_frag_count;
 
     /** cyclic counter for a unique tage for long messages. */
-    uint32_t tag_counter;
+    volatile uint32_t tag_counter;
 
-    /* Number of outgoing fragments that have completed since the
-       begining of time */
-    volatile uint32_t outgoing_frag_count;
-    /* Next outgoing fragment count at which we want a signal on cond */
-    volatile uint32_t outgoing_frag_signal_count;
+    /** number of outgoing fragments still to be completed */
+    volatile int32_t outgoing_frag_count;
 
-    /* Number of incoming fragments that have completed since the
-       begining of time */
-    volatile uint32_t active_incoming_frag_count;
-    /* Next incoming buffer count at which we want a signal on cond */
-    volatile uint32_t active_incoming_frag_signal_count;
+    /** number of incoming fragments */
+    volatile int32_t active_incoming_frag_count;
 
     /** Number of targets locked/being locked */
     unsigned int passive_target_access_epoch;
@@ -239,7 +234,7 @@ struct ompi_osc_pt2pt_module_t {
 
     /** Number of "count" messages from the remote complete group
         we've received */
-    int32_t num_complete_msgs;
+    volatile int32_t num_complete_msgs;
 
     /* ********************* LOCK data ************************ */
 
@@ -264,7 +259,12 @@ struct ompi_osc_pt2pt_module_t {
 
     /* enforce accumulate semantics */
     opal_atomic_lock_t accumulate_lock;
-    opal_list_t        pending_acc;
+
+    /** accumulate operations pending the accumulation lock */
+    opal_list_t pending_acc;
+
+    /** lock for pending_acc */
+    opal_mutex_t pending_acc_lock;
 
     /** Lock for garbage collection lists */
     opal_mutex_t gc_lock;
@@ -329,7 +329,7 @@ int ompi_osc_pt2pt_put(const void *origin_addr,
                              int origin_count,
                              struct ompi_datatype_t *origin_dt,
                              int target,
-                             OPAL_PTRDIFF_TYPE target_disp,
+                             ptrdiff_t target_disp,
                              int target_count,
                              struct ompi_datatype_t *target_dt,
                              struct ompi_win_t *win);
@@ -338,7 +338,7 @@ int ompi_osc_pt2pt_accumulate(const void *origin_addr,
 			      int origin_count,
 			      struct ompi_datatype_t *origin_dt,
 			      int target,
-			      OPAL_PTRDIFF_TYPE target_disp,
+			      ptrdiff_t target_disp,
 			      int target_count,
 			      struct ompi_datatype_t *target_dt,
 			      struct ompi_op_t *op,
@@ -348,7 +348,7 @@ int ompi_osc_pt2pt_get(void *origin_addr,
                        int origin_count,
                        struct ompi_datatype_t *origin_dt,
                        int target,
-                       OPAL_PTRDIFF_TYPE target_disp,
+                       ptrdiff_t target_disp,
                        int target_count,
                        struct ompi_datatype_t *target_dt,
                        struct ompi_win_t *win);
@@ -358,14 +358,14 @@ int ompi_osc_pt2pt_compare_and_swap(const void *origin_addr,
                                    void *result_addr,
                                    struct ompi_datatype_t *dt,
                                    int target,
-                                   OPAL_PTRDIFF_TYPE target_disp,
+                                   ptrdiff_t target_disp,
                                    struct ompi_win_t *win);
 
 int ompi_osc_pt2pt_fetch_and_op(const void *origin_addr,
                                void *result_addr,
                                struct ompi_datatype_t *dt,
                                int target,
-                               OPAL_PTRDIFF_TYPE target_disp,
+                               ptrdiff_t target_disp,
                                struct ompi_op_t *op,
                                struct ompi_win_t *win);
 
@@ -386,7 +386,7 @@ int ompi_osc_pt2pt_rput(const void *origin_addr,
                        int origin_count,
                        struct ompi_datatype_t *origin_dt,
                        int target,
-                       OPAL_PTRDIFF_TYPE target_disp,
+                       ptrdiff_t target_disp,
                        int target_count,
                        struct ompi_datatype_t *target_dt,
                        struct ompi_win_t *win,
@@ -396,7 +396,7 @@ int ompi_osc_pt2pt_rget(void *origin_addr,
                        int origin_count,
                        struct ompi_datatype_t *origin_dt,
                        int target,
-                       OPAL_PTRDIFF_TYPE target_disp,
+                       ptrdiff_t target_disp,
                        int target_count,
                        struct ompi_datatype_t *target_dt,
                        struct ompi_win_t *win,
@@ -406,7 +406,7 @@ int ompi_osc_pt2pt_raccumulate(const void *origin_addr,
                               int origin_count,
                               struct ompi_datatype_t *origin_dt,
                               int target,
-                              OPAL_PTRDIFF_TYPE target_disp,
+                              ptrdiff_t target_disp,
                               int target_count,
                               struct ompi_datatype_t *target_dt,
                               struct ompi_op_t *op,
@@ -471,8 +471,8 @@ int ompi_osc_pt2pt_flush_local(int target,
                               struct ompi_win_t *win);
 int ompi_osc_pt2pt_flush_local_all(struct ompi_win_t *win);
 
-int ompi_osc_pt2pt_set_info(struct ompi_win_t *win, struct ompi_info_t *info);
-int ompi_osc_pt2pt_get_info(struct ompi_win_t *win, struct ompi_info_t **info_used);
+int ompi_osc_pt2pt_set_info(struct ompi_win_t *win, struct opal_info_t *info);
+int ompi_osc_pt2pt_get_info(struct ompi_win_t *win, struct opal_info_t **info_used);
 
 int ompi_osc_pt2pt_component_irecv(ompi_osc_pt2pt_module_t *module,
                                   void *buf,
@@ -512,23 +512,29 @@ int ompi_osc_pt2pt_progress_pending_acc (ompi_osc_pt2pt_module_t *module);
  */
 static inline void mark_incoming_completion (ompi_osc_pt2pt_module_t *module, int source)
 {
+    int32_t new_value;
+
     if (MPI_PROC_NULL == source) {
         OPAL_OUTPUT_VERBOSE((50, ompi_osc_base_framework.framework_output,
-                             "mark_incoming_completion marking active incoming complete. count = %d. signal = %d",
-                             (int) module->active_incoming_frag_count + 1, module->active_incoming_frag_signal_count));
-        OPAL_THREAD_ADD32((int32_t *) &module->active_incoming_frag_count, 1);
-        if (module->active_incoming_frag_count >= module->active_incoming_frag_signal_count) {
+                             "mark_incoming_completion marking active incoming complete. module %p, count = %d",
+                             (void *) module, (int) module->active_incoming_frag_count + 1));
+        new_value = OPAL_THREAD_ADD32(&module->active_incoming_frag_count, 1);
+        if (new_value >= 0) {
+            OPAL_THREAD_LOCK(&module->lock);
             opal_condition_broadcast(&module->cond);
+            OPAL_THREAD_UNLOCK(&module->lock);
         }
     } else {
         ompi_osc_pt2pt_peer_t *peer = ompi_osc_pt2pt_peer_lookup (module, source);
 
         OPAL_OUTPUT_VERBOSE((50, ompi_osc_base_framework.framework_output,
-                             "mark_incoming_completion marking passive incoming complete. source = %d, count = %d",
-                             source, (int) peer->passive_incoming_frag_count + 1));
-        OPAL_THREAD_ADD32((int32_t *) &peer->passive_incoming_frag_count, 1);
-        if (0 == peer->passive_incoming_frag_count) {
+                             "mark_incoming_completion marking passive incoming complete. module %p, source = %d, count = %d",
+                             (void *) module, source, (int) peer->passive_incoming_frag_count + 1));
+        new_value = OPAL_THREAD_ADD32((int32_t *) &peer->passive_incoming_frag_count, 1);
+        if (0 == new_value) {
+            OPAL_THREAD_LOCK(&module->lock);
             opal_condition_broadcast(&module->cond);
+            OPAL_THREAD_UNLOCK(&module->lock);
         }
     }
 }
@@ -548,9 +554,13 @@ static inline void mark_incoming_completion (ompi_osc_pt2pt_module_t *module, in
  */
 static inline void mark_outgoing_completion (ompi_osc_pt2pt_module_t *module)
 {
-    OPAL_THREAD_ADD32((int32_t *) &module->outgoing_frag_count, 1);
-    if (module->outgoing_frag_count >= module->outgoing_frag_signal_count) {
+    int32_t new_value = OPAL_THREAD_ADD32((int32_t *) &module->outgoing_frag_count, 1);
+    OPAL_OUTPUT_VERBOSE((50, ompi_osc_base_framework.framework_output,
+                         "mark_outgoing_completion: outgoing_frag_count = %d", new_value));
+    if (new_value >= 0) {
+        OPAL_THREAD_LOCK(&module->lock);
         opal_condition_broadcast(&module->cond);
+        OPAL_THREAD_UNLOCK(&module->lock);
     }
 }
 
@@ -568,7 +578,7 @@ static inline void mark_outgoing_completion (ompi_osc_pt2pt_module_t *module)
  */
 static inline void ompi_osc_signal_outgoing (ompi_osc_pt2pt_module_t *module, int target, int count)
 {
-    OPAL_THREAD_ADD32((int32_t *) &module->outgoing_frag_signal_count, count);
+    OPAL_THREAD_ADD32((int32_t *) &module->outgoing_frag_count, -count);
     if (MPI_PROC_NULL != target) {
         OPAL_OUTPUT_VERBOSE((50, ompi_osc_base_framework.framework_output,
                              "ompi_osc_signal_outgoing_passive: target = %d, count = %d, total = %d", target,

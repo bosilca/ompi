@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2015 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -14,7 +14,7 @@
  * Copyright (c) 2009      University of Houston. All rights reserved.
  * Copyright (c) 2013      Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
@@ -66,24 +66,24 @@ int ompi_coll_base_reduce_scatter_intra_nonoverlapping(const void *sbuf, void *r
     if (MPI_IN_PLACE == sbuf) {
         /* rbuf on root (0) is big enough to hold whole data */
         if (root == rank) {
-            err = comm->c_coll.coll_reduce (MPI_IN_PLACE, tmprbuf, total_count,
-                                            dtype, op, root, comm, comm->c_coll.coll_reduce_module);
+            err = comm->c_coll->coll_reduce (MPI_IN_PLACE, tmprbuf, total_count,
+                                            dtype, op, root, comm, comm->c_coll->coll_reduce_module);
         } else {
-            err = comm->c_coll.coll_reduce(tmprbuf, NULL, total_count,
-                                           dtype, op, root, comm, comm->c_coll.coll_reduce_module);
+            err = comm->c_coll->coll_reduce(tmprbuf, NULL, total_count,
+                                           dtype, op, root, comm, comm->c_coll->coll_reduce_module);
         }
     } else {
         if (root == rank) {
             /* We must allocate temporary receive buffer on root to ensure that
                rbuf is big enough */
-            ptrdiff_t dsize, gap;
+            ptrdiff_t dsize, gap = 0;
             dsize = opal_datatype_span(&dtype->super, total_count, &gap);
 
             tmprbuf_free = (char*) malloc(dsize);
             tmprbuf = tmprbuf_free - gap;
         }
-        err = comm->c_coll.coll_reduce (sbuf, tmprbuf, total_count,
-                                        dtype, op, root, comm, comm->c_coll.coll_reduce_module);
+        err = comm->c_coll->coll_reduce (sbuf, tmprbuf, total_count,
+                                        dtype, op, root, comm, comm->c_coll->coll_reduce_module);
     }
     if (MPI_SUCCESS != err) {
         if (NULL != tmprbuf_free) free(tmprbuf_free);
@@ -95,9 +95,15 @@ int ompi_coll_base_reduce_scatter_intra_nonoverlapping(const void *sbuf, void *r
     for (i = 1; i < size; i++) {
         displs[i] = displs[i-1] + rcounts[i-1];
     }
-    err =  comm->c_coll.coll_scatterv (tmprbuf, rcounts, displs, dtype,
-                                       rbuf, rcounts[rank], dtype,
-                                       root, comm, comm->c_coll.coll_scatterv_module);
+    if (MPI_IN_PLACE == sbuf && root == rank) {
+        err =  comm->c_coll->coll_scatterv (tmprbuf, rcounts, displs, dtype,
+                                           MPI_IN_PLACE, 0, MPI_DATATYPE_NULL,
+                                           root, comm, comm->c_coll->coll_scatterv_module);
+    } else {
+        err =  comm->c_coll->coll_scatterv (tmprbuf, rcounts, displs, dtype,
+                                           rbuf, rcounts[rank], dtype,
+                                           root, comm, comm->c_coll->coll_scatterv_module);
+    }
     free(displs);
     if (NULL != tmprbuf_free) free(tmprbuf_free);
 
@@ -132,7 +138,7 @@ ompi_coll_base_reduce_scatter_intra_basic_recursivehalving( const void *sbuf,
 {
     int i, rank, size, count, err = OMPI_SUCCESS;
     int tmp_size, remain = 0, tmp_rank, *disps = NULL;
-    ptrdiff_t extent, buf_size, gap;
+    ptrdiff_t extent, buf_size, gap = 0;
     char *recv_buf = NULL, *recv_buf_free = NULL;
     char *result_buf = NULL, *result_buf_free = NULL;
 
@@ -456,7 +462,7 @@ ompi_coll_base_reduce_scatter_intra_ring( const void *sbuf, void *rbuf, const in
     int inbi, *displs = NULL;
     char *tmpsend = NULL, *tmprecv = NULL, *accumbuf = NULL, *accumbuf_free = NULL;
     char *inbuf_free[2] = {NULL, NULL}, *inbuf[2] = {NULL, NULL};
-    ptrdiff_t extent, max_real_segsize, dsize, gap;
+    ptrdiff_t extent, max_real_segsize, dsize, gap = 0;
     ompi_request_t *reqs[2] = {NULL, NULL};
 
     size = ompi_comm_size(comm);

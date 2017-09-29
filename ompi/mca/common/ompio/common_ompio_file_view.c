@@ -2,14 +2,17 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2005 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2008-2016 University of Houston. All rights reserved.
+ * Copyright (c) 2008-2017 University of Houston. All rights reserved.
+ * Copyright (c) 2017      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -25,6 +28,7 @@
 
 #include "common_ompio.h"
 #include "ompi/mca/fcoll/base/base.h"
+#include "ompi/mca/topo/topo.h"
 
 static OMPI_MPI_OFFSET_TYPE get_contiguous_chunk_size (mca_io_ompio_file_t *);
 static int datatype_duplicate (ompi_datatype_t *oldtype, ompi_datatype_t **newtype );
@@ -54,16 +58,16 @@ int mca_common_ompio_set_view (mca_io_ompio_file_t *fh,
                                ompi_datatype_t *etype,
                                ompi_datatype_t *filetype,
                                const char *datarep,
-                               ompi_info_t *info)
+                               opal_info_t *info)
 {
-
+    int ret=OMPI_SUCCESS;
     size_t max_data = 0;
     int i;
     int num_groups = 0;
-    mca_io_ompio_contg *contg_groups;
+    mca_io_ompio_contg *contg_groups=NULL;
 
     size_t ftype_size;
-    OPAL_PTRDIFF_TYPE ftype_extent, lb, ub;
+    ptrdiff_t ftype_extent, lb, ub;
     ompi_datatype_t *newfiletype;
 
     if ( NULL != fh->f_etype ) {
@@ -86,9 +90,12 @@ int mca_common_ompio_set_view (mca_io_ompio_file_t *fh,
     }
 
     /* Reset the flags first */
-    fh->f_flags = 0;
-
-    fh->f_flags |= OMPIO_FILE_VIEW_IS_SET;
+    if ( fh->f_flags & OMPIO_CONTIGUOUS_FVIEW ) {
+        fh->f_flags &= ~OMPIO_CONTIGUOUS_FVIEW;
+    }
+    if ( fh->f_flags & OMPIO_UNIFORM_FVIEW ) {
+        fh->f_flags &= ~OMPIO_UNIFORM_FVIEW;
+    }
     fh->f_datarep = strdup (datarep);
     datatype_duplicate (filetype, &fh->f_orig_filetype );
 
@@ -97,7 +104,7 @@ int mca_common_ompio_set_view (mca_io_ompio_file_t *fh,
 
     if ( etype == filetype                             &&
 	 ompi_datatype_is_predefined (filetype )       &&
-	 ftype_extent == (OPAL_PTRDIFF_TYPE)ftype_size ){
+	 ftype_extent == (ptrdiff_t)ftype_size ){
 	ompi_datatype_create_contiguous(MCA_IO_DEFAULT_FILE_VIEW_SIZE,
 					&ompi_mpi_byte.dt,
 					&newfiletype);
@@ -105,6 +112,7 @@ int mca_common_ompio_set_view (mca_io_ompio_file_t *fh,
     }
     else {
         newfiletype = filetype;
+	fh->f_flags |= OMPIO_FILE_VIEW_IS_SET;
     }
 
     fh->f_iov_count   = 0;
@@ -135,7 +143,7 @@ int mca_common_ompio_set_view (mca_io_ompio_file_t *fh,
 
     if (opal_datatype_is_contiguous_memory_layout(&etype->super,1)) {
         if (opal_datatype_is_contiguous_memory_layout(&filetype->super,1) &&
-	    fh->f_view_extent == (OPAL_PTRDIFF_TYPE)fh->f_view_size ) {
+	    fh->f_view_extent == (ptrdiff_t)fh->f_view_size ) {
             fh->f_flags |= OMPIO_CONTIGUOUS_FVIEW;
         }
     }
@@ -159,50 +167,90 @@ int mca_common_ompio_set_view (mca_io_ompio_file_t *fh,
     }
 
     if ( SIMPLE != mca_io_ompio_grouping_option ) {
-        if( OMPI_SUCCESS != mca_io_ompio_fview_based_grouping(fh,
-                                                              &num_groups,
-                                                              contg_groups)){
+
+        ret = mca_io_ompio_fview_based_grouping(fh,
+                                                &num_groups,
+                                                contg_groups);
+        if ( OMPI_SUCCESS != ret ) {
             opal_output(1, "mca_common_ompio_set_view: mca_io_ompio_fview_based_grouping failed\n");
-            free(contg_groups);
-            return OMPI_ERROR;
+            goto exit;
         }
     }
     else {
-        if( OMPI_SUCCESS != mca_io_ompio_simple_grouping(fh,
-                                                         &num_groups,
-                                                         contg_groups)){
-            opal_output(1, "mca_common_ompio_set_view: mca_io_ompio_simple_grouping failed\n");
-            free(contg_groups);
-            return OMPI_ERROR;
+        int done=0;
+        int ndims;
+        if ( fh->f_comm->c_flags & OMPI_COMM_CART ){
+            ret = fh->f_comm->c_topo->topo.cart.cartdim_get( fh->f_comm, &ndims);
+            if ( OMPI_SUCCESS != ret ){
+                goto exit;
+            }
+            if ( ndims > 1 ) { 
+                ret = mca_io_ompio_cart_based_grouping( fh, 
+                                                        &num_groups, 
+                                                        contg_groups);
+                if (OMPI_SUCCESS != ret ) {
+                    opal_output(1, "mca_common_ompio_set_view: mca_io_ompio_cart_based_grouping failed\n");
+                    goto exit;
+                }
+                done=1;
+            }
+        }
+
+        if ( !done ) {
+            ret = mca_io_ompio_simple_grouping(fh,
+                                               &num_groups,
+                                               contg_groups);
+            if ( OMPI_SUCCESS != ret ){
+                opal_output(1, "mca_common_ompio_set_view: mca_io_ompio_simple_grouping failed\n");
+                goto exit;
+            }
         }
     }
-    
-    
-    if ( OMPI_SUCCESS != mca_io_ompio_finalize_initial_grouping(fh,
-                                                                num_groups,
-                                                                contg_groups) ){
-        opal_output(1, "mca_common_ompio_set_view: mca_io_ompio_finalize_initial_grouping failed\n");
-        free(contg_groups);
-        return OMPI_ERROR;        
+
+#ifdef DEBUG_OMPIO
+    if ( fh->f_rank == 0) {
+        int ii, jj;
+        printf("BEFORE finalize_init: comm size = %d num_groups = %d\n", fh->f_size, num_groups);
+        for ( ii=0; ii< num_groups; ii++ ) {
+            printf("contg_groups[%d].procs_per_contg_group=%d\n", ii, contg_groups[ii].procs_per_contg_group); 
+            printf("contg_groups[%d].procs_in_contg_group.[", ii);
+
+            for ( jj=0; jj< contg_groups[ii].procs_per_contg_group; jj++ ) {
+                printf("%d,", contg_groups[ii].procs_in_contg_group[jj]);
+            }
+            printf("]\n");
+        }
     }
+#endif
+
+    ret = mca_io_ompio_finalize_initial_grouping(fh,
+                                                 num_groups,
+                                                 contg_groups);
+    if ( OMPI_SUCCESS != ret ) {
+        opal_output(1, "mca_common_ompio_set_view: mca_io_ompio_finalize_initial_grouping failed\n");
+        goto exit;
+    }
+
+    if ( etype == filetype                              &&
+	 ompi_datatype_is_predefined (filetype )        &&
+	 ftype_extent == (ptrdiff_t)ftype_size ){
+	ompi_datatype_destroy ( &newfiletype );
+    }
+
+
+    ret = mca_fcoll_base_file_select (fh, NULL);
+    if ( OMPI_SUCCESS != ret ) {
+        opal_output(1, "mca_common_ompio_set_view: mca_fcoll_base_file_select() failed\n");
+        goto exit;
+    }
+
+exit:
     for( i = 0; i < fh->f_size; i++){
        free(contg_groups[i].procs_in_contg_group);
     }
     free(contg_groups);
 
-    if ( etype == filetype                              &&
-	 ompi_datatype_is_predefined (filetype )        &&
-	 ftype_extent == (OPAL_PTRDIFF_TYPE)ftype_size ){
-	ompi_datatype_destroy ( &newfiletype );
-    }
-
-
-    if (OMPI_SUCCESS != mca_fcoll_base_file_select (fh, NULL)) {
-        opal_output(1, "mca_common_ompio_set_view: mca_fcoll_base_file_select() failed\n");
-        return OMPI_ERROR;
-    }
-
-    return OMPI_SUCCESS;
+    return ret;
 }
 
 OMPI_MPI_OFFSET_TYPE get_contiguous_chunk_size (mca_io_ompio_file_t *fh)
@@ -234,13 +282,13 @@ OMPI_MPI_OFFSET_TYPE get_contiguous_chunk_size (mca_io_ompio_file_t *fh)
     avg[1] = (OMPI_MPI_OFFSET_TYPE) fh->f_iov_count;
     avg[2] = (OMPI_MPI_OFFSET_TYPE) uniform;
 
-    fh->f_comm->c_coll.coll_allreduce (avg,
+    fh->f_comm->c_coll->coll_allreduce (avg,
                                        global_avg,
                                        3,
                                        OMPI_OFFSET_DATATYPE,
                                        MPI_SUM,
                                        fh->f_comm,
-                                       fh->f_comm->c_coll.coll_allreduce_module);
+                                       fh->f_comm->c_coll->coll_allreduce_module);
     global_avg[0] = global_avg[0]/fh->f_size;
     global_avg[1] = global_avg[1]/fh->f_size;
 
@@ -261,13 +309,13 @@ OMPI_MPI_OFFSET_TYPE get_contiguous_chunk_size (mca_io_ompio_file_t *fh)
     /* second confirmation round to see whether all processes agree
     ** on having a uniform file view or not
     */
-    fh->f_comm->c_coll.coll_allreduce (&uniform,
+    fh->f_comm->c_coll->coll_allreduce (&uniform,
 				       &global_uniform,
 				       1,
 				       MPI_INT,
 				       MPI_MAX,
 				       fh->f_comm,
-				       fh->f_comm->c_coll.coll_allreduce_module);
+				       fh->f_comm->c_coll->coll_allreduce_module);
 
     if ( 0 == global_uniform  ){
 	/* yes, everybody agrees on having a uniform file view */

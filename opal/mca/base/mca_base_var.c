@@ -11,11 +11,12 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2008-2015 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2012-2015 Los Alamos National Security, LLC. All rights
+ * Copyright (c) 2012-2017 Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2014-2016 Intel, Inc. All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -78,7 +79,7 @@ static int mca_base_var_count = 0;
 
 static opal_hash_table_t mca_base_var_index_hash;
 
-const char *var_type_names[] = {
+const char *ompi_var_type_names[] = {
     "int",
     "unsigned_int",
     "unsigned_long",
@@ -90,7 +91,7 @@ const char *var_type_names[] = {
     "double"
 };
 
-const size_t var_type_sizes[] = {
+const size_t ompi_var_type_sizes[] = {
     sizeof (int),
     sizeof (unsigned),
     sizeof (unsigned long),
@@ -102,7 +103,7 @@ const size_t var_type_sizes[] = {
     sizeof (double)
 };
 
-const char *var_source_names[] = {
+static const char *var_source_names[] = {
     "default",
     "command line",
     "environment",
@@ -770,7 +771,7 @@ int mca_base_var_set_value (int vari, const void *value, size_t size, mca_base_v
     }
 
     if (MCA_BASE_VAR_TYPE_STRING != var->mbv_type && MCA_BASE_VAR_TYPE_VERSION_STRING != var->mbv_type) {
-        memmove (var->mbv_storage, value, var_type_sizes[var->mbv_type]);
+        memmove (var->mbv_storage, value, ompi_var_type_sizes[var->mbv_type]);
     } else {
         var_set_string (var, (char *) value);
     }
@@ -1640,7 +1641,7 @@ static int var_set_from_env (mca_base_var_t *var, mca_base_var_t *original)
         const char *new_variable = "None (going away)";
 
         if (is_synonym) {
-            new_variable = var->mbv_full_name;
+            new_variable = original->mbv_full_name;
         }
 
         switch (var->mbv_source) {
@@ -1890,13 +1891,13 @@ static char *source_name(mca_base_var_t *var)
 
 static int var_value_string (mca_base_var_t *var, char **value_string)
 {
-    const mca_base_var_storage_t *value;
+    const mca_base_var_storage_t *value=NULL;
     int ret;
 
     assert (MCA_BASE_VAR_TYPE_MAX > var->mbv_type);
 
     ret = mca_base_var_get_value(var->mbv_index, &value, NULL, NULL);
-    if (OPAL_SUCCESS !=ret) {
+    if (OPAL_SUCCESS != ret || NULL == value) {
         return ret;
     }
 
@@ -2117,7 +2118,7 @@ int mca_base_var_dump(int vari, char ***out, mca_base_var_dump_type_t output_typ
         /* Is this variable deprecated? */
         asprintf(out[0] + line++, "%sdeprecated:%s", tmp, VAR_IS_DEPRECATED(var[0]) ? "yes" : "no");
 
-        asprintf(out[0] + line++, "%stype:%s", tmp, var_type_names[var->mbv_type]);
+        asprintf(out[0] + line++, "%stype:%s", tmp, ompi_var_type_names[var->mbv_type]);
 
         /* Does this parameter have any synonyms or is it a synonym? */
         if (VAR_IS_SYNONYM(var[0])) {
@@ -2148,7 +2149,7 @@ int mca_base_var_dump(int vari, char ***out, mca_base_var_dump_type_t output_typ
         asprintf (out[0], "%s \"%s\" (current value: \"%s\", data source: %s, level: %d %s, type: %s",
                   VAR_IS_DEFAULT_ONLY(var[0]) ? "informational" : "parameter",
                   full_name, value_string, source_string, var->mbv_info_lvl + 1,
-                  info_lvl_strings[var->mbv_info_lvl], var_type_names[var->mbv_type]);
+                  info_lvl_strings[var->mbv_info_lvl], ompi_var_type_names[var->mbv_type]);
 
         tmp = out[0][0];
         if (VAR_IS_DEPRECATED(var[0])) {

@@ -1,7 +1,7 @@
 # -*- shell-script -*-
 #
-# Copyright (c) 2009-2016 Cisco Systems, Inc.  All rights reserved.
-# Copyright (c) 2014      Research Organization for Information Science
+# Copyright (c) 2009-2017 Cisco Systems, Inc.  All rights reserved
+# Copyright (c) 2014-2017 Research Organization for Information Science
 #                         and Technology (RIST). All rights reserved.
 #
 # $COPYRIGHT$
@@ -38,7 +38,7 @@ AC_DEFUN([MCA_opal_hwloc_external_POST_CONFIG],[
                               [Version of hwloc])
 
            # Set this variable so that the framework m4 knows what
-           # file to include in opal/mca/hwloc/hwloc.h
+           # file to include in opal/mca/hwloc/hwloc-internal.h
            opal_hwloc_external_basedir=opal/mca/hwloc/external
            opal_hwloc_base_include="$opal_hwloc_external_basedir/external.h"
 
@@ -61,12 +61,17 @@ AC_DEFUN([MCA_opal_hwloc_external_POST_CONFIG],[
            # OPAL_HWLOC_WANT_VERBS_HELPER is set, that file will
            # include the external hwloc/openfabrics-verbs.h file (via
            # the MCA_hwloc_external_openfabrics_helper define).
+           AS_IF([test "$opal_hwloc_dir" != ""],
+                 [opal_hwloc_include="$opal_hwloc_dir/include/hwloc.h"
+                  opal_hwloc_openfabrics_include="$opal_hwloc_dir/include/hwloc/openfabrics-verbs.h"],
+                 [opal_hwloc_include="hwloc.h"
+                  opal_hwloc_openfabrics_include="hwloc/openfabrics-verbs.h"])
            AC_DEFINE_UNQUOTED(MCA_hwloc_external_header,
-                  ["$opal_hwloc_dir/include/hwloc.h"],
+                  ["$opal_hwloc_include"],
                   [Location of external hwloc header])
            AC_DEFINE_UNQUOTED(MCA_hwloc_external_openfabrics_header,
-                  ["$opal_hwloc_dir/include/hwloc/openfabrics-verbs.h"],
-                  [Location of external hwloc header])
+                  ["$opal_hwloc_openfabrics_include"],
+                  [Location of external hwloc OpenFabrics header])
           ])
     OPAL_VAR_SCOPE_POP
 ])dnl
@@ -98,7 +103,8 @@ AC_DEFUN([MCA_opal_hwloc_external_CONFIG],[
     AS_IF([test "$with_hwloc" = "external"], [opal_hwloc_external_want=yes])
     AS_IF([test "$with_hwloc" != "" && \
            test "$with_hwloc" != "no" && \
-           test "$with_hwloc" != "internal"], [opal_hwloc_external_want=yes])
+           test "$with_hwloc" != "internal" && \
+           test "$with_hwloc" != "future"], [opal_hwloc_external_want=yes])
     AS_IF([test "$with_hwloc" = "no"], [opal_hwloc_external_want=no])
 
     # If we still want external support, try it
@@ -131,6 +137,13 @@ AC_DEFUN([MCA_opal_hwloc_external_CONFIG],[
                               [opal_hwloc_external_support=yes],
                               [opal_hwloc_external_support=no])
 
+           AS_IF([test "$opal_hwloc_external_support" = "yes"],
+                 [CPPFLAGS="$CPPFLAGS $opal_hwloc_external_CPPFLAGS"
+                  LDFLAGS="$LDFLAGS $opal_hwloc_external_LDFLAGS"
+                  LIBS="$LIBS $opal_hwloc_external_LIBS"
+                  AC_CHECK_DECLS([HWLOC_OBJ_OSDEV_COPROC], [], [], [#include <hwloc.h>])
+                  AC_CHECK_FUNCS([hwloc_topology_dup])])
+
            CPPFLAGS=$opal_hwloc_external_CPPFLAGS_save
            CFLAGS=$opal_hwloc_external_CFLAGS_save
            LDFLAGS=$opal_hwloc_external_LDFLAGS_save
@@ -157,35 +170,21 @@ AC_DEFUN([MCA_opal_hwloc_external_CONFIG],[
 
            AC_CHECK_HEADERS([infiniband/verbs.h])
 
-           AC_MSG_CHECKING([if external hwloc version is 1.8 or greater])
+           AC_MSG_CHECKING([if external hwloc version is 1.5 or greater])
            AS_IF([test "$opal_hwloc_dir" != ""],
                  [opal_hwloc_external_CFLAGS_save=$CFLAGS
                   CFLAGS="-I$opal_hwloc_dir/include $opal_hwloc_external_CFLAGS_save"])
            AC_COMPILE_IFELSE(
                [AC_LANG_PROGRAM([[#include <hwloc.h>]],
                    [[
-#if HWLOC_API_VERSION < 0x00010800
-#error "hwloc API version is less than 0x00010800"
+#if HWLOC_API_VERSION < 0x00010500
+#error "hwloc API version is less than 0x00010500"
 #endif
                    ]])],
                [AC_MSG_RESULT([yes])],
                [AC_MSG_RESULT([no])
                 AC_MSG_ERROR([Cannot continue])])
-           AC_MSG_CHECKING([if external hwloc version is lower than 2.0])
-           AS_IF([test "$opal_hwloc_dir" != ""],
-                 [opal_hwloc_external_CFLAGS_save=$CFLAGS
-                  CFLAGS="-I$opal_hwloc_dir/include $opal_hwloc_external_CFLAGS_save"])
-           AC_COMPILE_IFELSE(
-               [AC_LANG_PROGRAM([[#include <hwloc.h>]],
-                   [[
-#if HWLOC_API_VERSION >= 0x00020000
-#error "hwloc API version is greater or equal than 0x00020000"
-#endif
-                   ]])],
-               [AC_MSG_RESULT([yes])],
-               [AC_MSG_RESULT([no])
-                AC_MSG_ERROR([OMPI does not currently support hwloc v2 API
-Cannot continue])])
+
            AS_IF([test "$opal_hwloc_dir" != ""],
                  [CFLAGS=$opal_hwloc_external_CFLAGS_save])
 

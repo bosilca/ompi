@@ -12,7 +12,7 @@
  *                         All rights reserved.
  * Copyright (c) 2010      Oracle and/or its affiliates.  All rights reserved
  * Copyright (c) 2011      Sandia National Laboratories. All rights reserved.
- * Copyright (c) 2012-2016 Los Alamos National Security, LLC. All rights
+ * Copyright (c) 2012-2017 Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
@@ -55,14 +55,12 @@ struct mca_pml_ob1_t {
     int free_list_num;      /* initial size of free list */
     int free_list_max;      /* maximum size of free list */
     int free_list_inc;      /* number of elements to grow free list */
-    size_t send_pipeline_depth;
-    size_t recv_pipeline_depth;
+    int32_t send_pipeline_depth;
+    int32_t recv_pipeline_depth;
     size_t rdma_retries_limit;
     int max_rdma_per_request;
     int max_send_per_range;
-    bool leave_pinned;
     bool use_all_rdma;
-    int leave_pinned_pipeline;
 
     /* lock queue access */
     opal_mutex_t lock;
@@ -398,5 +396,11 @@ mca_pml_ob1_calc_weighted_length( mca_pml_ob1_com_btl_t *btls, int num_btls, siz
     /* account for rounding errors */
     btls[0].length += length_left;
 }
+
+/**
+ * A thread-safe function that should be called every time we need the OB1
+ * progress to be turned (or kept) on.
+ */
+int mca_pml_ob1_enable_progress(int32_t count);
 
 #endif

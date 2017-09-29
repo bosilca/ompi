@@ -9,7 +9,7 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2014      Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -37,16 +37,33 @@
 
 BEGIN_C_DECLS
 
+#define ORTE_MAX_REGEX_CMD_LENGTH   1024
+
 #define ORTE_MAX_NODE_PREFIX        50
 #define ORTE_CONTIG_NODE_CMD        0x01
 #define ORTE_NON_CONTIG_NODE_CMD    0x02
 
-ORTE_DECLSPEC int orte_util_encode_nodemap(opal_byte_object_t *boptr, bool update);
-ORTE_DECLSPEC int orte_util_decode_daemon_nodemap(opal_byte_object_t *bo);
 
-#if ORTE_ENABLE_STATIC_PORTS
-ORTE_DECLSPEC int orte_util_build_daemon_nidmap(char **nodes);
-#endif
+ORTE_DECLSPEC void orte_util_nidmap_init(void);
+
+ORTE_DECLSPEC int orte_util_nidmap_create(opal_pointer_array_t *pool, char **regex);
+ORTE_DECLSPEC int orte_util_nidmap_parse(char *regex);
+
+/* create a regular expression describing the nodes in the
+ * allocation */
+ORTE_DECLSPEC int orte_util_encode_nodemap(opal_buffer_t *buffer);
+
+/* decode a regular expression created by the encode function
+ * into the orte_node_pool array */
+ORTE_DECLSPEC int orte_util_decode_daemon_nodemap(opal_buffer_t *buffer);
+
+ORTE_DECLSPEC int orte_util_build_daemon_nidmap(void);
+
+/* create a regular expression describing the ppn for a job */
+ORTE_DECLSPEC int orte_util_nidmap_generate_ppn(orte_job_t *jdata, char **ppn);
+
+/* decode the ppn */
+ORTE_DECLSPEC int orte_util_nidmap_parse_ppn(orte_job_t *jdata, char *ppn);
 
 END_C_DECLS
 

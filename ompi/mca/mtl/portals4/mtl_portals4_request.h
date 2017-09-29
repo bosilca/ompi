@@ -22,6 +22,7 @@
 
 #include "opal/datatype/opal_convertor.h"
 #include "ompi/mca/mtl/mtl.h"
+#include "opal/mca/timer/base/base.h"
 
 struct ompi_mtl_portals4_message_t;
 struct ompi_mtl_portals4_pending_request_t;
@@ -82,6 +83,28 @@ struct ompi_mtl_portals4_recv_request_t {
 #endif
 };
 typedef struct ompi_mtl_portals4_recv_request_t ompi_mtl_portals4_recv_request_t;
+
+struct ompi_mtl_portals4_rndv_get_frag_t {
+    opal_free_list_item_t super;
+    /* the recv request that's composed of these frags */
+    ompi_mtl_portals4_recv_request_t *request;
+    /* info extracted from the put_overflow event that is required to retry the rndv-get */
+    void            *frag_start;
+    ptl_size_t       frag_length;
+    ptl_process_t    frag_target;
+    ptl_hdr_data_t   frag_match_bits;
+    ptl_size_t       frag_remote_offset;
+    /* the absolute time at which this frag times out */
+    opal_timer_t     frag_abs_timeout_usec;
+
+    int (*event_callback)(ptl_event_t *ev, struct ompi_mtl_portals4_rndv_get_frag_t*);
+
+#if OPAL_ENABLE_DEBUG
+    uint32_t frag_num;
+#endif
+};
+typedef struct ompi_mtl_portals4_rndv_get_frag_t ompi_mtl_portals4_rndv_get_frag_t;
+OBJ_CLASS_DECLARATION(ompi_mtl_portals4_rndv_get_frag_t);
 
 
 struct ompi_mtl_portals4_recv_short_request_t {

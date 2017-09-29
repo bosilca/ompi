@@ -12,7 +12,7 @@
  *                         All rights reserved.
  * Copyright (c) 2007-2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2010      Oracle and/or its affiliates.  All rights reserved
- * Copyright (c) 2013-2015 Los Alamos National Security, LLC. All rights
+ * Copyright (c) 2013-2017 Los Alamos National Security, LLC. All rights
  *                         reserved.
  * $COPYRIGHT$
  *
@@ -184,8 +184,8 @@ static int mca_pml_ob1_component_register(void)
     mca_pml_ob1_param_register_int("free_list_max", -1, &mca_pml_ob1.free_list_max);
     mca_pml_ob1_param_register_int("free_list_inc", 64, &mca_pml_ob1.free_list_inc);
     mca_pml_ob1_param_register_int("priority", 20, &mca_pml_ob1.priority);
-    mca_pml_ob1_param_register_sizet("send_pipeline_depth", 3, &mca_pml_ob1.send_pipeline_depth);
-    mca_pml_ob1_param_register_sizet("recv_pipeline_depth", 4, &mca_pml_ob1.recv_pipeline_depth);
+    mca_pml_ob1_param_register_int("send_pipeline_depth", 3, &mca_pml_ob1.send_pipeline_depth);
+    mca_pml_ob1_param_register_int("recv_pipeline_depth", 4, &mca_pml_ob1.recv_pipeline_depth);
 
     /* NTH: we can get into a live-lock situation in the RDMA failure path so disable
        RDMA retries for now. Falling back to send may suck but it is better than
@@ -294,12 +294,6 @@ mca_pml_ob1_component_init( int* priority,
         }
 
     }
-
-    /* Set this here (vs in component_open()) because
-       opal_leave_pinned* may have been set after MCA params were
-       read (e.g., by the openib btl) */
-    mca_pml_ob1.leave_pinned = (1 == opal_leave_pinned);
-    mca_pml_ob1.leave_pinned_pipeline = (int) opal_leave_pinned_pipeline;
 
     return &mca_pml_ob1.super;
 }

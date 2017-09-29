@@ -14,9 +14,11 @@
  * Copyright (c) 2007-2015 Los Alamos National Security, LLC.  All rights
  *                         reserved.
  * Copyright (c) 2013      NVIDIA Corporation.  All rights reserved.
- * Copyright (c) 2013-2016 Intel, Inc. All rights reserved
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
  * Copyright (c) 2015      Mellanox Technologies, Inc.
  *                         All rights reserved.
+ * Copyright (c) 2016      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -35,6 +37,7 @@
 #include "ompi/runtime/params.h"
 #include "ompi/mca/rte/rte.h"
 
+#include "opal/mca/pmix/base/base.h"
 #include "opal/util/argv.h"
 #include "opal/util/output.h"
 #include "opal/util/show_help.h"
@@ -59,8 +62,7 @@ bool ompi_mpi_keep_fqdn_hostnames = false;
 bool ompi_have_sparse_group_storage = OPAL_INT_TO_BOOL(OMPI_GROUP_SPARSE);
 bool ompi_use_sparse_group_storage = OPAL_INT_TO_BOOL(OMPI_GROUP_SPARSE);
 
-bool ompi_mpi_yield_when_idle = true;
-bool ompi_mpi_lazy_wait_in_init = false;
+bool ompi_mpi_yield_when_idle = false;
 int ompi_mpi_event_tick_rate = -1;
 char *ompi_mpi_show_mca_params_string = NULL;
 bool ompi_mpi_have_sparse_group_storage = !!(OMPI_GROUP_SPARSE);
@@ -105,21 +107,13 @@ int ompi_mpi_register_params(void)
      */
     /* JMS: Need ORTE data here -- set this to 0 when
        exactly/under-subscribed, or 1 when oversubscribed */
-    ompi_mpi_yield_when_idle = true;
+    ompi_mpi_yield_when_idle = false;
     (void) mca_base_var_register("ompi", "mpi", NULL, "yield_when_idle",
                                  "Yield the processor when waiting for MPI communication (for MPI processes, will default to 1 when oversubscribing nodes)",
                                  MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
                                  OPAL_INFO_LVL_9,
                                  MCA_BASE_VAR_SCOPE_READONLY,
                                  &ompi_mpi_yield_when_idle);
-
-    ompi_mpi_lazy_wait_in_init = true;
-    (void) mca_base_var_register("ompi", "mpi", NULL, "lazy_wait_in_init",
-                                 "Avoid aggressive progress in MPI_Init, make sure that PMIx server has timeslots to progress",
-                                 MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
-                                 OPAL_INFO_LVL_9,
-                                 MCA_BASE_VAR_SCOPE_READONLY,
-                                 &ompi_mpi_lazy_wait_in_init);
 
     ompi_mpi_event_tick_rate = -1;
     (void) mca_base_var_register("ompi", "mpi", NULL, "event_tick_rate",
@@ -210,7 +204,6 @@ int ompi_mpi_register_params(void)
     }
 
     /* File to use when dumping the parameters */
-    ompi_mpi_show_mca_params_file = "";
     (void) mca_base_var_register("ompi", "mpi", NULL, "show_mca_params_file",
                                  "If mpi_show_mca_params is true, setting this string to a valid filename tells Open MPI to dump all the MCA parameter values into a file suitable for reading via the mca_param_files parameter (good for reproducability of MPI jobs)",
                                  MCA_BASE_VAR_TYPE_STRING, NULL, 0, 0,
@@ -339,7 +332,8 @@ int ompi_show_all_mca_params(int32_t rank, int requested, char *nodename) {
     timestamp = time(NULL);
 
     /* Open the file if one is specified */
-    if (0 != strlen(ompi_mpi_show_mca_params_file)) {
+    if (NULL != ompi_mpi_show_mca_params_file &&
+        0 != strlen(ompi_mpi_show_mca_params_file)) {
         if ( NULL == (fp = fopen(ompi_mpi_show_mca_params_file, "w")) ) {
             opal_output(0, "Unable to open file <%s> to write MCA parameters", ompi_mpi_show_mca_params_file);
             return OMPI_ERR_FILE_OPEN_FAILURE;
@@ -398,7 +392,8 @@ int ompi_show_all_mca_params(int32_t rank, int requested, char *nodename) {
         }
 
         /* Print the parameter */
-        if (0 != strlen(ompi_mpi_show_mca_params_file)) {
+        if (NULL != ompi_mpi_show_mca_params_file &&
+            0 != strlen(ompi_mpi_show_mca_params_file)) {
             fprintf(fp, "%s\n", var_dump[0]);
         } else {
             opal_output(0, "%s\n", var_dump[0]);
@@ -408,7 +403,8 @@ int ompi_show_all_mca_params(int32_t rank, int requested, char *nodename) {
     }
 
     /* Close file, cleanup allocated memory*/
-    if (0 != strlen(ompi_mpi_show_mca_params_file)) {
+    if (NULL != ompi_mpi_show_mca_params_file &&
+        0 != strlen(ompi_mpi_show_mca_params_file)) {
         fclose(fp);
     }
 

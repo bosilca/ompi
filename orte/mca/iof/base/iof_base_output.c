@@ -10,6 +10,8 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2008      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2017      Intel, Inc. All rights reserved.
+ * Copyright (c) 2017      Mellanox Technologies. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -37,14 +39,15 @@
 #include "opal/util/output.h"
 
 #include "orte/util/name_fns.h"
+#include "orte/util/threads.h"
 #include "orte/runtime/orte_globals.h"
 #include "orte/mca/errmgr/errmgr.h"
 #include "orte/mca/state/state.h"
 
 #include "orte/mca/iof/base/base.h"
 
-int orte_iof_base_write_output(orte_process_name_t *name, orte_iof_tag_t stream,
-                                unsigned char *data, int numbytes,
+int orte_iof_base_write_output(const orte_process_name_t *name, orte_iof_tag_t stream,
+                               const unsigned char *data, int numbytes,
                                orte_iof_write_event_t *channel)
 {
     char starttag[ORTE_IOF_BASE_TAG_MAX], endtag[ORTE_IOF_BASE_TAG_MAX], *suffix;
@@ -146,7 +149,7 @@ int orte_iof_base_write_output(orte_process_name_t *name, orte_iof_tag_t stream,
     output->numbytes = numbytes;
     goto process;
 
-construct:
+  construct:
     starttaglen = strlen(starttag);
     endtaglen = strlen(endtag);
     endtagged = false;
@@ -248,7 +251,7 @@ construct:
     }
     output->numbytes = k;
 
-process:
+  process:
     /* add this data to the write list for this fd */
     opal_list_append(&channel->outputs, &output->super);
 
@@ -261,8 +264,7 @@ process:
         OPAL_OUTPUT_VERBOSE((1, orte_iof_base_framework.framework_output,
                              "%s write:output adding write event",
                              ORTE_NAME_PRINT(ORTE_PROC_MY_NAME)));
-        opal_event_add(channel->ev, 0);
-        channel->pending = true;
+        ORTE_IOF_SINK_ACTIVATE(channel);
     }
 
     return num_buffered;
@@ -294,13 +296,15 @@ void orte_iof_base_static_dump_output(orte_iof_read_event_t *rev)
     }
 }
 
-void orte_iof_base_write_handler(int fd, short event, void *cbdata)
+void orte_iof_base_write_handler(int _fd, short event, void *cbdata)
 {
     orte_iof_sink_t *sink = (orte_iof_sink_t*)cbdata;
     orte_iof_write_event_t *wev = sink->wev;
     opal_list_item_t *item;
     orte_iof_write_output_t *output;
-    int num_written;
+    int num_written, total_written = 0;
+
+    ORTE_ACQUIRE_OBJECT(sink);
 
     OPAL_OUTPUT_VERBOSE((1, orte_iof_base_framework.framework_output,
                          "%s write:handler writing data to %d",
@@ -328,7 +332,7 @@ void orte_iof_base_write_handler(int fd, short event, void *cbdata)
                 /* leave the write event running so it will call us again
                  * when the fd is ready.
                  */
-                return;
+                goto NEXT_CALL;
             }
             /* otherwise, something bad happened so all we can do is abort
              * this attempt
@@ -351,12 +355,23 @@ void orte_iof_base_write_handler(int fd, short event, void *cbdata)
             /* leave the write event running so it will call us again
              * when the fd is ready
              */
-            return;
+            goto NEXT_CALL;
         }
         OBJ_RELEASE(output);
-    }
-ABORT:
-    opal_event_del(wev->ev);
-    wev->pending = false;
 
+        total_written += num_written;
+        if(wev->always_writable && (ORTE_IOF_SINK_BLOCKSIZE <= total_written)){
+            /* If this is a regular file it will never tell us it will block
+             * Write no more than ORTE_IOF_REGULARF_BLOCK at a time allowing
+             * other fds to progress
+             */
+            goto NEXT_CALL;
+        }
+    }
+  ABORT:
+    wev->pending = false;
+    ORTE_POST_OBJECT(wev);
+    return;
+NEXT_CALL:
+    ORTE_IOF_SINK_ACTIVATE(wev);
 }

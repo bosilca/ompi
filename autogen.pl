@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# Copyright (c) 2009-2016 Cisco Systems, Inc.  All rights reserved.
+# Copyright (c) 2009-2017 Cisco Systems, Inc.  All rights reserved
 # Copyright (c) 2010      Oracle and/or its affiliates.  All rights reserved.
 # Copyright (c) 2013      Mellanox Technologies, Inc.
 #                         All rights reserved.
@@ -316,7 +316,7 @@ sub mca_process_framework {
             $mca_found->{$pname}->{$framework}->{found} = 1;
             opendir(DIR, $dir) ||
                 my_die "Can't open $dir directory";
-            foreach my $d (readdir(DIR)) {
+            foreach my $d (sort(readdir(DIR))) {
                 # Skip any non-directory, "base", or any dir that
                 # begins with "."
                 next
@@ -432,11 +432,28 @@ sub mca_process_project {
             next
                 if (! -d "$dir/$d" || $d eq "base" || substr($d, 0, 1) eq ".");
 
-            # If this directory has a $dir.h file and a base/
+            my $framework_header = "$dir/$d/$d.h";
+
+            # If there's a $dir/$d/autogen.options file, read it
+            my $ao_file = "$dir/$d/autogen.options";
+            if (-r $ao_file) {
+                verbose "\n>>> Found $dir/$d/autogen.options file\n";
+                open(IN, $ao_file) ||
+                    die "$ao_file present, but cannot open it";
+                while (<IN>) {
+                    if (m/\s*framework_header\s*=\s*(.+?)\s*$/) {
+                        verbose "    Framework header entry: $1\n";
+                        $framework_header = "$dir/$d/$1";
+                    }
+                }
+                close(IN);
+            }
+
+            # If this directory has a framework header and a base/
             # subdirectory, or its name is "common", then it's a
             # framework.
             if ("common" eq $d || !$project->{need_base} ||
-                (-f "$dir/$d/$d.h" && -d "$dir/$d/base")) {
+                (-f $framework_header && -d "$dir/$d/base")) {
                 verbose "\n=== Found $pname / $d framework\n";
                 mca_process_framework($topdir, $project, $d);
             }
@@ -611,7 +628,7 @@ sub mpiext_run_global {
     my $dir = "$topdir/$ext_prefix";
     opendir(DIR, $dir) ||
         my_die "Can't open $dir directory";
-    foreach my $d (readdir(DIR)) {
+    foreach my $d (sort(readdir(DIR))) {
         # Skip any non-directory, "base", or any dir that begins with "."
         next
             if (! -d "$dir/$d" || $d eq "base" || substr($d, 0, 1) eq ".");
@@ -698,7 +715,7 @@ sub mpicontrib_run_global {
     my $dir = "$topdir/$contrib_prefix";
     opendir(DIR, $dir) ||
         my_die "Can't open $dir directory";
-    foreach my $d (readdir(DIR)) {
+    foreach my $d (sort(readdir(DIR))) {
         # Skip any non-directory, "base", or any dir that begins with "."
         next
             if (! -d "$dir/$d" || $d eq "base" || substr($d, 0, 1) eq ".");
@@ -957,6 +974,28 @@ sub patch_autotools_output {
     #
     # Below is essentially an upstream patch for Libtool which we want
     # made available to Open MPI users running older versions of Libtool
+
+    foreach my $tag (("", "_FC")) {
+
+        # We have to change the search pattern and substitution on each
+        # iteration to take into account the tag changing
+        my $search_string = '# icc used to be incompatible with GCC.\n\s+' .
+                            '# ICC 10 doesn\047t accept -KPIC any more.\n.*\n\s+' .
+	                    "lt_prog_compiler_wl${tag}=";
+        my $replace_string = "# Flang compiler
+      *flang)
+	lt_prog_compiler_wl${tag}='-Wl,'
+	lt_prog_compiler_pic${tag}='-fPIC -DPIC'
+	lt_prog_compiler_static${tag}='-static'
+        ;;
+      # icc used to be incompatible with GCC.
+      # ICC 10 doesn't accept -KPIC any more.
+      icc* | ifort*)
+	lt_prog_compiler_wl${tag}=";
+
+        push(@verbose_out, $indent_str . "Patching configure for flang Fortran ($tag)\n");
+        $c =~ s/$search_string/$replace_string/;
+    }
 
     foreach my $tag (("", "_FC")) {
 

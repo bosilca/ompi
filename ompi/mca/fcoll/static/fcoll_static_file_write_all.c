@@ -2,7 +2,7 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2005 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -11,8 +11,9 @@
  *                         All rights reserved.
  * Copyright (c) 2008-2016 University of Houston. All rights reserved.
  * Copyright (c) 2015      Los Alamos National Security, LLC. All rights reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -90,13 +91,13 @@ mca_fcoll_static_file_write_all (mca_io_ompio_file_t *fh,
     /* For creating datatype of type io_array */
     int blocklen[3] = {1, 1, 1};
     int static_num_io_procs=1;
-    OPAL_PTRDIFF_TYPE d[3], base;
+    ptrdiff_t d[3], base;
     ompi_datatype_t *types[3];
     ompi_datatype_t *io_array_type=MPI_DATATYPE_NULL;
     int my_aggregator=-1;
     bool sendbuf_is_contiguous= false;
     size_t ftype_size;
-    OPAL_PTRDIFF_TYPE ftype_extent, lb;
+    ptrdiff_t ftype_extent, lb;
 
 
     /*----------------------------------------------*/
@@ -118,7 +119,7 @@ mca_fcoll_static_file_write_all (mca_io_ompio_file_t *fh,
     /**************************************************************************
      ** 1.  In case the data is not contigous in memory, decode it into an iovec
      **************************************************************************/
-    if ( ( ftype_extent == (OPAL_PTRDIFF_TYPE) ftype_size)             &&
+    if ( ( ftype_extent == (ptrdiff_t) ftype_size)             &&
          opal_datatype_is_contiguous_memory_layout(&datatype->super,1) &&
          0 == lb ) {
         sendbuf_is_contiguous = true;
@@ -155,9 +156,9 @@ mca_fcoll_static_file_write_all (mca_io_ompio_file_t *fh,
     types[1] = &ompi_mpi_long.dt;
     types[2] = &ompi_mpi_int.dt;
 
-    d[0] = (OPAL_PTRDIFF_TYPE)&local_iov_array[0];
-    d[1] = (OPAL_PTRDIFF_TYPE)&local_iov_array[0].length;
-    d[2] = (OPAL_PTRDIFF_TYPE)&local_iov_array[0].process_id;
+    d[0] = (ptrdiff_t)&local_iov_array[0];
+    d[1] = (ptrdiff_t)&local_iov_array[0].length;
+    d[2] = (ptrdiff_t)&local_iov_array[0].process_id;
     base = d[0];
     for (i=0 ; i<3 ; i++) {
         d[i] -= base;
@@ -207,13 +208,13 @@ mca_fcoll_static_file_write_all (mca_io_ompio_file_t *fh,
 #if OMPIO_FCOLL_WANT_TIME_BREAKDOWN
     start_exch = MPI_Wtime();
 #endif
-    ret = fh->f_comm->c_coll.coll_allreduce (&local_cycles,
+    ret = fh->f_comm->c_coll->coll_allreduce (&local_cycles,
                                              &cycles,
                                              1,
                                              MPI_INT,
                                              MPI_MAX,
                                              fh->f_comm,
-                                             fh->f_comm->c_coll.coll_allreduce_module);
+                                             fh->f_comm->c_coll->coll_allreduce_module);
 
     if (OMPI_SUCCESS != ret){
         fprintf(stderr,"local cycles allreduce!\n");
@@ -295,7 +296,7 @@ mca_fcoll_static_file_write_all (mca_io_ompio_file_t *fh,
 #if OMPIO_FCOLL_WANT_TIME_BREAKDOWN
     start_exch = MPI_Wtime();
 #endif
-    ret = fcoll_base_coll_allgather_array (&iov_size,
+    ret = ompi_fcoll_base_coll_allgather_array (&iov_size,
                                            1,
                                            MPI_INT,
                                            iovec_count_per_process,
@@ -339,7 +340,7 @@ mca_fcoll_static_file_write_all (mca_io_ompio_file_t *fh,
 #if OMPIO_FCOLL_WANT_TIME_BREAKDOWN
     start_exch = MPI_Wtime();
 #endif
-    ret = fcoll_base_coll_gatherv_array (local_iov_array,
+    ret = ompi_fcoll_base_coll_gatherv_array (local_iov_array,
                                          iov_size,
                                          io_array_type,
                                          global_iov_array,
@@ -500,7 +501,7 @@ mca_fcoll_static_file_write_all (mca_io_ompio_file_t *fh,
         start_exch = MPI_Wtime();
 #endif
         /* gather from each process how many bytes each will be sending */
-        ret = fcoll_base_coll_gather_array (&bytes_to_write_in_cycle,
+        ret = ompi_fcoll_base_coll_gather_array (&bytes_to_write_in_cycle,
                                             1,
                                             MPI_INT,
                                             bytes_per_process,
@@ -787,7 +788,7 @@ mca_fcoll_static_file_write_all (mca_io_ompio_file_t *fh,
             /* allocate a send buffer and copy the data that needs
                to be sent into it in case the data is non-contigous
                in memory */
-            OPAL_PTRDIFF_TYPE mem_address;
+            ptrdiff_t mem_address;
             size_t remaining = 0;
             size_t temp_position = 0;
 
@@ -800,7 +801,7 @@ mca_fcoll_static_file_write_all (mca_io_ompio_file_t *fh,
             remaining = bytes_to_write_in_cycle;
 
             while (remaining) {
-                mem_address = (OPAL_PTRDIFF_TYPE)
+                mem_address = (ptrdiff_t)
                     (decoded_iov[iov_index].iov_base) + current_position;
 
                 if (remaining >=
@@ -914,7 +915,7 @@ mca_fcoll_static_file_write_all (mca_io_ompio_file_t *fh,
             for (i=0 ; i<fh->f_num_of_io_entries ; i++) {
                 printf(" ADDRESS: %p  OFFSET: %ld   LENGTH: %ld\n",
                        fh->f_io_array[i].memory_address,
-                       (OPAL_PTRDIFF_TYPE)fh->f_io_array[i].offset,
+                       (ptrdiff_t)fh->f_io_array[i].offset,
                        fh->f_io_array[i].length);
             }
 #endif

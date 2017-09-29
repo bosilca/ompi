@@ -9,6 +9,7 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
+ * Copyright (c) 2017      Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -35,8 +36,10 @@ BEGIN_C_DECLS
 
 typedef struct {
     opal_list_item_t super;
-    int start;
+    int vpid;
     int cnt;
+    int slots;
+    orte_topology_t *t;
 } orte_regex_range_t;
 ORTE_DECLSPEC OBJ_CLASS_DECLARATION(orte_regex_range_t);
 
@@ -50,16 +53,7 @@ typedef struct {
 } orte_regex_node_t;
 ORTE_DECLSPEC OBJ_CLASS_DECLARATION(orte_regex_node_t);
 
-/* NOTE: this is a destructive call for the nodes param - the
- * function will search and replace all commas with '\0'
- */
-ORTE_DECLSPEC int orte_regex_create(char *nodes, char **regexp);
-
 ORTE_DECLSPEC int orte_regex_extract_node_names(char *regexp, char ***names);
-
-ORTE_DECLSPEC int orte_regex_extract_ppn(int num_nodes, char *regexp, int **ppn);
-
-ORTE_DECLSPEC int orte_regex_extract_name_range(char *regexp, char ***names);
 
 END_C_DECLS
 #endif

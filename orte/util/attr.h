@@ -1,5 +1,7 @@
 /*
- * Copyright (c) 2014-2016 Intel, Inc. All rights reserved
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2016      Research Organization for Information Science
+ *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -68,6 +70,7 @@ typedef uint8_t orte_node_flags_t;
                                                              // we need to know the id of our "host" to help any procs on us to determine locality
 #define ORTE_NODE_ALIAS          (ORTE_NODE_START_KEY + 4)   // comma-separate list of alternate names for the node
 #define ORTE_NODE_SERIAL_NUMBER  (ORTE_NODE_START_KEY + 5)   // string - serial number: used if node is a coprocessor
+#define ORTE_NODE_PORT           (ORTE_NODE_START_KEY + 6)   // int32 - Alternate port to be passed to plm
 
 #define ORTE_NODE_MAX_KEY        200
 
@@ -75,7 +78,6 @@ typedef uint8_t orte_node_flags_t;
 typedef uint16_t orte_job_flags_t;
 #define ORTE_JOB_FLAGS_T  OPAL_UINT16
 #define ORTE_JOB_FLAG_UPDATED            0x0001   // job has been updated and needs to be included in the pidmap message
-#define ORTE_JOB_FLAG_GANG_LAUNCHED      0x0002   // MPI is allowed on this job - i.e., all members of the job were simultaneously launched
 #define ORTE_JOB_FLAG_RESTARTED          0x0004   // some procs in this job are being restarted
 #define ORTE_JOB_FLAG_ABORTED            0x0008   // did this job abort?
 #define ORTE_JOB_FLAG_DEBUGGER_DAEMON    0x0010   // job is launching debugger daemons
@@ -85,7 +87,7 @@ typedef uint16_t orte_job_flags_t;
 #define ORTE_JOB_FLAG_RECOVERABLE        0x0100   // job is recoverable
 #define ORTE_JOB_FLAG_RESTART            0x0200   //
 #define ORTE_JOB_FLAG_PROCS_MIGRATING    0x0400   // some procs in job are migrating from one node to another
-
+#define ORTE_JOB_FLAG_OVERSUBSCRIBED     0x0800   // at least one node in the job is oversubscribed
 
 /***   JOB ATTRIBUTE KEYS   ***/
 #define ORTE_JOB_START_KEY   ORTE_NODE_MAX_KEY
@@ -125,7 +127,7 @@ typedef uint16_t orte_job_flags_t;
 #define ORTE_JOB_PHYSICAL_CPUIDS        (ORTE_JOB_START_KEY + 34)    // bool - Hostfile contains physical jobids in cpuset
 #define ORTE_JOB_LAUNCHED_DAEMONS       (ORTE_JOB_START_KEY + 35)    // bool - Job caused new daemons to be spawned
 #define ORTE_JOB_REPORT_BINDINGS        (ORTE_JOB_START_KEY + 36)    // bool - Report process bindings
-#define ORTE_JOB_SLOT_LIST              (ORTE_JOB_START_KEY + 37)    // string - constraints on cores to use
+#define ORTE_JOB_CPU_LIST               (ORTE_JOB_START_KEY + 37)    // string - cpus to which procs are to be bound
 #define ORTE_JOB_NOTIFICATIONS          (ORTE_JOB_START_KEY + 38)    // string - comma-separated list of desired notifications+methods
 #define ORTE_JOB_ROOM_NUM               (ORTE_JOB_START_KEY + 39)    // int - number of remote request's hotel room
 #define ORTE_JOB_LAUNCH_PROXY           (ORTE_JOB_START_KEY + 40)    // opal_process_name_t - name of spawn requestor
@@ -140,6 +142,10 @@ typedef uint16_t orte_job_flags_t;
 #define ORTE_JOB_MULTI_DAEMON_SIM       (ORTE_JOB_START_KEY + 49)    // bool - multiple daemons/node to simulate large cluster
 #define ORTE_JOB_NOTIFY_COMPLETION      (ORTE_JOB_START_KEY + 50)    // bool - notify parent proc when spawned job terminates
 #define ORTE_JOB_TRANSPORT_KEY          (ORTE_JOB_START_KEY + 51)    // string - transport keys assigned to this job
+#define ORTE_JOB_INFO_CACHE             (ORTE_JOB_START_KEY + 52)    // opal_list_t - list of opal_value_t to be included in job_info
+#define ORTE_JOB_FULLY_DESCRIBED        (ORTE_JOB_START_KEY + 53)    // bool - job is fully described in launch msg
+#define ORTE_JOB_SILENT_TERMINATION     (ORTE_JOB_START_KEY + 54)    // bool - do not generate an event notification when job
+                                                                     //        normally terminates
 
 #define ORTE_JOB_MAX_KEY   300
 
@@ -183,16 +189,16 @@ typedef uint16_t orte_proc_flags_t;
 
 /*** RML ATTRIBUTE keys ***/
 #define ORTE_RML_START_KEY  ORTE_PROC_MAX_KEY
-#define ORTE_RML_TRANSPORT_TYPE         (ORTE_RML_START_KEY + 1)    // string - null terminated string containing transport type
-#define ORTE_RML_PROTOCOL_TYPE          (ORTE_RML_START_KEY + 2)    // string - protocol type (e.g., as returned by fi_info)
-#define ORTE_RML_CONDUIT_ID             (ORTE_RML_START_KEY + 3)    // orte_rml_conduit_t - conduit_id for this transport
-#define ORTE_RML_INCLUDE_COMP_ATTRIB    (ORTE_RML_START_KEY + 4)    // string - comma delimited list of RML component names to be considered
-#define ORTE_RML_EXCLUDE_COMP_ATTRIB    (ORTE_RML_START_KEY + 5)    // string - comma delimited list of RML component names to be excluded
-#define ORTE_RML_TRANSPORT_ATTRIB       (ORTE_RML_START_KEY + 6)    // string - comma delimited list of transport types to be considered (e.g., "fabric,ethernet")
-#define ORTE_RML_QUALIFIER_ATTRIB       (ORTE_RML_START_KEY + 7)    // string - comma delimited list of qualifiers (e.g., routed=direct,bandwidth=xxx)
-#define ORTE_RML_PROVIDER_ATTRIB        (ORTE_RML_START_KEY + 8)    // string - comma delimited list of provider names to be considered
-#define ORTE_RML_PROTOCOL_ATTRIB        (ORTE_RML_START_KEY + 9)    // string - comma delimited list of protocols to be considered (e.g., tcp,udp)
-
+#define ORTE_RML_TRANSPORT_TYPE         (ORTE_RML_START_KEY +  1)   // string - null terminated string containing transport type
+#define ORTE_RML_PROTOCOL_TYPE          (ORTE_RML_START_KEY +  2)   // string - protocol type (e.g., as returned by fi_info)
+#define ORTE_RML_CONDUIT_ID             (ORTE_RML_START_KEY +  3)   // orte_rml_conduit_t - conduit_id for this transport
+#define ORTE_RML_INCLUDE_COMP_ATTRIB    (ORTE_RML_START_KEY +  4)   // string - comma delimited list of RML component names to be considered
+#define ORTE_RML_EXCLUDE_COMP_ATTRIB    (ORTE_RML_START_KEY +  5)   // string - comma delimited list of RML component names to be excluded
+#define ORTE_RML_TRANSPORT_ATTRIB       (ORTE_RML_START_KEY +  6)   // string - comma delimited list of transport types to be considered (e.g., "fabric,ethernet")
+#define ORTE_RML_QUALIFIER_ATTRIB       (ORTE_RML_START_KEY +  7)   // string - comma delimited list of qualifiers (e.g., routed=direct,bandwidth=xxx)
+#define ORTE_RML_PROVIDER_ATTRIB        (ORTE_RML_START_KEY +  8)   // string - comma delimited list of provider names to be considered
+#define ORTE_RML_PROTOCOL_ATTRIB        (ORTE_RML_START_KEY +  9)   // string - comma delimited list of protocols to be considered (e.g., tcp,udp)
+#define ORTE_RML_ROUTED_ATTRIB          (ORTE_RML_START_KEY + 10)   // string - comma delimited list of routed modules to be considered
 
 #define ORTE_ATTR_KEY_MAX  1000
 

@@ -12,7 +12,7 @@
  *                         All rights reserved.
  * Copyright (c) 2007-2014 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2014-2016 Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
  * Copyright (c) 2016      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
@@ -48,13 +48,12 @@
 #include "opal/class/opal_pointer_array.h"
 
 #include "orte/runtime/orte_globals.h"
+#include "orte/mca/routed/routed.h"
 
 #include "orte/mca/rml/rml.h"
 
 
 BEGIN_C_DECLS
-
-OPAL_TIMING_DECLARE_EXT(ORTE_DECLSPEC, tm_rml)
 
 /*
  * MCA Framework
@@ -62,27 +61,6 @@ OPAL_TIMING_DECLARE_EXT(ORTE_DECLSPEC, tm_rml)
 ORTE_DECLSPEC extern mca_base_framework_t orte_rml_base_framework;
 /* select a component */
 ORTE_DECLSPEC int orte_rml_base_select(void);
-
-/**
- * Post receive to get updates regarding contact information
- *
- * Post a non-blocking receive (likely during orte_init()) to receive
- * updated contact information from the HNP when it becomes available.
- * This should be called in any process that needs such updates, and
- * the receive will continue to get update callbacks until
- * orte_rml_base_comm_stop() is called.
- */
-ORTE_DECLSPEC void orte_rml_base_comm_start(void);
-
-
-/**
- * Stop receiving contact information updates
- *
- * Shut down the receive posted during orte_rml_base_comm_start(),
- * likely during orte_finalize().
- */
-ORTE_DECLSPEC void orte_rml_base_comm_stop(void);
-
 
 /*
  *  globals that might be needed
@@ -101,7 +79,7 @@ typedef struct {
     opal_pointer_array_t conduits;  /* array to hold the open conduits */
     opal_list_t posted_recvs;
     opal_list_t unmatched_msgs;
-    orte_rml_conduit_t def_conduit_id;
+    int max_retries;
 #if OPAL_ENABLE_TIMING
     bool timing;
 #endif
@@ -116,6 +94,7 @@ typedef struct {
     orte_process_name_t origin;
     int status;                  // returned status on send
     orte_rml_tag_t tag;          // targeted tag
+    int retries;                 // #times we have tried to send it
 
     /* user's send callback functions and data */
     union {
@@ -135,6 +114,8 @@ typedef struct {
      * transfers
      */
     char *data;
+    /* routed module to be used */
+    char *routed;
 } orte_rml_send_t;
 OBJ_CLASS_DECLARATION(orte_rml_send_t);
 
@@ -143,8 +124,6 @@ typedef struct {
     opal_object_t super;
     opal_event_t ev;
     orte_rml_send_t send;
-    /* conduit_id */
-    orte_rml_conduit_t conduit_id;
 } orte_rml_send_request_t;
 OBJ_CLASS_DECLARATION(orte_rml_send_request_t);
 
@@ -182,13 +161,29 @@ typedef struct {
 } orte_rml_recv_request_t;
 OBJ_CLASS_DECLARATION(orte_rml_recv_request_t);
 
+/* define a structure for sending a message to myself */
+typedef struct {
+    opal_object_t object;
+    opal_event_t ev;
+    orte_rml_tag_t tag;
+    struct iovec* iov;
+    int count;
+    opal_buffer_t *buffer;
+    union {
+        orte_rml_callback_fn_t        iov;
+        orte_rml_buffer_callback_fn_t buffer;
+    } cbfunc;
+    void *cbdata;
+} orte_self_send_xfer_t;
+OBJ_CLASS_DECLARATION(orte_self_send_xfer_t);
+
 #define ORTE_RML_POST_MESSAGE(p, t, s, b, l)                            \
     do {                                                                \
         orte_rml_recv_t *msg;                                           \
         opal_output_verbose(5, orte_rml_base_framework.framework_output, \
-                            "%s Message posted at %s:%d",               \
+                            "%s Message posted at %s:%d for tag %d",    \
                             ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),         \
-                            __FILE__, __LINE__);                        \
+                            __FILE__, __LINE__, (t));                   \
         msg = OBJ_NEW(orte_rml_recv_t);                                 \
         msg->sender.jobid = (p)->jobid;                                 \
         msg->sender.vpid = (p)->vpid;                                   \
@@ -230,7 +225,7 @@ OBJ_CLASS_DECLARATION(orte_rml_recv_request_t);
             }                                                           \
          } else if (NULL != (m)->cbfunc.buffer) {                       \
             /* non-blocking buffer send */                              \
-            (m)->cbfunc.buffer((m)->status, &((m)->origin),             \
+            (m)->cbfunc.buffer((m)->status, &((m)->dst),                \
                            (m)->buffer,                                 \
                            (m)->tag, (m)->cbdata);                      \
          }                                                              \
@@ -241,38 +236,24 @@ OBJ_CLASS_DECLARATION(orte_rml_recv_request_t);
 /* common implementations */
 ORTE_DECLSPEC void orte_rml_base_post_recv(int sd, short args, void *cbdata);
 ORTE_DECLSPEC void orte_rml_base_process_msg(int fd, short flags, void *cbdata);
-ORTE_DECLSPEC void orte_rml_base_complete_recv_msg (orte_rml_recv_t **recv_msg);
 
 
 /* Stub API interfaces to cycle through active plugins */
-char* orte_rml_API_get_contact_info(void);
-void orte_rml_API_set_contact_info(const char *contact_info);
-
-int orte_rml_API_ping(const char* contact_info,
+int orte_rml_API_ping(orte_rml_conduit_t conduit_id,
+                      const char* contact_info,
                       const struct timeval* tv);
-int orte_rml_API_ping_conduit(orte_rml_conduit_t conduit_id,
-                              const char* contact_info,
-                              const struct timeval* tv);
 
-int orte_rml_API_send_nb(orte_process_name_t* peer, struct iovec* msg,
+int orte_rml_API_send_nb(orte_rml_conduit_t conduit_id,
+                         orte_process_name_t* peer, struct iovec* msg,
                          int count, orte_rml_tag_t tag,
                          orte_rml_callback_fn_t cbfunc, void* cbdata);
-int orte_rml_API_send_nb_conduit(orte_rml_conduit_t conduit_id,
-                                 orte_process_name_t* peer, struct iovec* msg,
-                                 int count, orte_rml_tag_t tag,
-                                 orte_rml_callback_fn_t cbfunc, void* cbdata);
 
-int orte_rml_API_send_buffer_nb(orte_process_name_t* peer,
+int orte_rml_API_send_buffer_nb(orte_rml_conduit_t conduit_id,
+                                orte_process_name_t* peer,
                                 struct opal_buffer_t* buffer,
                                 orte_rml_tag_t tag,
                                 orte_rml_buffer_callback_fn_t cbfunc,
                                 void* cbdata);
-int orte_rml_API_send_buffer_nb_conduit(orte_rml_conduit_t conduit_id,
-                                        orte_process_name_t* peer,
-                                        struct opal_buffer_t* buffer,
-                                        orte_rml_tag_t tag,
-                                        orte_rml_buffer_callback_fn_t cbfunc,
-                                        void* cbdata);
 
 void orte_rml_API_recv_nb(orte_process_name_t* peer,
                           orte_rml_tag_t tag,
@@ -294,6 +275,8 @@ int orte_rml_API_query_transports(opal_list_t *providers);
 orte_rml_conduit_t orte_rml_API_open_conduit(opal_list_t *attributes);
 
 void orte_rml_API_close_conduit(orte_rml_conduit_t id);
+
+char* orte_rml_API_get_routed(orte_rml_conduit_t id);
 
 END_C_DECLS
 

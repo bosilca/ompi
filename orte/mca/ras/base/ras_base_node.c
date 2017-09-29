@@ -9,9 +9,9 @@
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2011-2012 Los Alamos National Security, LLC.  All rights
+ * Copyright (c) 2011-2017 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2014-2016 Intel, Inc. All rights reserved.
+ * Copyright (c) 2014-2017 Intel, Inc. All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
@@ -30,6 +30,7 @@
 #include "opal/util/if.h"
 
 #include "orte/mca/errmgr/errmgr.h"
+#include "orte/mca/rmaps/base/base.h"
 #include "orte/util/name_fns.h"
 #include "orte/runtime/orte_globals.h"
 
@@ -46,7 +47,7 @@ int orte_ras_base_node_insert(opal_list_t* nodes, orte_job_t *jdata)
     int rc, i;
     orte_node_t *node, *hnp_node, *nptr;
     char *ptr;
-    bool hnp_alone = true;
+    bool hnp_alone = true, skiphnp = false;
     orte_attribute_t *kv;
     char **alias=NULL, **nalias;
 
@@ -78,6 +79,24 @@ int orte_ras_base_node_insert(opal_list_t* nodes, orte_job_t *jdata)
     /* get the hnp node's info */
     hnp_node = (orte_node_t*)opal_pointer_array_get_item(orte_node_pool, 0);
 
+    if ((orte_ras_base.launch_orted_on_hn == true) &&
+        (orte_managed_allocation)) {
+        if (NULL != hnp_node) {
+            OPAL_LIST_FOREACH(node, nodes, orte_node_t) {
+                if (orte_ifislocal(node->name)) {
+                    orte_hnp_is_allocated = true;
+                    break;
+                }
+            }
+            if (orte_hnp_is_allocated && !(ORTE_GET_MAPPING_DIRECTIVE(orte_rmaps_base.mapping) &
+                ORTE_MAPPING_NO_USE_LOCAL)) {
+                hnp_node->name = strdup("mpirun");
+                skiphnp = true;
+                ORTE_SET_MAPPING_DIRECTIVE(orte_rmaps_base.mapping, ORTE_MAPPING_NO_USE_LOCAL);
+            }
+        }
+    }
+
     /* cycle through the list */
     while (NULL != (item = opal_list_remove_first(nodes))) {
         node = (orte_node_t*)item;
@@ -86,7 +105,7 @@ int orte_ras_base_node_insert(opal_list_t* nodes, orte_job_t *jdata)
          * first position since it is the first one entered. We need to check to see
          * if this node is the same as the HNP's node so we don't double-enter it
          */
-        if (NULL != hnp_node && orte_ifislocal(node->name)) {
+        if (!skiphnp && NULL != hnp_node && orte_ifislocal(node->name)) {
             OPAL_OUTPUT_VERBOSE((5, orte_ras_base_framework.framework_output,
                                  "%s ras:base:node_insert updating HNP [%s] info to %ld slots",
                                  ORTE_NAME_PRINT(ORTE_PROC_MY_NAME),
@@ -96,7 +115,7 @@ int orte_ras_base_node_insert(opal_list_t* nodes, orte_job_t *jdata)
             /* flag that hnp has been allocated */
             orte_hnp_is_allocated = true;
             /* update the total slots in the job */
-            orte_ras_base.total_slots_alloc = node->slots;
+            orte_ras_base.total_slots_alloc += node->slots;
             /* copy the allocation data to that node's info */
             hnp_node->slots = node->slots;
             hnp_node->slots_max = node->slots_max;
@@ -189,7 +208,7 @@ int orte_ras_base_node_insert(opal_list_t* nodes, orte_job_t *jdata)
      * ensure we don't have any domain info in the node record
      * for the hnp
      */
-    if (!orte_have_fqdn_allocation && !hnp_alone) {
+    if (NULL != hnp_node && !orte_have_fqdn_allocation && !hnp_alone) {
         if (NULL != (ptr = strchr(hnp_node->name, '.'))) {
             *ptr = '\0';
         }

@@ -3,7 +3,7 @@
  * Copyright (c) 2012      Sandia National Laboratories.  All rights reserved.
  * Copyright (c) 2014-2016 Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2014      The University of Tennessee and The University
+ * Copyright (c) 2014-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * $COPYRIGHT$
@@ -101,8 +101,8 @@ ompi_osc_sm_fence(int assert, struct ompi_win_t *win)
     opal_atomic_mb();
 
     if (module->global_state->use_barrier_for_fence) {
-        return module->comm->c_coll.coll_barrier(module->comm,
-                                                 module->comm->c_coll.coll_barrier_module);
+        return module->comm->c_coll->coll_barrier(module->comm,
+                                                 module->comm->c_coll->coll_barrier_module);
     } else {
         module->my_sense = !module->my_sense;
         pthread_mutex_lock(&module->global_state->mtx);
@@ -149,8 +149,8 @@ ompi_osc_sm_start(struct ompi_group_t *group,
         size = ompi_group_size(module->start_group);
 
         for (int i = 0 ; i < size ; ++i) {
-            int rank_byte = ranks[i] >> 6;
-            uint64_t old, rank_bit = ((uint64_t) 1) << (ranks[i] & 0x3f);
+            int rank_byte = ranks[i] >> OSC_SM_POST_BITS;
+            osc_sm_post_type_t old, rank_bit = ((osc_sm_post_type_t) 1) << (ranks[i] & 0x3f);
 
             /* wait for rank to post */
             while (!(module->posts[my_rank][rank_byte] & rank_bit)) {
@@ -162,7 +162,7 @@ ompi_osc_sm_start(struct ompi_group_t *group,
 
             do {
                 old = module->posts[my_rank][rank_byte];
-            } while (!opal_atomic_cmpset_64 ((int64_t *) module->posts[my_rank] + rank_byte, old, old ^ rank_bit));
+            } while (!opal_atomic_cmpset ((volatile osc_sm_post_type_t *) module->posts[my_rank] + rank_byte, old, old ^ rank_bit));
        }
 
         free (ranks);
@@ -244,7 +244,7 @@ ompi_osc_sm_post(struct ompi_group_t *group,
 
         gsize = ompi_group_size(module->post_group);
         for (int i = 0 ; i < gsize ; ++i) {
-            (void) opal_atomic_add_64 ((int64_t *) module->posts[ranks[i]] + my_byte, my_bit);
+            (void) opal_atomic_add ((volatile osc_sm_post_type_t *) module->posts[ranks[i]] + my_byte, my_bit);
         }
 
         opal_atomic_wmb ();

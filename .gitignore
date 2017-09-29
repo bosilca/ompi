@@ -67,6 +67,7 @@ vc70.pdb
 .hg
 .hgignore_local
 stamp-h?
+AUTHORS
 
 ar-lib
 ylwrap
@@ -111,6 +112,7 @@ contrib/platform/intel/bend/*orcm*
 contrib/scaling/orte_no_op
 contrib/scaling/mpi_no_op
 contrib/scaling/mpi_barrier
+contrib/scaling/mpi_memprobe
 
 examples/hello_c
 examples/hello_cxx
@@ -127,6 +129,7 @@ examples/ring_oshmem
 examples/hello_oshmem
 examples/ring_oshmemfh
 examples/hello_oshmemfh
+examples/hello_oshmemcxx
 examples/oshmem_circular_shift
 examples/oshmem_max_reduction
 examples/oshmem_shmalloc
@@ -215,6 +218,8 @@ ompi/mpi/fortran/use-mpi-ignore-tkr/mpi-ignore-tkr-sizeof.h
 ompi/mpi/fortran/use-mpi-tkr/fortran_kinds.sh
 ompi/mpi/fortran/use-mpi-tkr/fortran_sizes.h
 ompi/mpi/fortran/use-mpi-tkr/mpi_kinds.ompi_module
+ompi/mpi/fortran/use-mpi-tkr/mpi-tkr-sizeof.f90
+ompi/mpi/fortran/use-mpi-tkr/mpi-tkr-sizeof.h
 
 ompi/mpi/java/java/mpi
 ompi/mpi/java/java/*.jar
@@ -241,6 +246,7 @@ ompi/mpiext/cuda/c/mpiext_cuda_c.h
 ompi/tools/mpisync/mpisync
 ompi/tools/mpisync/mpirun_prof
 ompi/tools/mpisync/ompi_timing_post
+ompi/tools/mpisync/mpisync.1
 
 ompi/tools/ompi_info/ompi_info
 ompi/tools/ompi_info/ompi_info.1
@@ -252,6 +258,7 @@ ompi/tools/wrappers/mpicc.1
 ompi/tools/wrappers/mpic++.1
 ompi/tools/wrappers/mpicxx.1
 ompi/tools/wrappers/mpifort.1
+ompi/tools/wrappers/mpijavac.1
 ompi/tools/wrappers/ompi_wrapper_script
 ompi/tools/wrappers/ompi.pc
 ompi/tools/wrappers/ompi-c.pc
@@ -298,22 +305,41 @@ opal/mca/event/libevent*/libevent/include/event2/event-config.h
 
 opal/mca/hwloc/hwloc*/hwloc/include/hwloc/autogen/config.h
 opal/mca/hwloc/hwloc*/hwloc/include/private/autogen/config.h
+opal/mca/hwloc/base/static-components.h.new.extern
+opal/mca/hwloc/base/static-components.h.new.struct
 
 opal/mca/installdirs/config/install_dirs.h
 
+opal/mca/pmix/ext2x/ext2x.c
+opal/mca/pmix/ext2x/ext2x.h
+opal/mca/pmix/ext2x/ext2x_client.c
+opal/mca/pmix/ext2x/ext2x_component.c
+opal/mca/pmix/ext2x/ext2x_server_north.c
+opal/mca/pmix/ext2x/ext2x_server_south.c
 opal/mca/pmix/pmix*/pmix/include/pmix/autogen/config.h
 opal/mca/pmix/pmix*/pmix/include/pmix/autogen/config.h.in
 opal/mca/pmix/pmix*/pmix/src/include/private/autogen/config.h.in
 opal/mca/pmix/pmix*/pmix/src/include/private/autogen/config.h
-opal/mca/hwloc/base/static-components.h.new.extern
-opal/mca/hwloc/base/static-components.h.new.struct
-opal/mca/pmix/pmix3x/pmix/src/include/frameworks.h
-opal/mca/pmix/pmix3x/pmix/src/mca/pinstalldirs/config/pinstall_dirs.h
-opal/mca/pmix/pmix3x/pmix/config/autogen_found_items.m4
-opal/mca/pmix/pmix3x/pmix/src/include/pmix_config.h
-opal/mca/pmix/pmix3x/pmix/src/include/pmix_config.h.in
-opal/mca/pmix/pmix3x/pmix/include/pmix_rename.h
-opal/mca/pmix/pmix3x/pmix/include/pmix_version.h
+opal/mca/pmix/pmix2x/pmix/src/include/frameworks.h
+opal/mca/pmix/pmix2x/pmix/src/mca/pinstalldirs/config/pinstall_dirs.h
+opal/mca/pmix/pmix2x/pmix/config/autogen_found_items.m4
+opal/mca/pmix/pmix2x/pmix/src/include/pmix_config.h
+opal/mca/pmix/pmix2x/pmix/src/include/pmix_config.h.in
+opal/mca/pmix/pmix2x/pmix/include/pmix_rename.h
+opal/mca/pmix/pmix2x/pmix/include/pmix_version.h
+opal/mca/pmix/pmix2x/pmix/src/util/keyval/keyval_lex.c
+opal/mca/pmix/pmix2x/pmix/src/util/show_help_lex.c
+opal/mca/pmix/pmix2x/pmix/examples/alloc
+opal/mca/pmix/pmix2x/pmix/examples/client
+opal/mca/pmix/pmix2x/pmix/examples/debugger
+opal/mca/pmix/pmix2x/pmix/examples/debuggerd
+opal/mca/pmix/pmix2x/pmix/examples/dmodex
+opal/mca/pmix/pmix2x/pmix/examples/dynamic
+opal/mca/pmix/pmix2x/pmix/examples/fault
+opal/mca/pmix/pmix2x/pmix/examples/jctrl
+opal/mca/pmix/pmix2x/pmix/examples/pub
+opal/mca/pmix/pmix2x/pmix/examples/server
+opal/mca/pmix/pmix2x/pmix/examples/tool
 
 opal/tools/opal-checkpoint/opal-checkpoint
 opal/tools/opal-checkpoint/opal-checkpoint.1
@@ -349,8 +375,10 @@ orte/mca/sstore/orte_sstore.7
 
 orte/test/mpi/abort
 orte/test/mpi/accept
+orte/test/mpi/attach
 orte/test/mpi/bad_exit
 orte/test/mpi/bcast_loop
+orte/test/mpi/binding
 orte/test/mpi/concurrent_spawn
 orte/test/mpi/connect
 orte/test/mpi/crisscross
@@ -380,6 +408,7 @@ orte/test/mpi/segv
 orte/test/mpi/simple_spawn
 orte/test/mpi/slave
 orte/test/mpi/spawn_multiple
+orte/test/mpi/xlib
 orte/test/mpi/ziaprobe
 orte/test/mpi/ziatest
 orte/test/mpi/*.dwarf
@@ -407,6 +436,8 @@ orte/test/mpi/memcached-dummy
 orte/test/mpi/coll_test
 orte/test/mpi/badcoll
 orte/test/mpi/iof
+orte/test/mpi/no-disconnect
+orte/test/mpi/nonzero
 
 orte/test/system/radix
 orte/test/system/sigusr_trap
@@ -464,6 +495,7 @@ orte/test/system/opal_db
 orte/test/system/ulfm
 orte/test/system/pmixtool
 orte/test/system/orte_notify
+orte/test/system/threads
 
 orte/tools/orte-checkpoint/orte-checkpoint
 orte/tools/orte-checkpoint/orte-checkpoint.1
@@ -494,6 +526,8 @@ orte/tools/orted/orted
 orte/tools/orted/orted.1
 orte/tools/orterun/orterun
 orte/tools/orterun/orterun.1
+orte/tools/prun/prun
+orte/tools/prun/prun.1
 orte/tools/wrappers/ortecc-wrapper-data.txt
 orte/tools/wrappers/ortec++-wrapper-data.txt
 orte/tools/wrappers/ortecc.1
@@ -554,6 +588,13 @@ oshmem/tools/wrappers/shmemfort.1
 oshmem/tools/wrappers/shmemrun.1
 oshmem/tools/wrappers/shmemcc-wrapper-data.txt
 oshmem/tools/wrappers/shmemfort-wrapper-data.txt
+oshmem/tools/wrappers/oshCC.1
+oshmem/tools/wrappers/oshc++.1
+oshmem/tools/wrappers/oshcxx.1
+oshmem/tools/wrappers/shmemCC.1
+oshmem/tools/wrappers/shmemc++-wrapper-data.txt
+oshmem/tools/wrappers/shmemc++.1
+oshmem/tools/wrappers/shmemcxx.1
 
 test/asm/atomic_math_noinline
 test/asm/atomic_barrier
@@ -609,6 +650,11 @@ test/event/event-test
 test/event/time-test
 
 test/monitoring/monitoring_test
+test/monitoring/check_monitoring
+test/monitoring/example_reduce_count
+test/monitoring/test_overhead
+test/monitoring/test_pvar_access
+
 
 test/mpi/environment/chello
 
@@ -641,3 +687,7 @@ test/util/opal_sos
 test/util/opal_path_nfs
 test/util/opal_path_nfs.out
 test/util/opal_bit_ops
+test/util/bipartite_graph
+
+opal/test/reachable/reachable_netlink
+opal/test/reachable/reachable_weighted

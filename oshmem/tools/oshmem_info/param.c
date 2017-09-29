@@ -2,9 +2,10 @@
  * Copyright (c) 2013      Mellanox Technologies, Inc.
  *                         All rights reserved.
  *
- * Copyright (c) 2014-2015 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2014-2016 Research Organization for Information Science
+ * Copyright (c) 2014-2017 Cisco Systems, Inc.  All rights reserved
+ * Copyright (c) 2014-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -46,25 +47,7 @@
 #include "oshmem/tools/oshmem_info/oshmem_info.h"
 
 
-const char *ompi_info_deprecated_value = "deprecated-ompi-info-value";
-
-static void append(char *dest, size_t max, int *first, char *src)
-{
-    size_t len;
-
-    if (NULL == src) {
-        return;
-    }
-
-    len = max - strlen(dest);
-    if (!(*first)) {
-        strncat(dest, ", ", len);
-        len = max - strlen(dest);
-    }
-    strncat(dest, src, len);
-    *first = 0;
-}
-
+const char *opal_info_deprecated_value = "deprecated-ompi-info-value";
 
 /*
  * do_config
@@ -80,23 +63,7 @@ static void append(char *dest, size_t max, int *first, char *src)
  */
 void oshmem_info_do_config(bool want_all)
 {
-    char *cxx;
-    char *fortran_mpifh;
-    char *fortran_usempi;
-    char *fortran_usempif08;
-    char *fortran_usempif08_compliance;
-    char *fortran_have_ignore_tkr;
-    char *fortran_have_f08_assumed_rank;
-    char *fortran_build_f08_subarrays;
-    char *fortran_have_optional_args;
-    char *fortran_have_bind_c;
-    char *fortran_have_private;
-    char *fortran_have_abstract;
-    char *fortran_have_asynchronous;
-    char *fortran_have_procedure;
-    char *fortran_have_c_funloc;
-    char *fortran_08_using_wrappers_for_choice_buffer_functions;
-    char *java;
+    char *fortran;
     char *heterogeneous;
     char *memprofile;
     char *memdebug;
@@ -104,9 +71,7 @@ void oshmem_info_do_config(bool want_all)
     char *mpi_interface_warning;
     char *cprofiling;
     char *cxxprofiling;
-    char *fortran_mpifh_profiling;
-    char *fortran_usempi_profiling;
-    char *fortran_usempif08_profiling;
+    char *fortran_profiling;
     char *cxxexceptions;
     char *threads;
     char *have_dl;
@@ -114,7 +79,6 @@ void oshmem_info_do_config(bool want_all)
     char *mpirun_prefix_by_default;
 #endif
     char *sparse_groups;
-    char *have_mpi_io;
     char *wtime_support;
     char *symbol_visibility;
     char *ft_support;
@@ -145,84 +109,6 @@ void oshmem_info_do_config(bool want_all)
     paramcheck = "runtime";
 #endif
 
-    /* setup the strings that don't require allocations*/
-    cxx = OMPI_BUILD_CXX_BINDINGS ? "yes" : "no";
-    if (OMPI_BUILD_FORTRAN_BINDINGS >= OMPI_FORTRAN_USEMPI_BINDINGS) {
-        if (OMPI_FORTRAN_HAVE_IGNORE_TKR) {
-            fortran_usempi = "yes (full: ignore TKR)";
-        } else {
-            fortran_usempi = "yes (limited: overloading)";
-        }
-    } else {
-        fortran_usempi = "no";
-    }
-    fortran_usempif08 = OMPI_BUILD_FORTRAN_BINDINGS >= OMPI_FORTRAN_USEMPIF08_BINDINGS ? "yes" : "no";
-    fortran_have_f08_assumed_rank = OMPI_FORTRAN_HAVE_F08_ASSUMED_RANK ?
-        "yes" : "no";
-    fortran_build_f08_subarrays = OMPI_BUILD_FORTRAN_F08_SUBARRAYS ?
-        "yes" : "no";
-    fortran_have_optional_args = OMPI_FORTRAN_HAVE_OPTIONAL_ARGS ?
-        "yes" : "no";
-    fortran_have_bind_c = OMPI_FORTRAN_HAVE_BIND_C ? "yes" : "no";
-    fortran_have_private = OMPI_FORTRAN_HAVE_PRIVATE ? "yes" : "no";
-    fortran_have_abstract = OMPI_FORTRAN_HAVE_ABSTRACT ? "yes" : "no";
-    fortran_have_asynchronous = OMPI_FORTRAN_HAVE_ASYNCHRONOUS ? "yes" : "no";
-    fortran_have_procedure = OMPI_FORTRAN_HAVE_PROCEDURE ? "yes" : "no";
-    fortran_have_c_funloc = OMPI_FORTRAN_HAVE_C_FUNLOC ? "yes" : "no";
-    fortran_08_using_wrappers_for_choice_buffer_functions =
-        OMPI_FORTRAN_NEED_WRAPPER_ROUTINES ? "yes" : "no";
-
-    /* Build a string describing what level of compliance the mpi_f08
-       module has */
-    char f08_msg[1024];
-    if (OMPI_BUILD_FORTRAN_BINDINGS >= OMPI_FORTRAN_USEMPIF08_BINDINGS) {
-
-        /* Do we have everything? */
-        if (OMPI_BUILD_FORTRAN_F08_SUBARRAYS &&
-            OMPI_FORTRAN_HAVE_PRIVATE &&
-            OMPI_FORTRAN_HAVE_ABSTRACT &&
-            OMPI_FORTRAN_HAVE_ASYNCHRONOUS &&
-            OMPI_FORTRAN_HAVE_PROCEDURE &&
-            OMPI_FORTRAN_HAVE_C_FUNLOC &&
-            OMPI_FORTRAN_NEED_WRAPPER_ROUTINES) {
-            fortran_usempif08_compliance = "The mpi_f08 module is available, and is fully compliant.  w00t!";
-        } else {
-            int first = 1;
-            snprintf(f08_msg, sizeof(f08_msg),
-                     "The mpi_f08 module is available, but due to limitations in the %s compiler, does not support the following: ",
-                     OMPI_FC);
-            if (!OMPI_BUILD_FORTRAN_F08_SUBARRAYS) {
-                append(f08_msg, sizeof(f08_msg), &first, "array subsections");
-            }
-            if (!OMPI_FORTRAN_HAVE_PRIVATE) {
-                append(f08_msg, sizeof(f08_msg), &first,
-                       "private MPI_Status members");
-            }
-            if (!OMPI_FORTRAN_HAVE_ABSTRACT) {
-                append(f08_msg, sizeof(f08_msg), &first,
-                       "ABSTRACT INTERFACE function pointers");
-            }
-            if (!OMPI_FORTRAN_HAVE_ASYNCHRONOUS) {
-                append(f08_msg, sizeof(f08_msg), &first,
-                       "Fortran '08-specified ASYNCHRONOUS behavior");
-            }
-            if (!OMPI_FORTRAN_HAVE_PROCEDURE) {
-                append(f08_msg, sizeof(f08_msg), &first, "PROCEDUREs");
-            }
-            if (!OMPI_FORTRAN_HAVE_C_FUNLOC) {
-                append(f08_msg, sizeof(f08_msg), &first, "C_FUNLOCs");
-            }
-            if (OMPI_FORTRAN_NEED_WRAPPER_ROUTINES) {
-                append(f08_msg, sizeof(f08_msg), &first,
-                       "direct passthru (where possible) to underlying Open MPI's C functionality");
-            }
-            fortran_usempif08_compliance = f08_msg;
-        }
-    } else {
-        fortran_usempif08_compliance = "The mpi_f08 module was not built";
-    }
-
-    java = OMPI_WANT_JAVA_BINDINGS ? "yes" : "no";
     heterogeneous = OPAL_ENABLE_HETEROGENEOUS_SUPPORT ? "yes" : "no";
     memprofile = OPAL_ENABLE_MEM_PROFILE ? "yes" : "no";
     memdebug = OPAL_ENABLE_MEM_DEBUG ? "yes" : "no";
@@ -231,39 +117,25 @@ void oshmem_info_do_config(bool want_all)
     cprofiling = "yes";
     cxxprofiling = OMPI_BUILD_CXX_BINDINGS ? "yes" : "no";
     cxxexceptions = (OMPI_BUILD_CXX_BINDINGS && OMPI_HAVE_CXX_EXCEPTION_SUPPORT) ? "yes" : "no";
-    fortran_mpifh_profiling = (OMPI_BUILD_FORTRAN_BINDINGS >= OMPI_FORTRAN_MPIFH_BINDINGS) ? "yes" : "no";
-    fortran_usempi_profiling = (OMPI_BUILD_FORTRAN_BINDINGS >= OMPI_FORTRAN_USEMPI_BINDINGS) ? "yes" : "no";
-    fortran_usempif08_profiling = (OMPI_BUILD_FORTRAN_BINDINGS >= OMPI_FORTRAN_USEMPIF08_BINDINGS) ? "yes" : "no";
+    fortran_profiling = (OMPI_BUILD_FORTRAN_BINDINGS >= OMPI_FORTRAN_MPIFH_BINDINGS) ? "yes" : "no";
     have_dl = OPAL_HAVE_DL_SUPPORT ? "yes" : "no";
 #if OMPI_RTE_ORTE
     mpirun_prefix_by_default = ORTE_WANT_ORTERUN_PREFIX_BY_DEFAULT ? "yes" : "no";
 #endif
     sparse_groups = OMPI_GROUP_SPARSE ? "yes" : "no";
-    have_mpi_io = OMPI_PROVIDE_MPI_FILE_INTERFACE ? "yes" : "no";
     wtime_support = OPAL_TIMER_USEC_NATIVE ? "native" : "gettimeofday";
     symbol_visibility = OPAL_C_HAVE_VISIBILITY ? "yes" : "no";
     topology_support = "yes";
 
     /* setup strings that require allocation */
     if (OMPI_BUILD_FORTRAN_BINDINGS >= OMPI_FORTRAN_MPIFH_BINDINGS) {
-        (void)asprintf(&fortran_mpifh, "yes (%s)",
+        (void)asprintf(&fortran, "yes (%s)",
                        (OPAL_HAVE_WEAK_SYMBOLS ? "all" :
                         (OMPI_FORTRAN_CAPS ? "caps" :
                          (OMPI_FORTRAN_PLAIN ? "lower case" :
                           (OMPI_FORTRAN_SINGLE_UNDERSCORE ? "single underscore" : "double underscore")))));
     } else {
-        fortran_mpifh = strdup("no");
-    }
-
-    if (OMPI_FORTRAN_HAVE_IGNORE_TKR) {
-        /* OMPI_FORTRAN_IGNORE_TKR_PREDECL is already in quotes; it
-           didn't work consistently to put it in _STRINGIFY because
-           sometimes the compiler would actually interpret the pragma
-           in there before stringify-ing it. */
-        (void)asprintf(&fortran_have_ignore_tkr, "yes (%s)",
-                       OMPI_FORTRAN_IGNORE_TKR_PREDECL);
-    } else {
-        fortran_have_ignore_tkr = strdup("no");
+        fortran = strdup("no");
     }
 
 #if OMPI_RTE_ORTE
@@ -291,20 +163,8 @@ void oshmem_info_do_config(bool want_all)
     opal_info_out("Built host", "build:host", OMPI_BUILD_HOST);
 
     opal_info_out("C bindings", "bindings:c", "yes");
-    opal_info_out("C++ bindings", "bindings:cxx", cxx);
-    opal_info_out("Fort mpif.h", "bindings:mpif.h", fortran_mpifh);
-    free(fortran_mpifh);
-    opal_info_out("Fort use mpi", "bindings:use_mpi",
-                  fortran_usempi);
-    opal_info_out("Fort use mpi size", "bindings:use_mpi:size",
-                  ompi_info_deprecated_value);
-    opal_info_out("Fort use mpi_f08", "bindings:use_mpi_f08",
-                  fortran_usempif08);
-    opal_info_out("Fort mpi_f08 compliance", "bindings:use_mpi_f08:compliance",
-                  fortran_usempif08_compliance);
-    opal_info_out("Fort mpi_f08 subarrays", "bindings:use_mpi_f08:subarrays-supported",
-                  fortran_build_f08_subarrays);
-    opal_info_out("Java bindings", "bindings:java", java);
+    opal_info_out("Fort shmem.fh", "bindings:fortran", fortran);
+    free(fortran);
 
     opal_info_out("Wrapper compiler rpath", "compiler:all:rpath",
                   WRAPPER_RPATH_SUPPORT);
@@ -351,36 +211,6 @@ void oshmem_info_do_config(bool want_all)
     opal_info_out("Fort compiler", "compiler:fortran:command", OMPI_FC);
     opal_info_out("Fort compiler abs", "compiler:fortran:absolute",
                   OMPI_FC_ABSOLUTE);
-    opal_info_out("Fort ignore TKR", "compiler:fortran:ignore_tkr",
-                  fortran_have_ignore_tkr);
-    free(fortran_have_ignore_tkr);
-    opal_info_out("Fort 08 assumed shape",
-                  "compiler:fortran:f08_assumed_rank",
-                  fortran_have_f08_assumed_rank);
-    opal_info_out("Fort optional args",
-                  "compiler:fortran:optional_arguments",
-                  fortran_have_optional_args);
-    opal_info_out("Fort BIND(C)",
-                  "compiler:fortran:bind_c",
-                  fortran_have_bind_c);
-    opal_info_out("Fort PRIVATE",
-                  "compiler:fortran:private",
-                  fortran_have_private);
-    opal_info_out("Fort ABSTRACT",
-                  "compiler:fortran:abstract",
-                  fortran_have_abstract);
-    opal_info_out("Fort ASYNCHRONOUS",
-                  "compiler:fortran:asynchronous",
-                  fortran_have_asynchronous);
-    opal_info_out("Fort PROCEDURE",
-                  "compiler:fortran:procedure",
-                  fortran_have_procedure);
-    opal_info_out("Fort C_FUNLOC",
-                  "compiler:fortran:c_funloc",
-                  fortran_have_c_funloc);
-    opal_info_out("Fort f08 using wrappers",
-                  "compiler:fortran:08_wrappers",
-                  fortran_08_using_wrappers_for_choice_buffer_functions);
 
     if (want_all) {
 
@@ -517,13 +347,8 @@ void oshmem_info_do_config(bool want_all)
 
     opal_info_out("C profiling", "option:profiling:c", cprofiling);
     opal_info_out("C++ profiling", "option:profiling:cxx", cxxprofiling);
-    opal_info_out("Fort mpif.h profiling", "option:profiling:mpif.h",
-                  fortran_mpifh_profiling);
-    opal_info_out("Fort use mpi profiling", "option:profiling:use_mpi",
-                  fortran_usempi_profiling);
-    opal_info_out("Fort use mpi_f08 prof",
-                  "option:profiling:use_mpi_f08",
-                  fortran_usempif08_profiling);
+    opal_info_out("Fort shmem.fh profiling", "option:profiling:shmem.fh",
+                  fortran_profiling);
 
     opal_info_out("C++ exceptions", "option:cxx_exceptions", cxxexceptions);
     opal_info_out("Thread support", "option:threads", threads);
@@ -566,7 +391,6 @@ void oshmem_info_do_config(bool want_all)
     opal_info_out("mpirun default --prefix", "mpirun:prefix_by_default",
                   mpirun_prefix_by_default);
 #endif
-    opal_info_out("MPI I/O support", "options:mpi-io", have_mpi_io);
     opal_info_out("MPI_WTIME support", "options:mpi-wtime", wtime_support);
     opal_info_out("Symbol vis. support", "options:visibility", symbol_visibility);
     opal_info_out("Host topology support", "options:host-topology",

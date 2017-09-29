@@ -13,7 +13,7 @@
  * Copyright (c) 2011-2015 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2011-2013 Los Alamos National Security, LLC.
  *                         All rights reserved.
- * Copyright (c) 2013-2016 Intel, Inc. All rights reserved.
+ * Copyright (c) 2013-2017 Intel, Inc.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -187,13 +187,12 @@ int orte_dt_print_job(char **output, char *prefix, orte_job_t *src, opal_data_ty
     }
 
     tmp2 = opal_argv_join(src->personality, ',');
-    asprintf(&tmp, "\n%sData for job: %s\tPersonality: %s\tRecovery: %s(%s)\n%s\tNum apps: %ld\tMPI allowed: %s\tStdin target: %s\tState: %s\tAbort: %s", pfx2,
+    asprintf(&tmp, "\n%sData for job: %s\tPersonality: %s\tRecovery: %s(%s)\n%s\tNum apps: %ld\tStdin target: %s\tState: %s\tAbort: %s", pfx2,
              ORTE_JOBID_PRINT(src->jobid), tmp2,
              (ORTE_FLAG_TEST(src, ORTE_JOB_FLAG_RECOVERABLE)) ? "ENABLED" : "DISABLED",
              (orte_get_attribute(&src->attributes, ORTE_JOB_RECOVER_DEFINED, NULL, OPAL_BOOL)) ? "DEFINED" : "DEFAULT",
              pfx2,
-             (long)src->num_apps,
-             (ORTE_FLAG_TEST(src, ORTE_JOB_FLAG_GANG_LAUNCHED)) ? "YES" : "NO", ORTE_VPID_PRINT(src->stdin_target),
+             (long)src->num_apps, ORTE_VPID_PRINT(src->stdin_target),
               orte_job_state_to_str(src->state), (ORTE_FLAG_TEST(src, ORTE_JOB_FLAG_ABORTED)) ? "True" : "False");
     free(tmp2);
     asprintf(&pfx, "%s\t", pfx2);
@@ -476,13 +475,13 @@ int orte_dt_print_proc(char **output, char *prefix, orte_proc_t *src, opal_data_
         char *str=NULL, *cpu_bitmap=NULL;
 
         if (orte_get_attribute(&src->attributes, ORTE_PROC_CPU_BITMAP, (void**)&cpu_bitmap, OPAL_STRING) &&
-            NULL != src->node->topology) {
+            NULL != src->node->topology && NULL != src->node->topology->topo) {
             mycpus = hwloc_bitmap_alloc();
             hwloc_bitmap_list_sscanf(mycpus, cpu_bitmap);
-            if (OPAL_ERR_NOT_BOUND == opal_hwloc_base_cset2str(tmp1, sizeof(tmp1), src->node->topology, mycpus)) {
+            if (OPAL_ERR_NOT_BOUND == opal_hwloc_base_cset2str(tmp1, sizeof(tmp1), src->node->topology->topo, mycpus)) {
                 str = strdup("UNBOUND");
             } else {
-                opal_hwloc_base_cset2mapstr(tmp2, sizeof(tmp2), src->node->topology, mycpus);
+                opal_hwloc_base_cset2mapstr(tmp2, sizeof(tmp2), src->node->topology->topo, mycpus);
                 asprintf(&str, "%s:%s", tmp1, tmp2);
             }
             hwloc_bitmap_free(mycpus);
@@ -517,7 +516,7 @@ int orte_dt_print_proc(char **output, char *prefix, orte_proc_t *src, opal_data_
 
     if (orte_get_attribute(&src->attributes, ORTE_PROC_HWLOC_LOCALE, (void**)&loc, OPAL_PTR)) {
         if (NULL != loc) {
-            if (OPAL_ERR_NOT_BOUND == opal_hwloc_base_cset2mapstr(locale, sizeof(locale), src->node->topology, loc->cpuset)) {
+            if (OPAL_ERR_NOT_BOUND == opal_hwloc_base_cset2mapstr(locale, sizeof(locale), src->node->topology->topo, loc->cpuset)) {
                 strcpy(locale, "NODE");
             }
         } else {
@@ -528,7 +527,7 @@ int orte_dt_print_proc(char **output, char *prefix, orte_proc_t *src, opal_data_
     }
     if (orte_get_attribute(&src->attributes, ORTE_PROC_HWLOC_BOUND, (void**)&bd, OPAL_PTR)) {
         if (NULL != bd) {
-            if (OPAL_ERR_NOT_BOUND == opal_hwloc_base_cset2mapstr(bind, sizeof(bind), src->node->topology, bd->cpuset)) {
+            if (OPAL_ERR_NOT_BOUND == opal_hwloc_base_cset2mapstr(bind, sizeof(bind), src->node->topology->topo, bd->cpuset)) {
                 strcpy(bind, "UNBOUND");
             }
         } else {
@@ -677,7 +676,7 @@ int orte_dt_print_map(char **output, char *prefix, orte_job_map_t *src, opal_dat
                  orte_rmaps_base_print_mapping(src->mapping),
                  orte_rmaps_base_print_ranking(src->ranking),
                  pfx2, opal_hwloc_base_print_binding(src->binding),
-                 (NULL == opal_hwloc_base_cpu_set) ? "NULL" : opal_hwloc_base_cpu_set,
+                 (NULL == opal_hwloc_base_cpu_list) ? "NULL" : opal_hwloc_base_cpu_list,
                  (NULL == src->ppr) ? "NULL" : src->ppr,
                  (int)src->cpus_per_rank);
 
@@ -853,13 +852,13 @@ int orte_dt_print_sig(char **output, char *prefix, orte_grpcomm_signature_t *src
     }
 
     if (NULL == src->signature) {
-        asprintf(output, "%sORTE_SIG  SeqNumber:%d  Procs: NULL", prefx, src->seq_num);
+        asprintf(output, "%sORTE_SIG  Procs: NULL", prefx);
         free(prefx);
         return ORTE_SUCCESS;
     }
 
     /* there must be at least one proc in the signature */
-    asprintf(&tmp, "%sORTE_SIG  SeqNumber:%d  Procs: ", prefx, src->seq_num);
+    asprintf(&tmp, "%sORTE_SIG  Procs: ", prefx);
 
     for (i=0; i < src->sz; i++) {
         asprintf(&tmp2, "%s%s", tmp, ORTE_NAME_PRINT(&src->signature[i]));
@@ -869,4 +868,3 @@ int orte_dt_print_sig(char **output, char *prefix, orte_grpcomm_signature_t *src
     *output = tmp;
     return ORTE_SUCCESS;
 }
-

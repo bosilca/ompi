@@ -12,7 +12,7 @@
  *                         All rights reserved.
  * Copyright (c) 2007-2015 Los Alamos National Security, LLC.  All rights
  *                         reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * $COPYRIGHT$
  *
@@ -37,9 +37,7 @@
 
 #include "opal_config.h"
 
-#ifdef HAVE_PTHREAD_H
 #include <pthread.h>
-#endif
 #include <errno.h>
 #include <stdio.h>
 
@@ -78,14 +76,14 @@ OPAL_DECLSPEC OBJ_CLASS_DECLARATION(opal_recursive_mutex_t);
         .m_lock_debug = 0,                                              \
         .m_lock_file = NULL,                                            \
         .m_lock_line = 0,                                               \
-        .m_lock_atomic = { .u = { .lock = OPAL_ATOMIC_UNLOCKED } },     \
+        .m_lock_atomic = { .u = { .lock = OPAL_ATOMIC_LOCK_UNLOCKED } },     \
     }
 #else
 #define OPAL_MUTEX_STATIC_INIT                                          \
     {                                                                   \
         .super = OPAL_OBJ_STATIC_INIT(opal_mutex_t),                    \
         .m_lock_pthread = PTHREAD_MUTEX_INITIALIZER,                    \
-        .m_lock_atomic = { .u = { .lock = OPAL_ATOMIC_UNLOCKED } },     \
+        .m_lock_atomic = { .u = { .lock = OPAL_ATOMIC_LOCK_UNLOCKED } },     \
     }
 #endif
 
@@ -99,14 +97,14 @@ OPAL_DECLSPEC OBJ_CLASS_DECLARATION(opal_recursive_mutex_t);
         .m_lock_debug = 0,                                              \
         .m_lock_file = NULL,                                            \
         .m_lock_line = 0,                                               \
-        .m_lock_atomic = { .u = { .lock = OPAL_ATOMIC_UNLOCKED } },     \
+        .m_lock_atomic = { .u = { .lock = OPAL_ATOMIC_LOCK_UNLOCKED } },     \
     }
 #else
 #define OPAL_RECURSIVE_MUTEX_STATIC_INIT                                \
     {                                                                   \
         .super = OPAL_OBJ_STATIC_INIT(opal_mutex_t),                    \
         .m_lock_pthread = OPAL_PTHREAD_RECURSIVE_MUTEX_INITIALIZER,     \
-        .m_lock_atomic = { .u = { .lock = OPAL_ATOMIC_UNLOCKED } },     \
+        .m_lock_atomic = { .u = { .lock = OPAL_ATOMIC_LOCK_UNLOCKED } },     \
     }
 #endif
 
