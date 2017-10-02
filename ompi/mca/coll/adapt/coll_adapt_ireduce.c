@@ -164,21 +164,22 @@ static int ireduce_request_fini(mca_coll_adapt_reduce_context_t *context)
     #if OPAL_CUDA_SUPPORT
     mca_common_cuda_sync_op_stream(0);
     #endif
-    OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal in recv\n", ompi_comm_rank(context->con->comm)));
+    OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Singal\n", ompi_comm_rank(context->con->comm)));
     ompi_request_t *temp_req = context->con->request;
     if (context->con->accumbuf != NULL) {
         if (context->con->rank != context->con->root) {
             for (i=0; i<context->con->num_segs; i++) {
                 //wei opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)to_inbuf(context->con->accumbuf[i], context->con->distance));
                 if (CPU_BUFFER == context->con->buff_type) {
+                    OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: Return accumbuf %d %p\n", ompi_comm_rank(context->con->comm), i, to_inbuf(context->con->accumbuf[i], context->con->distance)));
                     coll_adapt_free_inbuf(context->con->inbuf_list, to_inbuf(context->con->accumbuf[i], context->con->distance), context->con->buff_type);
-                } 
-#if OPAL_CUDA_SUPPORT  
+                }
+                #if OPAL_CUDA_SUPPORT
                 else {
                     coll_adapt_free_inbuf(context->con->inbuf_list, context->con->accumbuf_to_inbuf[i], context->con->buff_type);
                     context->con->accumbuf_to_inbuf[i] = NULL;
                 }
-#endif
+                #endif
             }
         }
         free(context->con->accumbuf);
@@ -191,6 +192,7 @@ static int ireduce_request_fini(mca_coll_adapt_reduce_context_t *context)
     OBJ_RELEASE(context->con->mutex_num_recv_segs);
     OBJ_RELEASE(context->con->mutex_recv_list);
     OBJ_RELEASE(context->con->mutex_num_sent);
+    fflush(stdout);
     if (context->con->tree->tree_nextsize > 0) {
         OBJ_RELEASE(context->con->inbuf_list);
         free(context->con->next_recv_segs);
@@ -290,6 +292,7 @@ static int recv_cb(ompi_request_t *req){
         }
         else {
             //wei inbuf = (mca_coll_adapt_inbuf_t *) opal_free_list_wait(context->con->inbuf_list);
+            OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: In recv_cb, alloc inbuf\n", context->con->rank));
             inbuf = (mca_coll_adapt_inbuf_t *) coll_adapt_alloc_inbuf(context->con->inbuf_list, context->con->real_seg_size, context->con->buff_type);
             temp_recv_buf = inbuf->buff - context->con->lower_bound;
         }
@@ -347,6 +350,7 @@ static int recv_cb(ompi_request_t *req){
             //free old accumbuf
             //opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)to_inbuf(context->con->accumbuf[context->frag_id], context->con->distance));
             if (CPU_BUFFER == context->con->buff_type) {
+                OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: free old accumbuf %p\n", context->con->rank, to_inbuf(context->con->accumbuf[context->frag_id], context->con->distance)));
                 coll_adapt_free_inbuf(context->con->inbuf_list, to_inbuf(context->con->accumbuf[context->frag_id], context->con->distance), context->con->buff_type);
             }
 #if OPAL_CUDA_SUPPORT  
@@ -452,6 +456,7 @@ RECV_CB_SKIP_SEND: ;
         OPAL_THREAD_UNLOCK (context->con->mutex_num_recv_segs);
         if (!keep_inbuf && context->inbuf != NULL) {
             // wei opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
+            OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: root free context inbuf %p", context->con->rank, context->inbuf));
             coll_adapt_free_inbuf(context->con->inbuf_list, context->inbuf, context->con->buff_type);
         }
         ireduce_request_fini(context);
@@ -459,12 +464,12 @@ RECV_CB_SKIP_SEND: ;
     else{
         OPAL_THREAD_UNLOCK (context->con->mutex_num_recv_segs);
         if (!keep_inbuf && context->inbuf != NULL && !op_async_not_free) {
-            OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "return inbuf\n"));
             //wei opal_free_list_return(context->con->inbuf_list, (opal_free_list_item_t*)context->inbuf);
+            OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: free context inbuf %p", context->con->rank, context->inbuf));
             coll_adapt_free_inbuf(context->con->inbuf_list, context->inbuf, context->con->buff_type);
         }
         OBJ_RELEASE(context->con);
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "return context_list\n"));
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: return context_list", context->con->rank));
         opal_free_list_return(coll_adapt_ireduce_context_free_list, (opal_free_list_item_t*)context);
     }
     OPAL_THREAD_UNLOCK(req->req_lock);
@@ -709,6 +714,7 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
         //wei mca_coll_adapt_inbuf_t * temp_inbuf = (mca_coll_adapt_inbuf_t *) opal_free_list_wait(inbuf_list);
         mca_coll_adapt_inbuf_t * temp_inbuf = coll_adapt_alloc_inbuf(inbuf_list, real_seg_size, buff_type);
         distance = (char *)temp_inbuf->buff - lower_bound - (char *)temp_inbuf; //address of inbuf->buff to address of inbuf
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: distance %d, inbuf %p, inbuf->buff %p, inbuf->buff-lb %p, to_inbuf %p, inbuf_list %p\n", rank, distance, temp_inbuf, (char *)temp_inbuf->buff, (char *)temp_inbuf->buff - lower_bound, to_inbuf((char *)temp_inbuf->buff - lower_bound, distance), inbuf_list));
         //wei opal_free_list_return(inbuf_list, (opal_free_list_item_t*)temp_inbuf);
         coll_adapt_free_inbuf(inbuf_list, temp_inbuf, buff_type);
     }
@@ -773,7 +779,7 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
     con->buff_type = buff_type;
     con->real_seg_size = real_seg_size;
     
-    TEST("[%d]: start ireduce root %d tag %d\n", rank, tree->tree_root, ireduce_tag);
+    OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: start ireduce root %d tag %d\n", rank, tree->tree_root, ireduce_tag));
 
     // non leaf nodes
     if (tree->tree_nextsize > 0) {
@@ -832,6 +838,7 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
                     else {
                        //wei inbuf = (mca_coll_adapt_inbuf_t *) opal_free_list_wait(inbuf_list);
                         inbuf = coll_adapt_alloc_inbuf(inbuf_list, real_seg_size, buff_type);
+                        OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: In ireduce, alloc inbuf %p\n", rank, inbuf));
                         temp_recv_buf = inbuf->buff - lower_bound;
                     }
                     //get context
@@ -844,7 +851,7 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
                     OBJ_RETAIN(con);
                     context->inbuf = inbuf;
                     
-                    TEST("[%d]: In ireduce, create irecv for seg %d, peer %d, recv_count %d, inbuf %p tag %d\n", context->con->rank, context->frag_id, context->peer, recv_count, (void *)inbuf, (ireduce_tag << 16) + seg_index);
+                    OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: In ireduce, create irecv for seg %d, peer %d, recv_count %d, inbuf %p tag %d\n", context->con->rank, context->frag_id, context->peer, recv_count, (void *)inbuf, (ireduce_tag << 16) + seg_index));
                     
                     //create a recv request
                     ompi_request_t *recv_req;
@@ -896,7 +903,7 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count, stru
                 
                 //atomic
                 opal_atomic_add_32(&(context->con->ongoing_send), 1);
-                TEST("[%d]: In ireduce, create isend to seg %d, peer %d, send_count %d tag %d\n", context->con->rank, context->frag_id, context->peer, send_count, (ireduce_tag << 16) + context->frag_id);
+                OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output, "[%d]: In ireduce, create isend to seg %d, peer %d, send_count %d tag %d\n", context->con->rank, context->frag_id, context->peer, send_count, (ireduce_tag << 16) + context->frag_id));
                 
                 //create send request
                 ompi_request_t *send_req;

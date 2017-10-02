@@ -12,8 +12,7 @@ OBJ_CLASS_INSTANCE(mca_coll_adapt_inbuf_t, opal_free_list_item_t, mca_coll_adapt
 mca_coll_adapt_inbuf_t* coll_adapt_alloc_inbuf(opal_free_list_t *inbuf_list, size_t size, int buff_type)
 {
     mca_coll_adapt_inbuf_t *inbuf = (mca_coll_adapt_inbuf_t *) opal_free_list_wait(inbuf_list);
-    char *temp_inbuf = (char*)inbuf;
-    inbuf->buff = (char*)inbuf + sizeof(mca_coll_adapt_inbuf_t) + sizeof(char);
+    //inbuf->buff = (char*)inbuf + sizeof(mca_coll_adapt_inbuf_t) + sizeof(char);
 #if OPAL_CUDA_SUPPORT
     if (GPU_BUFFER == buff_type) {
         mca_mpool_base_module_t *mpool = mca_coll_adapt_component.pined_gpu_mpool;
@@ -32,7 +31,7 @@ int coll_adapt_free_inbuf(opal_free_list_t *inbuf_list, mca_coll_adapt_inbuf_t *
         mpool->mpool_free(mpool, inbuf->buff);
     }
 #endif
-    inbuf->buff = NULL;
+    //inbuf->buff = NULL;
     opal_free_list_return(inbuf_list, (opal_free_list_item_t*)inbuf);
     
     return 0;

@@ -5,7 +5,8 @@
 
 struct mca_coll_adapt_inbuf_s {
     opal_free_list_item_t super;
-    char* buff;
+    char buff[1];
+    //char* buff;
 };
 
 typedef struct mca_coll_adapt_inbuf_s mca_coll_adapt_inbuf_t;
