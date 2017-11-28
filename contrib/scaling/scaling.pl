@@ -24,12 +24,12 @@ my $ppn = 1;
 my @csvrow;
 
 my @tests = qw(/bin/true ./orte_no_op ./mpi_no_op ./mpi_no_op ./mpi_no_op);
-my @options = ("", "", "", "-mca mpi_add_procs_cutoff 0 -mca pmix_base_async_modex 1", "-mca mpi_add_procs_cutoff 0 -mca pmix_base_async_modex 1 -mca async_mpi_init 1 -mca async_mpi_finalize 1");
+my @options = ("", "", "", "-mca mpi_add_procs_cutoff 0 -mca pmix_base_async_modex 1 -mca pmix_base_collect_data 0", "-mca mpi_add_procs_cutoff 0 -mca pmix_base_async_modex 1 -mca async_mpi_init 1 -mca async_mpi_finalize 1 -mca pmix_base_collect_data 0");
 my @starterlist = qw(mpirun prun srun aprun);
-my @starteroptionlist = ("--novm",
-                         "",
-                         "--distribution=cyclic -N",
-                         "-N");
+my @starteroptionlist = (" --novm --timeout 600",
+                         " --system-server-only",
+                         " --distribution=cyclic --ntasks-per-node=",
+                         " -N");
 
 # Set to true if the script should merely print the cmds
 # it would run, but don't run them
@@ -87,6 +87,7 @@ my $option;
 my $havedvm = 0;
 my @starters;
 my @starteroptions;
+my $pid;
 
 # if they explicitly requested specific starters, then
 # only use those
@@ -130,7 +131,7 @@ foreach $starter (@starterlist) {
             push @starteroptions, $opt;
         } elsif ($usesrun && $starter eq "srun") {
             push @starters, $starter;
-            $opt = $starteroptionlist[$idx] . " " . $ppn;
+            $opt = $starteroptionlist[$idx] . $ppn;
             push @starteroptions, $opt;
         }
     }
@@ -267,16 +268,25 @@ foreach $starter (@starters) {
     # if we are going to use the dvm, then we
     if ($starter eq "prun") {
         # need to start it
-        $cmd = "orte-dvm -mca pmix_system_server 1 2>&1 &";
         if ($myresults) {
-            print FILE "\n\n$cmd\n";
+            print FILE "\n\norte-dvm --system-server\n";
         }
         if (!$SHOWME) {
-            system($cmd);
+            unless ($pid = fork) {
+                unless (fork) {
+                    exec "orte-dvm --system-server 2>&1";
+                    die "no exec";
+                }
+                exit 0;
+            }
             $havedvm = 1;
         }
         # give it a couple of seconds to start
         sleep 2;
+    } else {
+        if ($myresults) {
+            print FILE "\n\n";
+        }
     }
 
     if ($myresults) {
@@ -292,7 +302,15 @@ foreach $starter (@starters) {
             if (!$SHOWME) {
                 # pre-position the executable
                 $cmd = $starter . $starteroptions[$index] . " $test 2>&1";
-                system($cmd);
+                my $error;
+                $error = `$cmd`;
+                if (0 != $error) {
+                    if ($myresults) {
+                        print FILE "Command $cmd returned error $error\n";
+                        $testnum = $testnum + 1;
+                        next;
+                    }
+                }
             }
             $n = 1;
             while ($n <= $num_nodes) {
@@ -321,12 +339,19 @@ foreach $starter (@starters) {
             print "\n--------------------------------------------------\n";
         }
         $testnum = $testnum + 1;
+        if ($starter eq "srun" or $starter eq "aprun") {
+            if ($testnum ge 3) {
+                last;
+            }
+        }
     }
     if ($havedvm) {
         if (!$SHOWME) {
-            $cmd = "prun --terminate";
-            system($cmd);
+            $cmd = "prun --system-server-only --terminate";
+            my $rc = `$cmd`;
+            waitpid($pid, 0);
         }
+        $havedvm = 0;
     }
     $index = $index + 1;
 }

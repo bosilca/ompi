@@ -276,6 +276,8 @@ static int ppr_mapper(orte_job_t *jdata)
             /* add the node to the map, if needed */
             if (!ORTE_FLAG_TEST(node, ORTE_NODE_FLAG_MAPPED)) {
                 ORTE_FLAG_SET(node, ORTE_NODE_FLAG_MAPPED);
+                OBJ_RETAIN(node);
+                opal_pointer_array_add(jdata->map->nodes, node);
                 jdata->map->num_nodes++;
             }
             /* if we are mapping solely at the node level, just put
@@ -620,7 +622,7 @@ static int assign_locations(orte_job_t *jdata)
     orte_node_t *node;
     orte_proc_t *proc;
     orte_app_context_t *app;
-    opal_hwloc_level_t level;
+    hwloc_obj_type_t level;
     hwloc_obj_t obj;
     unsigned int cache_level=0;
     int ppr, cnt, nobjs, nprocs_mapped;
@@ -643,24 +645,24 @@ static int assign_locations(orte_job_t *jdata)
 
     /* pickup the object level */
     if (ORTE_MAPPING_BYNODE == ORTE_GET_MAPPING_POLICY(jdata->map->mapping)) {
-        level = OPAL_HWLOC_NODE_LEVEL;
+        level = HWLOC_OBJ_MACHINE;
     } else if (ORTE_MAPPING_BYHWTHREAD == ORTE_GET_MAPPING_POLICY(jdata->map->mapping)) {
-        level = OPAL_HWLOC_HWTHREAD_LEVEL;
+        level = HWLOC_OBJ_PU;
     } else if (ORTE_MAPPING_BYCORE == ORTE_GET_MAPPING_POLICY(jdata->map->mapping)) {
-        level = OPAL_HWLOC_CORE_LEVEL;
+        level = HWLOC_OBJ_CORE;
     } else if (ORTE_MAPPING_BYSOCKET == ORTE_GET_MAPPING_POLICY(jdata->map->mapping)) {
-        level = OPAL_HWLOC_SOCKET_LEVEL;
+        level = HWLOC_OBJ_SOCKET;
     } else if (ORTE_MAPPING_BYL1CACHE == ORTE_GET_MAPPING_POLICY(jdata->map->mapping)) {
-        level = OPAL_HWLOC_L1CACHE_LEVEL;
+        level = HWLOC_OBJ_L1CACHE;
         cache_level = 1;
     } else if (ORTE_MAPPING_BYL2CACHE == ORTE_GET_MAPPING_POLICY(jdata->map->mapping)) {
-        level = OPAL_HWLOC_L2CACHE_LEVEL;
+        level = HWLOC_OBJ_L2CACHE;
         cache_level = 2;
     } else if (ORTE_MAPPING_BYL3CACHE == ORTE_GET_MAPPING_POLICY(jdata->map->mapping)) {
-        level = OPAL_HWLOC_L3CACHE_LEVEL;
+        level = HWLOC_OBJ_L3CACHE;
         cache_level = 3;
     } else if (ORTE_MAPPING_BYNUMA == ORTE_GET_MAPPING_POLICY(jdata->map->mapping)) {
-        level = OPAL_HWLOC_NUMA_LEVEL;
+        level = HWLOC_OBJ_NUMANODE;
     } else {
         ORTE_ERROR_LOG(ORTE_ERR_NOT_FOUND);
         return ORTE_ERR_TAKE_NEXT_OPTION;
@@ -689,7 +691,7 @@ static int assign_locations(orte_job_t *jdata)
                                true, node->name);
                 return ORTE_ERR_SILENT;
             }
-            if (OPAL_HWLOC_NODE_LEVEL == level) {
+            if (HWLOC_OBJ_MACHINE == level) {
                 obj = hwloc_get_root_obj(node->topology->topo);
                 for (j=0; j < node->procs->size; j++) {
                     if (NULL == (proc = (orte_proc_t*)opal_pointer_array_get_item(node->procs, j))) {
@@ -709,8 +711,8 @@ static int assign_locations(orte_job_t *jdata)
                 /* map the specified number of procs to each such resource on this node,
                  * recording the locale of each proc so we know its cpuset
                  */
-                cnt = 0;
                 for (i=0; i < nobjs; i++) {
+                    cnt = 0;
                     obj = opal_hwloc_base_get_obj_by_type(node->topology->topo,
                                                           level, cache_level,
                                                           i, OPAL_HWLOC_AVAILABLE);
@@ -719,6 +721,10 @@ static int assign_locations(orte_job_t *jdata)
                             continue;
                         }
                         if (proc->name.jobid != jdata->jobid) {
+                            continue;
+                        }
+                        /* if we already assigned it, then skip */
+                        if (orte_get_attribute(&proc->attributes, ORTE_PROC_HWLOC_LOCALE, NULL, OPAL_PTR)) {
                             continue;
                         }
                         nprocs_mapped++;

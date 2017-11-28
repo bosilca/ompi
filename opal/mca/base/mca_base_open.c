@@ -3,14 +3,14 @@
  * Copyright (c) 2004-2005 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2008 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
- * Copyright (c) 2011      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2011-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2015      Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2017      IBM Corporation.  All rights reserved.
@@ -48,7 +48,8 @@ char *mca_base_component_path = NULL;
 int mca_base_opened = 0;
 char *mca_base_system_default_path = NULL;
 char *mca_base_user_default_path = NULL;
-bool mca_base_component_show_load_errors = true;
+bool mca_base_component_show_load_errors =
+    (bool) OPAL_SHOW_LOAD_ERRORS_DEFAULT;
 bool mca_base_component_track_load_errors = false;
 bool mca_base_component_disable_dlopen = false;
 
@@ -102,7 +103,8 @@ int mca_base_open(void)
                                          MCA_BASE_VAR_SYN_FLAG_DEPRECATED);
     free(value);
 
-    mca_base_component_show_load_errors = true;
+    mca_base_component_show_load_errors =
+        (bool) OPAL_SHOW_LOAD_ERRORS_DEFAULT;
     var_id = mca_base_var_register("opal", "mca", "base", "component_show_load_errors",
                                    "Whether to show errors for components that failed to load or not",
                                    MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
@@ -174,8 +176,10 @@ static void set_defaults(opal_output_stream_t *lds)
     /* Load up defaults */
 
     OBJ_CONSTRUCT(lds, opal_output_stream_t);
+#if defined(HAVE_SYSLOG) && defined(HAVE_SYSLOG_H)
     lds->lds_syslog_priority = LOG_INFO;
     lds->lds_syslog_ident = "ompi";
+#endif
     lds->lds_want_stderr = true;
 }
 
@@ -205,10 +209,15 @@ static void parse_verbose(char *e, opal_output_stream_t *lds)
         }
 
         if (0 == strcasecmp(ptr, "syslog")) {
+#if defined(HAVE_SYSLOG) && defined(HAVE_SYSLOG_H)
             lds->lds_want_syslog = true;
             have_output = true;
+#else
+            opal_output(0, "syslog support requested but not available on this system");
+#endif  /* defined(HAVE_SYSLOG) && defined(HAVE_SYSLOG_H) */
         }
         else if (strncasecmp(ptr, "syslogpri:", 10) == 0) {
+#if defined(HAVE_SYSLOG) && defined(HAVE_SYSLOG_H)
             lds->lds_want_syslog = true;
             have_output = true;
             if (strcasecmp(ptr + 10, "notice") == 0)
@@ -217,9 +226,16 @@ static void parse_verbose(char *e, opal_output_stream_t *lds)
                 lds->lds_syslog_priority = LOG_INFO;
             else if (strcasecmp(ptr + 10, "DEBUG") == 0)
                 lds->lds_syslog_priority = LOG_DEBUG;
+#else
+            opal_output(0, "syslog support requested but not available on this system");
+#endif  /* defined(HAVE_SYSLOG) && defined(HAVE_SYSLOG_H) */
         } else if (strncasecmp(ptr, "syslogid:", 9) == 0) {
+#if defined(HAVE_SYSLOG) && defined(HAVE_SYSLOG_H)
             lds->lds_want_syslog = true;
             lds->lds_syslog_ident = ptr + 9;
+#else
+            opal_output(0, "syslog support requested but not available on this system");
+#endif  /* defined(HAVE_SYSLOG) && defined(HAVE_SYSLOG_H) */
         }
 
         else if (strcasecmp(ptr, "stdout") == 0) {
