@@ -34,6 +34,8 @@
 #include "ompi/include/mpi.h"
 #include "ompi/mca/coll/base/coll_base_functions.h"
 #include "opal/util/info.h"
+#include "ompi/op/op.h"
+#include "opal/runtime/opal_progress.h"
 
 BEGIN_C_DECLS
 
@@ -70,6 +72,13 @@ BEGIN_C_DECLS
         ompi_win_t *root_win;
         ompi_win_t *leader_win;
 
+        /* Reduce */
+        int *sm_data_ptr;
+        MPI_Win sm_data_win;
+        int **data_buf;
+        int *sm_ctrl_ptr;
+        MPI_Win sm_ctrl_win;
+        int **ctrl_buf;
 
     } mca_coll_shared_module_t;
     OBJ_CLASS_DECLARATION(mca_coll_shared_module_t);
@@ -101,6 +110,13 @@ BEGIN_C_DECLS
 				 int root,
 				 struct ompi_communicator_t *comm,
 				 mca_coll_base_module_t *module);
+    int mca_coll_shared_allreduce_intra(const void *sbuf, void *rbuf,
+                                    int count,
+                                    struct ompi_datatype_t *dtype,
+                                    struct ompi_op_t *op,
+                                    struct ompi_communicator_t *comm,
+                                    mca_coll_base_module_t *module);
+
 
 END_C_DECLS
 

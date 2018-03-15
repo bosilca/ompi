@@ -1,9 +1,9 @@
 #include "coll_shared.h"
 
-int mca_coll_shared_reduce_intra(const void *sbuf, void* rbuf, int count,
+int mca_coll_shared_allreduce_intra(const void *sbuf, void *rbuf,
+                                 int count,
                                  struct ompi_datatype_t *dtype,
                                  struct ompi_op_t *op,
-                                 int root,
                                  struct ompi_communicator_t *comm,
                                  mca_coll_base_module_t *module){
     mca_coll_shared_module_t *shared_module = (mca_coll_shared_module_t*) module;
@@ -11,7 +11,7 @@ int mca_coll_shared_reduce_intra(const void *sbuf, void* rbuf, int count,
         ompi_coll_shared_lazy_enable(module, comm);
     }
 
-    //printf("In shared reduce\n");
+    printf("In shared allreduce\n");
     int i;
     ptrdiff_t extent, lower_bound;
     ompi_datatype_get_extent(dtype, &lower_bound, &extent);
@@ -55,21 +55,17 @@ int mca_coll_shared_reduce_intra(const void *sbuf, void* rbuf, int count,
         shared_module->sm_data_win->w_osc_module->osc_fence(0, shared_module->sm_data_win);
     }
     int w_rank = ompi_comm_rank(comm);
-    if (w_rank == root) {
-        char *c;
-        c = rbuf;
-        for (i=0; i<shared_module->sm_size; i++) {
-            if (i != shared_module->sm_size-1) {
-                seg_size = l_seg_size;
-            }
-            else {
-                seg_size = count - i*l_seg_size;
-            }
-            memcpy((char*)c, shared_module->data_buf[i], seg_size*extent);
-            c = c+seg_size*extent;
+    char *c;
+    c = rbuf;
+    for (i=0; i<shared_module->sm_size; i++) {
+        if (i != shared_module->sm_size-1) {
+            seg_size = l_seg_size;
         }
-        
+        else {
+            seg_size = count - i*l_seg_size;
+        }
+        memcpy((char*)c, shared_module->data_buf[i], seg_size*extent);
+        c = c+seg_size*extent;
     }
-    
     return OMPI_SUCCESS;
 }

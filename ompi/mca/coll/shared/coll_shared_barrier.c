@@ -14,23 +14,27 @@ int mca_coll_shared_barrier_intra(struct ompi_communicator_t *comm,
     int temp[1];
     temp[0] = 1;
     tag = !tag;
-    int n = opal_atomic_add_32(&(shared_module->barrier_buf[2]), 1);
+    int n = opal_atomic_add_fetch_32(&(shared_module->barrier_buf[2]), 1);
     id++;
     printf("[%d] rank=%d %d enter barrier %d num_node %d\n", id, w_rank, shared_module->sm_rank, n, shared_module->num_node);
     if (n == shared_module->sm_size){
         shared_module->barrier_buf[!tag] = 0;
         shared_module->barrier_buf[2]=0;
         printf("lock [%d] rank=%d %d accumulate remote\n", id, w_rank, shared_module->sm_rank);
+        //shared_module->root_win->w_osc_module->osc_fence(0, shared_module->root_win);
         shared_module->root_win->w_osc_module->osc_lock(MPI_LOCK_EXCLUSIVE, 0, 0, shared_module->root_win);
         printf("accm [%d] rank=%d %d accumulate remote\n", id, w_rank, shared_module->sm_rank);
         shared_module->root_win->w_osc_module->osc_accumulate(&temp, 1, MPI_INT, 0, 0, 1, MPI_INT, MPI_SUM, shared_module->root_win);
         printf("unlock [%d] rank=%d %d accumulate remote\n", id, w_rank, shared_module->sm_rank);
-        shared_module->root_win->w_osc_module->osc_unlock(0, shared_module->root_win);
         //shared_module->root_win->w_osc_module->osc_fence(0, shared_module->root_win);
+        shared_module->root_win->w_osc_module->osc_unlock(0, shared_module->root_win);
         printf("after [%d] rank=%d %d accumulate remote\n", id, w_rank, shared_module->sm_rank);
+        
     }
     if (w_rank == 0) {
-        while (shared_module->barrier_buf[3] < shared_module->num_node) {;}
+        while (shared_module->barrier_buf[3] < shared_module->num_node) {
+            opal_progress();
+        }
         printf("ready [%d] rank=%d %d root_ptr %d\n", id, w_rank, shared_module->sm_rank, shared_module->barrier_buf[3]);
         shared_module->barrier_buf[3] = 0;
         int i;
@@ -46,7 +50,9 @@ int mca_coll_shared_barrier_intra(struct ompi_communicator_t *comm,
         }
     }
     else{
-        while (shared_module->barrier_buf[tag] == 0) {;}
+        while (shared_module->barrier_buf[tag] == 0) {
+            opal_progress();
+        }
     }
     
     printf("[%d] rank=%d %d exit barrier %d %d %d\n", id, w_rank, shared_module->sm_rank, shared_module->barrier_buf[0], shared_module->barrier_buf[1], shared_module->barrier_buf[2]);

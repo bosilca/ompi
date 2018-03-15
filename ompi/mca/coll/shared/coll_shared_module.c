@@ -59,7 +59,7 @@
 #include "ompi/mca/rte/rte.h"
 #include "ompi/proc/proc.h"
 #include "coll_shared.h"
-
+#include "ompi/mca/coll/base/coll_base_functions.h"
 #include "ompi/mca/coll/base/coll_tags.h"
 #include "ompi/mca/pml/pml.h"
 
@@ -179,16 +179,16 @@ mca_coll_shared_comm_query(struct ompi_communicator_t *comm, int *priority)
     shared_module->super.ft_event        = NULL;
     shared_module->super.coll_allgather  = NULL;
     shared_module->super.coll_allgatherv = NULL;
-    shared_module->super.coll_allreduce  = NULL;
+    shared_module->super.coll_allreduce  = mca_coll_shared_allreduce_intra; //mca_coll_shared_allreduce_intra
     shared_module->super.coll_alltoall   = NULL;
     shared_module->super.coll_alltoallv  = NULL;
     shared_module->super.coll_alltoallw  = NULL;
-    shared_module->super.coll_barrier    = mca_coll_shared_barrier_intra;
+    shared_module->super.coll_barrier    = mca_coll_shared_barrier_intra; //mca_coll_shared_barrier_intra;
     shared_module->super.coll_bcast      = NULL;
     shared_module->super.coll_exscan     = NULL;
     shared_module->super.coll_gather     = NULL;
     shared_module->super.coll_gatherv    = NULL;
-    shared_module->super.coll_reduce     = NULL; //mca_coll_shared_reduce_intra;
+    shared_module->super.coll_reduce     = mca_coll_shared_reduce_intra; //mca_coll_shared_reduce_intra;
     shared_module->super.coll_reduce_scatter = NULL;
     shared_module->super.coll_scan       = NULL;
     shared_module->super.coll_scatter    = NULL;
@@ -216,7 +216,9 @@ int ompi_coll_shared_lazy_enable(mca_coll_base_module_t *module,
     //printf("shared_module_lazy_enable start\n");
     int p = mca_coll_shared_component.shared_priority;
     mca_coll_shared_component.shared_priority = 0;
+    comm->c_coll->coll_allreduce = ompi_coll_base_allreduce_intra_recursivedoubling;
     mca_coll_shared_module_t *shared_module = (mca_coll_shared_module_t*) module;
+    //Barrier
     int w_rank;
     w_rank = ompi_comm_rank(comm);
     
@@ -259,8 +261,30 @@ int ompi_coll_shared_lazy_enable(mca_coll_base_module_t *module,
         shared_module->leader_win->w_osc_module->osc_fence(0, shared_module->leader_win);
     }
     
+    //Reduce
+    //create a shared memory to store data on every node
+    int max_seg_size = 2500000;
+    ompi_win_allocate_shared(max_seg_size*sizeof(char), sizeof(char), (opal_info_t *)(&ompi_mpi_info_null), shared_module->node_comm, &shared_module->sm_data_ptr, &shared_module->sm_data_win);
+    size_t data_size[shared_module->sm_size];
+    int data_disp[shared_module->sm_size];
+    shared_module->data_buf = malloc(sizeof(char *) * shared_module->sm_size);
+    //get shared memory
+    for (i=0; i<shared_module->sm_size; i++) {
+        shared_module->sm_data_win->w_osc_module->osc_win_shared_query(shared_module->sm_data_win, i, &(data_size[i]), &(data_disp[i]), &(shared_module->data_buf[i]));
+    }
+    //create a shared memory to store control message on every node
+    ompi_win_allocate_shared(1*sizeof(int), sizeof(int), (opal_info_t *)(&ompi_mpi_info_null), shared_module->node_comm, &shared_module->sm_ctrl_ptr, &shared_module->sm_ctrl_win);
+    size_t ctrl_size[shared_module->sm_size];
+    int ctrl_disp[shared_module->sm_size];
+    shared_module->ctrl_buf = malloc(sizeof(int *) * shared_module->sm_size);
+    //get shared memory
+    for (i=0; i<shared_module->sm_size; i++) {
+        shared_module->sm_ctrl_win->w_osc_module->osc_win_shared_query(shared_module->sm_ctrl_win, i, &(ctrl_size[i]), &(ctrl_disp[i]), &(shared_module->ctrl_buf[i]));
+    }
+
     shared_module->enabled = true;
     mca_coll_shared_component.shared_priority = p;
+    comm->c_coll->coll_allreduce = mca_coll_shared_allreduce_intra;
     //printf("shared_module_lazy_enable end\n");
     return OMPI_SUCCESS;
 }

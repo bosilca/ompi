@@ -24,6 +24,7 @@ sources = \
         coll_shared.h \
         coll_shared_barrier.c \
         coll_shared_reduce.c \
+        coll_shared_allreduce.c \
         coll_shared_component.c \
         coll_shared_module.c 
 
