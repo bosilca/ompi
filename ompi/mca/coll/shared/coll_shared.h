@@ -116,6 +116,10 @@ BEGIN_C_DECLS
                                     struct ompi_op_t *op,
                                     struct ompi_communicator_t *comm,
                                     mca_coll_base_module_t *module);
+    int mca_coll_shared_bcast_intra(void *buff, int count, struct ompi_datatype_t *dtype, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+    int mca_coll_shared_bcast_linear_intra(void *buff, int count, struct ompi_datatype_t *dtype, int root, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+
+
 
 
 END_C_DECLS

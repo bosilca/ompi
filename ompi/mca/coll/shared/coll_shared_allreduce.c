@@ -11,7 +11,7 @@ int mca_coll_shared_allreduce_intra(const void *sbuf, void *rbuf,
         ompi_coll_shared_lazy_enable(module, comm);
     }
 
-    printf("In shared allreduce\n");
+    //printf("In shared allreduce\n");
     int i;
     ptrdiff_t extent, lower_bound;
     ompi_datatype_get_extent(dtype, &lower_bound, &extent);
@@ -52,9 +52,8 @@ int mca_coll_shared_allreduce_intra(const void *sbuf, void *rbuf,
         }
         cur = (cur-1+shared_module->sm_size)%shared_module->sm_size;
         shared_module->ctrl_buf[cur][0] = (shared_module->ctrl_buf[cur][0]+1)%shared_module->sm_size;
-        shared_module->sm_data_win->w_osc_module->osc_fence(0, shared_module->sm_data_win);
+        shared_module->sm_ctrl_win->w_osc_module->osc_fence(0, shared_module->sm_ctrl_win);
     }
-    int w_rank = ompi_comm_rank(comm);
     char *c;
     c = rbuf;
     for (i=0; i<shared_module->sm_size; i++) {

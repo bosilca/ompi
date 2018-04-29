@@ -52,7 +52,7 @@ int mca_coll_shared_reduce_intra(const void *sbuf, void* rbuf, int count,
         }
         cur = (cur-1+shared_module->sm_size)%shared_module->sm_size;
         shared_module->ctrl_buf[cur][0] = (shared_module->ctrl_buf[cur][0]+1)%shared_module->sm_size;
-        shared_module->sm_data_win->w_osc_module->osc_fence(0, shared_module->sm_data_win);
+        shared_module->sm_ctrl_win->w_osc_module->osc_fence(0, shared_module->sm_ctrl_win);
     }
     int w_rank = ompi_comm_rank(comm);
     if (w_rank == root) {
@@ -68,7 +68,6 @@ int mca_coll_shared_reduce_intra(const void *sbuf, void* rbuf, int count,
             memcpy((char*)c, shared_module->data_buf[i], seg_size*extent);
             c = c+seg_size*extent;
         }
-        
     }
     
     return OMPI_SUCCESS;
