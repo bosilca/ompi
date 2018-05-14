@@ -184,7 +184,7 @@ mca_coll_shared_comm_query(struct ompi_communicator_t *comm, int *priority)
     shared_module->super.coll_alltoallv  = NULL;
     shared_module->super.coll_alltoallw  = NULL;
     shared_module->super.coll_barrier    = NULL; //mca_coll_shared_barrier_intra;
-    shared_module->super.coll_bcast      = mca_coll_shared_bcast_intra; //mca_coll_shared_bcast_linear_intra
+    shared_module->super.coll_bcast      = mca_coll_shared_bcast_linear_nofence_intra; //mca_coll_shared_bcast_linear_intra mca_coll_shared_bcast_linear_nofence_intra mca_coll_shared_bcast_binary
     shared_module->super.coll_exscan     = NULL;
     shared_module->super.coll_gather     = NULL;
     shared_module->super.coll_gatherv    = NULL;
