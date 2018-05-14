@@ -120,7 +120,7 @@ int mca_coll_shared_bcast_linear_nofence_intra(void *buff, int count, struct omp
         memcpy((char*)buff, shared_module->data_buf[root], count*extent);
     }
     //barrier
-    ompi_coll_base_barrier_intra_doublering(comm, module);
+    ompi_coll_base_barrier_intra_recursivedoubling(comm, module);
     //shared_module->sm_data_win->w_osc_module->osc_fence(0, shared_module->sm_data_win);
     return OMPI_SUCCESS;
 }
