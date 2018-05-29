@@ -112,7 +112,38 @@ BEGIN_C_DECLS
 				 int root,
 				 struct ompi_communicator_t *comm,
 				 mca_coll_base_module_t *module);
+    int mca_coll_shared_reduce_shared_ring(const void *sbuf, void* rbuf, int count,
+                                 struct ompi_datatype_t *dtype,
+                                 struct ompi_op_t *op,
+                                 int root,
+                                 struct ompi_communicator_t *comm,
+                                 mca_coll_base_module_t *module);
+
+    int mca_coll_shared_reduce_linear(const void *sbuf, void* rbuf, int count,
+                                  struct ompi_datatype_t *dtype,
+                                  struct ompi_op_t *op,
+                                  int root,
+                                  struct ompi_communicator_t *comm,
+                                  mca_coll_base_module_t *module);
+    int mca_coll_shared_reduce_binomial(const void *sbuf, void* rbuf, int count,
+                                    struct ompi_datatype_t *dtype,
+                                    struct ompi_op_t *op,
+                                    int root,
+                                    struct ompi_communicator_t *comm,
+                                    mca_coll_base_module_t *module);
+    int mca_coll_shared_reduce_generic( const void* sendbuf, void* recvbuf, int original_count,
+                                  ompi_datatype_t* datatype, ompi_op_t* op,
+                                  int root, ompi_communicator_t* comm,
+                                  mca_coll_base_module_t *module,
+                                  ompi_coll_tree_t* tree, int count_by_segment,
+                                  int max_outstanding_reqs );
     int mca_coll_shared_allreduce_intra(const void *sbuf, void *rbuf,
+                                    int count,
+                                    struct ompi_datatype_t *dtype,
+                                    struct ompi_op_t *op,
+                                    struct ompi_communicator_t *comm,
+                                    mca_coll_base_module_t *module);
+    int mca_coll_shared_allreduce_shared_ring(const void *sbuf, void *rbuf,
                                     int count,
                                     struct ompi_datatype_t *dtype,
                                     struct ompi_op_t *op,

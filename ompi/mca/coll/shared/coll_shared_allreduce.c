@@ -1,6 +1,27 @@
 #include "coll_shared.h"
 
 int mca_coll_shared_allreduce_intra(const void *sbuf, void *rbuf,
+                                    int count,
+                                    struct ompi_datatype_t *dtype,
+                                    struct ompi_op_t *op,
+                                    struct ompi_communicator_t *comm,
+                                    mca_coll_base_module_t *module){
+    ptrdiff_t extent, lower_bound;
+    ompi_datatype_get_extent(dtype, &lower_bound, &extent);
+    if (count*extent <= 8*1024) {
+        ompi_coll_base_allreduce_intra_recursivedoubling(sbuf, rbuf, count, dtype, op, comm, module);
+    }
+    else if (count*extent <= 128*1024) {
+        ompi_coll_base_allreduce_intra_ring(sbuf, rbuf, count, dtype, op, comm, module);
+    }
+    else{
+        mca_coll_shared_allreduce_shared_ring(sbuf, rbuf, count, dtype, op, comm, module);
+    }
+    return OMPI_SUCCESS;
+
+}
+
+int mca_coll_shared_allreduce_shared_ring(const void *sbuf, void *rbuf,
                                  int count,
                                  struct ompi_datatype_t *dtype,
                                  struct ompi_op_t *op,
@@ -68,3 +89,4 @@ int mca_coll_shared_allreduce_intra(const void *sbuf, void *rbuf,
     }
     return OMPI_SUCCESS;
 }
+
