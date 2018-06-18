@@ -9,7 +9,7 @@ int mca_coll_shared_reduce_intra(const void *sbuf, void* rbuf, int count,
     ptrdiff_t extent, lower_bound;
     ompi_datatype_get_extent(dtype, &lower_bound, &extent);
     if (count*extent <= 256) {
-        mca_coll_shared_reduce_binomial(sbuf, rbuf, count, dtype, op, root, comm, module);
+        mca_coll_shared_reduce_linear(sbuf, rbuf, count, dtype, op, root, comm, module);
 
     }
     else if (count*extent <= 256*1024) {
@@ -107,7 +107,10 @@ int mca_coll_shared_reduce_linear(const void *sbuf, void* rbuf, int count,
     ompi_coll_tree_t* tree;
     //fanout need to less than 32
     if (fanout > 1) {
-        tree = ompi_coll_base_topo_build_tree(ompi_comm_size(comm) - 1, comm, root);
+        if (fanout > MAXTREEFANOUT) {
+            fanout = MAXTREEFANOUT;
+        }
+        tree = ompi_coll_base_topo_build_tree(fanout, comm, root);
     }
     else{
         tree = ompi_coll_base_topo_build_chain(1, comm, root);
