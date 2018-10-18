@@ -16,6 +16,7 @@
 
 #include "opal/runtime/opal.h"
 #include "opal/mca/pmix/pmix.h"
+#include "ompi/attribute/attribute.h"
 #include "ompi/message/message.h"
 #include "ompi/mca/pml/base/pml_base_bsend.h"
 #include "opal/mca/common/ucx/common_ucx.h"
@@ -190,9 +191,9 @@ int mca_pml_ucx_close(void)
 int mca_pml_ucx_init(void)
 {
     ucp_worker_params_t params;
-    ucs_status_t status;
     ucp_worker_attr_t attr;
-    int rc;
+    ucs_status_t status;
+    int i, rc;
 
     PML_UCX_VERBOSE(1, "mca_pml_ucx_init");
 
@@ -209,30 +210,34 @@ int mca_pml_ucx_init(void)
                                &ompi_pml_ucx.ucp_worker);
     if (UCS_OK != status) {
         PML_UCX_ERROR("Failed to create UCP worker");
-        return OMPI_ERROR;
+        rc = OMPI_ERROR;
+        goto err;
     }
 
     attr.field_mask = UCP_WORKER_ATTR_FIELD_THREAD_MODE;
     status = ucp_worker_query(ompi_pml_ucx.ucp_worker, &attr);
     if (UCS_OK != status) {
-        ucp_worker_destroy(ompi_pml_ucx.ucp_worker);
-        ompi_pml_ucx.ucp_worker = NULL;
         PML_UCX_ERROR("Failed to query UCP worker thread level");
-        return OMPI_ERROR;
+        rc = OMPI_ERROR;
+        goto err_destroy_worker;
     }
 
-    if (ompi_mpi_thread_multiple && attr.thread_mode != UCS_THREAD_MODE_MULTI) {
+    if (ompi_mpi_thread_multiple && (attr.thread_mode != UCS_THREAD_MODE_MULTI)) {
         /* UCX does not support multithreading, disqualify current PML for now */
         /* TODO: we should let OMPI to fallback to THREAD_SINGLE mode */
-        ucp_worker_destroy(ompi_pml_ucx.ucp_worker);
-        ompi_pml_ucx.ucp_worker = NULL;
         PML_UCX_ERROR("UCP worker does not support MPI_THREAD_MULTIPLE");
-        return OMPI_ERROR;
+        rc = OMPI_ERR_NOT_SUPPORTED;
+        goto err_destroy_worker;
     }
 
     rc = mca_pml_ucx_send_worker_address();
     if (rc < 0) {
-        return rc;
+        goto err_destroy_worker;
+    }
+
+    ompi_pml_ucx.datatype_attr_keyval = MPI_KEYVAL_INVALID;
+    for (i = 0; i < OMPI_DATATYPE_MAX_PREDEFINED; ++i) {
+        ompi_pml_ucx.predefined_types[i] = PML_UCX_DATATYPE_INVALID;
     }
 
     /* Initialize the free lists */
@@ -249,13 +254,32 @@ int mca_pml_ucx_init(void)
                     (void *)ompi_pml_ucx.ucp_context,
                     (void *)ompi_pml_ucx.ucp_worker);
     return OMPI_SUCCESS;
+
+err_destroy_worker:
+    ucp_worker_destroy(ompi_pml_ucx.ucp_worker);
+    ompi_pml_ucx.ucp_worker = NULL;
+err:
+    return rc;
 }
 
 int mca_pml_ucx_cleanup(void)
 {
+    int i;
+
     PML_UCX_VERBOSE(1, "mca_pml_ucx_cleanup");
 
     opal_progress_unregister(mca_pml_ucx_progress);
+
+    if (ompi_pml_ucx.datatype_attr_keyval != MPI_KEYVAL_INVALID) {
+        ompi_attr_free_keyval(TYPE_ATTR, &ompi_pml_ucx.datatype_attr_keyval, false);
+    }
+
+    for (i = 0; i < OMPI_DATATYPE_MAX_PREDEFINED; ++i) {
+        if (ompi_pml_ucx.predefined_types[i] != PML_UCX_DATATYPE_INVALID) {
+            ucp_dt_destroy(ompi_pml_ucx.predefined_types[i]);
+            ompi_pml_ucx.predefined_types[i] = PML_UCX_DATATYPE_INVALID;
+        }
+    }
 
     ompi_pml_ucx.completed_send_req.req_state = OMPI_REQUEST_INVALID;
     OMPI_REQUEST_FINI(&ompi_pml_ucx.completed_send_req);
@@ -398,6 +422,22 @@ int mca_pml_ucx_del_procs(struct ompi_proc_t **procs, size_t nprocs)
 
 int mca_pml_ucx_enable(bool enable)
 {
+    ompi_attribute_fn_ptr_union_t copy_fn;
+    ompi_attribute_fn_ptr_union_t del_fn;
+    int ret;
+
+    /* Create a key for adding custom attributes to datatypes */
+    copy_fn.attr_datatype_copy_fn  =
+                    (MPI_Type_internal_copy_attr_function*)MPI_TYPE_NULL_COPY_FN;
+    del_fn.attr_datatype_delete_fn = mca_pml_ucx_datatype_attr_del_fn;
+    ret = ompi_attr_create_keyval(TYPE_ATTR, copy_fn, del_fn,
+                                  &ompi_pml_ucx.datatype_attr_keyval, NULL, 0,
+                                  NULL);
+    if (ret != OMPI_SUCCESS) {
+        PML_UCX_ERROR("Failed to create keyval for UCX datatypes: %d", ret);
+        return ret;
+    }
+
     PML_UCX_FREELIST_INIT(&ompi_pml_ucx.persistent_reqs,
                           mca_pml_ucx_persistent_request_t,
                           128, -1, 128);
@@ -441,7 +481,7 @@ int mca_pml_ucx_irecv_init(void *buf, size_t count, ompi_datatype_t *datatype,
     req->flags          = 0;
     req->buffer         = buf;
     req->count          = count;
-    req->datatype       = mca_pml_ucx_get_datatype(datatype);
+    req->datatype.datatype = mca_pml_ucx_get_datatype(datatype);
 
     PML_UCX_MAKE_RECV_TAG(req->tag, req->recv.tag_mask, tag, src, comm);
 
@@ -492,13 +532,12 @@ int mca_pml_ucx_recv(void *buf, size_t count, ompi_datatype_t *datatype, int src
                               mca_pml_ucx_get_datatype(datatype),
                               ucp_tag, ucp_tag_mask, req);
 
-    for (;;) {
+    MCA_COMMON_UCX_PROGRESS_LOOP(ompi_pml_ucx.ucp_worker) {
         status = ucp_request_test(req, &info);
         if (status != UCS_INPROGRESS) {
             mca_pml_ucx_set_recv_status_safe(mpi_status, status, &info);
             return OMPI_SUCCESS;
         }
-        opal_progress();
     }
 }
 
@@ -551,10 +590,10 @@ int mca_pml_ucx_isend_init(const void *buf, size_t count, ompi_datatype_t *datat
     req->send.mode      = mode;
     req->send.ep        = ep;
     if (MCA_PML_BASE_SEND_BUFFERED == mode) {
-        req->ompi_datatype = datatype;
+        req->datatype.ompi_datatype = datatype;
         OBJ_RETAIN(datatype);
     } else {
-        req->datatype = mca_pml_ucx_get_datatype(datatype);
+        req->datatype.datatype = mca_pml_ucx_get_datatype(datatype);
     }
 
     *request = &req->ompi;
@@ -685,16 +724,12 @@ mca_pml_ucx_send_nb(ucp_ep_h ep, const void *buf, size_t count,
 
     req = (ompi_request_t*)mca_pml_ucx_common_send(ep, buf, count, datatype,
                                                    mca_pml_ucx_get_datatype(datatype),
-                                                   tag, mode,
-                                                   mca_pml_ucx_send_completion);
-
+                                                   tag, mode, cb);
     if (OPAL_LIKELY(req == NULL)) {
         return OMPI_SUCCESS;
     } else if (!UCS_PTR_IS_ERR(req)) {
         PML_UCX_VERBOSE(8, "got request %p", (void*)req);
-        ucp_worker_progress(ompi_pml_ucx.ucp_worker);
-        ompi_request_wait(&req, MPI_STATUS_IGNORE);
-        return OMPI_SUCCESS;
+        MCA_COMMON_UCX_WAIT_LOOP(req, ompi_pml_ucx.ucp_worker, "ucx send", ompi_request_free(&req));
     } else {
         PML_UCX_ERROR("ucx send failed: %s", ucs_status_string(UCS_PTR_STATUS(req)));
         return OMPI_ERROR;
@@ -707,7 +742,7 @@ mca_pml_ucx_send_nbr(ucp_ep_h ep, const void *buf, size_t count,
                      ucp_datatype_t ucx_datatype, ucp_tag_t tag)
 
 {
-    void *req;
+    ucs_status_ptr_t req;
     ucs_status_t status;
 
     /* coverity[bad_alloc_arithmetic] */
@@ -717,12 +752,7 @@ mca_pml_ucx_send_nbr(ucp_ep_h ep, const void *buf, size_t count,
         return OMPI_SUCCESS;
     }
 
-    ucp_worker_progress(ompi_pml_ucx.ucp_worker);
-    while ((status = ucp_request_check_status(req)) == UCS_INPROGRESS) {
-        opal_progress();
-    }
-
-    return OPAL_LIKELY(UCS_OK == status) ? OMPI_SUCCESS : OMPI_ERROR;
+    MCA_COMMON_UCX_WAIT_LOOP(req, ompi_pml_ucx.ucp_worker, "ucx send", (void)0);
 }
 #endif
 
@@ -758,6 +788,8 @@ int mca_pml_ucx_send(const void *buf, size_t count, ompi_datatype_t *datatype, i
 int mca_pml_ucx_iprobe(int src, int tag, struct ompi_communicator_t* comm,
                          int *matched, ompi_status_public_t* mpi_status)
 {
+    static unsigned progress_count = 0;
+
     ucp_tag_t ucp_tag, ucp_tag_mask;
     ucp_tag_recv_info_t info;
     ucp_tag_message_h ucp_msg;
@@ -770,8 +802,9 @@ int mca_pml_ucx_iprobe(int src, int tag, struct ompi_communicator_t* comm,
     if (ucp_msg != NULL) {
         *matched = 1;
         mca_pml_ucx_set_recv_status_safe(mpi_status, UCS_OK, &info);
-    } else {
-        opal_progress();
+    } else  {
+        (++progress_count % opal_common_ucx.progress_iterations) ?
+            (void)ucp_worker_progress(ompi_pml_ucx.ucp_worker) : opal_progress();
         *matched = 0;
     }
     return OMPI_SUCCESS;
@@ -787,22 +820,23 @@ int mca_pml_ucx_probe(int src, int tag, struct ompi_communicator_t* comm,
     PML_UCX_TRACE_PROBE("probe", src, tag, comm);
 
     PML_UCX_MAKE_RECV_TAG(ucp_tag, ucp_tag_mask, tag, src, comm);
-    for (;;) {
-        ucp_msg = ucp_tag_probe_nb(ompi_pml_ucx.ucp_worker, ucp_tag, ucp_tag_mask,
-                                   0, &info);
+
+    MCA_COMMON_UCX_PROGRESS_LOOP(ompi_pml_ucx.ucp_worker) {
+        ucp_msg = ucp_tag_probe_nb(ompi_pml_ucx.ucp_worker, ucp_tag,
+                                   ucp_tag_mask, 0, &info);
         if (ucp_msg != NULL) {
             mca_pml_ucx_set_recv_status_safe(mpi_status, UCS_OK, &info);
             return OMPI_SUCCESS;
         }
-
-        opal_progress();
     }
 }
 
 int mca_pml_ucx_improbe(int src, int tag, struct ompi_communicator_t* comm,
-                          int *matched, struct ompi_message_t **message,
-                          ompi_status_public_t* mpi_status)
+                        int *matched, struct ompi_message_t **message,
+                        ompi_status_public_t* mpi_status)
 {
+    static unsigned progress_count = 0;
+
     ucp_tag_t ucp_tag, ucp_tag_mask;
     ucp_tag_recv_info_t info;
     ucp_tag_message_h ucp_msg;
@@ -818,7 +852,8 @@ int mca_pml_ucx_improbe(int src, int tag, struct ompi_communicator_t* comm,
         *matched         = 1;
         mca_pml_ucx_set_recv_status_safe(mpi_status, UCS_OK, &info);
     } else  {
-        opal_progress();
+        (++progress_count % opal_common_ucx.progress_iterations) ?
+            (void)ucp_worker_progress(ompi_pml_ucx.ucp_worker) : opal_progress();
         *matched = 0;
     }
     return OMPI_SUCCESS;
@@ -835,7 +870,7 @@ int mca_pml_ucx_mprobe(int src, int tag, struct ompi_communicator_t* comm,
     PML_UCX_TRACE_PROBE("mprobe", src, tag, comm);
 
     PML_UCX_MAKE_RECV_TAG(ucp_tag, ucp_tag_mask, tag, src, comm);
-    for (;;) {
+    MCA_COMMON_UCX_PROGRESS_LOOP(ompi_pml_ucx.ucp_worker) {
         ucp_msg = ucp_tag_probe_nb(ompi_pml_ucx.ucp_worker, ucp_tag, ucp_tag_mask,
                                    1, &info);
         if (ucp_msg != NULL) {
@@ -844,8 +879,6 @@ int mca_pml_ucx_mprobe(int src, int tag, struct ompi_communicator_t* comm,
             mca_pml_ucx_set_recv_status_safe(mpi_status, UCS_OK, &info);
             return OMPI_SUCCESS;
         }
-
-        opal_progress();
     }
 }
 
@@ -917,8 +950,8 @@ int mca_pml_ucx_start(size_t count, ompi_request_t** requests)
             tmp_req = (ompi_request_t*)mca_pml_ucx_common_send(preq->send.ep,
                                                                preq->buffer,
                                                                preq->count,
-                                                               preq->ompi_datatype,
-                                                               preq->datatype,
+                                                               preq->datatype.ompi_datatype,
+                                                               preq->datatype.datatype,
                                                                preq->tag,
                                                                preq->send.mode,
                                                                mca_pml_ucx_psend_completion);
@@ -926,7 +959,8 @@ int mca_pml_ucx_start(size_t count, ompi_request_t** requests)
             PML_UCX_VERBOSE(8, "start recv request %p", (void*)preq);
             tmp_req = (ompi_request_t*)ucp_tag_recv_nb(ompi_pml_ucx.ucp_worker,
                                                        preq->buffer, preq->count,
-                                                       preq->datatype, preq->tag,
+                                                       preq->datatype.datatype,
+                                                       preq->tag,
                                                        preq->recv.tag_mask,
                                                        mca_pml_ucx_precv_completion);
         }

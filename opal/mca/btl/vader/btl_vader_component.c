@@ -18,6 +18,7 @@
  * Copyright (c) 2014-2018 Intel, Inc. All rights reserved.
  * Copyright (c) 2014-2018 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2018      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -28,6 +29,7 @@
 
 #include "opal/util/output.h"
 #include "opal/util/show_help.h"
+#include "opal/util/printf.h"
 #include "opal/threads/mutex.h"
 #include "opal/mca/btl/base/btl_base_error.h"
 
@@ -365,6 +367,7 @@ static int mca_btl_base_vader_modex_send (void)
     return rc;
 }
 
+#if OPAL_BTL_VADER_HAVE_XPMEM || OPAL_BTL_VADER_HAVE_CMA || OPAL_BTL_VADER_HAVE_KNEM
 static void mca_btl_vader_select_next_single_copy_mechanism (void)
 {
     for (int i = 0 ; single_copy_mechanisms[i].value != MCA_BTL_VADER_NONE ; ++i) {
@@ -374,10 +377,13 @@ static void mca_btl_vader_select_next_single_copy_mechanism (void)
         }
     }
 }
+#endif
 
 static void mca_btl_vader_check_single_copy (void)
 {
+#if OPAL_BTL_VADER_HAVE_XPMEM || OPAL_BTL_VADER_HAVE_CMA || OPAL_BTL_VADER_HAVE_KNEM
     int initial_mechanism = mca_btl_vader_component.single_copy_mechanism;
+#endif
 
     /* single-copy emulation is always used to support AMO's right now */
     mca_btl_vader_sc_emu_init ();
@@ -522,10 +528,9 @@ static mca_btl_base_module_t **mca_btl_vader_component_init (int *num_btls,
     mca_btl_vader_check_single_copy ();
 
     if (MCA_BTL_VADER_XPMEM != mca_btl_vader_component.single_copy_mechanism) {
-        const char *base_dir = opal_process_info.proc_session_dir;
         char *sm_file;
 
-        rc = asprintf(&sm_file, "%s" OPAL_PATH_SEP "vader_segment.%s.%x.%d", mca_btl_vader_component.backing_directory,
+        rc = opal_asprintf(&sm_file, "%s" OPAL_PATH_SEP "vader_segment.%s.%x.%d", mca_btl_vader_component.backing_directory,
                       opal_process_info.nodename, OPAL_PROC_MY_NAME.jobid, MCA_BTL_VADER_LOCAL_RANK);
         if (0 > rc) {
             free (btls);
@@ -712,7 +717,7 @@ static void mca_btl_vader_progress_endpoints (void)
 
 static int mca_btl_vader_component_progress (void)
 {
-    static int32_t lock = 0;
+    static opal_atomic_int32_t lock = 0;
     int count = 0;
 
     if (opal_using_threads()) {

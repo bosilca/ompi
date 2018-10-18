@@ -13,11 +13,9 @@
 #include "btl_vader_frag.h"
 
 #if OPAL_HAVE_ATOMIC_MATH_64
-static void mca_btl_vader_sc_emu_atomic_64 (int64_t *operand, volatile int64_t *addr, mca_btl_base_atomic_op_t op)
+static void mca_btl_vader_sc_emu_atomic_64 (int64_t *operand, opal_atomic_int64_t *addr, mca_btl_base_atomic_op_t op)
 {
-    int64_t result;
-
-    fprintf (stderr, "Performing atomic operation %d on address %p\n", op, (void *) addr);
+    int64_t result = 0;
 
     switch (op) {
     case MCA_BTL_ATOMIC_ADD:
@@ -54,11 +52,9 @@ static void mca_btl_vader_sc_emu_atomic_64 (int64_t *operand, volatile int64_t *
 #endif
 
 #if OPAL_HAVE_ATOMIC_MATH_32
-static void mca_btl_vader_sc_emu_atomic_32 (int32_t *operand, volatile int32_t *addr, mca_btl_base_atomic_op_t op)
+static void mca_btl_vader_sc_emu_atomic_32 (int32_t *operand, opal_atomic_int32_t *addr, mca_btl_base_atomic_op_t op)
 {
-    int32_t result;
-
-    fprintf (stderr, "Performing atomic operation %d on address %p\n", op, (void *) addr);
+    int32_t result = 0;
 
     switch (op) {
     case MCA_BTL_ATOMIC_ADD:
@@ -127,10 +123,10 @@ static void mca_btl_vader_sc_emu_rdma (mca_btl_base_module_t *btl, mca_btl_base_
 #if OPAL_HAVE_ATOMIC_MATH_64
     case MCA_BTL_VADER_OP_CSWAP:
         if (!(hdr->flags & MCA_BTL_ATOMIC_FLAG_32BIT)) {
-            opal_atomic_compare_exchange_strong_64 ((volatile int64_t *) hdr->addr, &hdr->operand[0], hdr->operand[1]);
+            opal_atomic_compare_exchange_strong_64 ((opal_atomic_int64_t *) hdr->addr, &hdr->operand[0], hdr->operand[1]);
 #if OPAL_HAVE_ATOMIC_MATH_32
         } else {
-            opal_atomic_compare_exchange_strong_32 ((volatile int32_t *) hdr->addr, (int32_t *) &hdr->operand[0],
+            opal_atomic_compare_exchange_strong_32 ((opal_atomic_int32_t *) hdr->addr, (int32_t *) &hdr->operand[0],
                                                     (int32_t) hdr->operand[1]);
 #else
         } else {

@@ -17,7 +17,7 @@
  * Copyright (c) 2008-2009 Sun Microsystems, Inc.  All rights reserved.
  * Copyright (c) 2011      Sandia National Laboratories. All rights reserved.
  * Copyright (c) 2012-2013 Inria.  All rights reserved.
- * Copyright (c) 2014-2017 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2014-2018 Intel, Inc.  All rights reserved.
  * Copyright (c) 2014-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016-2018 Mellanox Technologies Ltd. All rights reserved.
@@ -130,7 +130,7 @@ const char ompi_version_string[] = OMPI_IDENT_STRING;
  * Global variables and symbols for the MPI layer
  */
 
-volatile int32_t ompi_mpi_state = OMPI_MPI_STATE_NOT_INITIALIZED;
+opal_atomic_int32_t ompi_mpi_state = OMPI_MPI_STATE_NOT_INITIALIZED;
 volatile bool ompi_rte_initialized = false;
 
 bool ompi_mpi_thread_multiple = false;
@@ -531,7 +531,7 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
     /* we want to go first */
     OBJ_CONSTRUCT(&info, opal_list_t);
     kv = OBJ_NEW(opal_value_t);
-    kv->key = strdup(OPAL_PMIX_EVENT_ORDER_PREPEND);
+    kv->key = strdup(OPAL_PMIX_EVENT_HDLR_PREPEND);
     opal_list_append(&info, &kv->super);
     /* give it a name so we can distinguish it */
     kv = OBJ_NEW(opal_value_t);
@@ -660,11 +660,17 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
     opal_pmix.commit();
     OMPI_TIMING_NEXT("commit");
 #if (OPAL_ENABLE_TIMING)
-    if (OMPI_TIMING_ENABLED && !opal_pmix_base_async_modex && 
+    if (OMPI_TIMING_ENABLED && !opal_pmix_base_async_modex &&
             opal_pmix_collect_all_data) {
-        opal_pmix.fence(NULL, 0);
+        if (OMPI_SUCCESS != (ret = opal_pmix.fence(NULL, 0))) {
+            error = "timing: pmix-barrier-1 failed";
+            goto error;
+        }
         OMPI_TIMING_NEXT("pmix-barrier-1");
-        opal_pmix.fence(NULL, 0);
+        if (OMPI_SUCCESS != (ret = opal_pmix.fence(NULL, 0))) {
+            error = "timing: pmix-barrier-2 failed";
+            goto error;
+        }
         OMPI_TIMING_NEXT("pmix-barrier-2");
     }
 #endif
@@ -687,19 +693,32 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
             background_fence = true;
             active = true;
             OPAL_POST_OBJECT(&active);
-            opal_pmix.fence_nb(NULL, true, fence_release, (void*)&active);
+            if( OMPI_SUCCESS != (ret = opal_pmix.fence_nb(NULL, true,
+                                                    fence_release,
+                                                    (void*)&active))) {
+                error = "opal_pmix.fence_nb() failed";
+                goto error;
+            }
+
         } else if (!opal_pmix_base_async_modex) {
             /* we want to do the modex */
             active = true;
             OPAL_POST_OBJECT(&active);
-            opal_pmix.fence_nb(NULL, opal_pmix_collect_all_data,
-                               fence_release, (void*)&active);
+            if( OMPI_SUCCESS != (ret = opal_pmix.fence_nb(NULL,
+                opal_pmix_collect_all_data, fence_release, (void*)&active))) {
+                error = "opal_pmix.fence_nb() failed";
+                goto error;
+            }
             /* cannot just wait on thread as we need to call opal_progress */
             OMPI_LAZY_WAIT_FOR_COMPLETION(active);
         }
         /* otherwise, we don't want to do the modex, so fall thru */
     } else if (!opal_pmix_base_async_modex || opal_pmix_collect_all_data) {
-        opal_pmix.fence(NULL, opal_pmix_collect_all_data);
+        if( OMPI_SUCCESS != (ret = opal_pmix.fence(NULL,
+                                                opal_pmix_collect_all_data))) {
+            error = "opal_pmix.fence() failed";
+            goto error;
+        }
     }
 
     OMPI_TIMING_NEXT("modex");
@@ -877,11 +896,17 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
         if (NULL != opal_pmix.fence_nb) {
             active = true;
             OPAL_POST_OBJECT(&active);
-            opal_pmix.fence_nb(NULL, false,
-                               fence_release, (void*)&active);
+            if (OMPI_SUCCESS != (ret = opal_pmix.fence_nb(NULL, false,
+                               fence_release, (void*)&active))) {
+                error = "opal_pmix.fence_nb() failed";
+                goto error;
+            }
             OMPI_LAZY_WAIT_FOR_COMPLETION(active);
         } else {
-            opal_pmix.fence(NULL, false);
+            if (OMPI_SUCCESS != (ret = opal_pmix.fence(NULL, false))) {
+                error = "opal_pmix.fence() failed";
+                goto error;
+            }
         }
     }
 

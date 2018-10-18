@@ -16,6 +16,9 @@
  * Copyright (c) 2013-2018 Intel, Inc. All rights reserved.
  * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (C) 2018      Mellanox Technologies, Ltd. 
+ *                         All rights reserved.
+ * Copyright (c) 2018      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -49,6 +52,7 @@
 #include "opal/util/output.h"
 #include "opal/util/os_dirpath.h"
 #include "opal/util/show_help.h"
+#include "opal/util/printf.h"
 #include "opal/threads/tsd.h"
 #include "opal/mca/pmix/pmix.h"
 
@@ -348,6 +352,11 @@ int opal_hwloc_base_get_topology(void)
         OPAL_MODEX_RECV_VALUE_IMMEDIATE(rc, OPAL_PMIX_HWLOC_XML_V1,
                                         &wildcard_rank, &val, OPAL_STRING);
 #endif
+        if (rc != OPAL_SUCCESS) {
+            /* check the old topo key to keep compatibility with older RMs */
+            OPAL_MODEX_RECV_VALUE_OPTIONAL(rc, OPAL_PMIX_LOCAL_TOPO,
+                                           &wildcard_rank, &val, OPAL_STRING);
+        }
     } else {
         opal_output_verbose(1, opal_hwloc_base_framework.framework_output,
                             "hwloc:base PMIx not available");
@@ -1857,9 +1866,18 @@ static void sort_by_dist(hwloc_topology_t topo, char* device_name, opal_list_t *
             if (!strcmp(device_obj->name, device_name)) {
                 /* find numa node containing this device */
                 obj = device_obj->parent;
+#if HWLOC_API_VERSION < 0x20000
                 while ((obj != NULL) && (obj->type != HWLOC_OBJ_NODE)) {
                     obj = obj->parent;
                 }
+#else
+                while (obj && !obj->memory_arity) {
+                    obj = obj->parent; /* no memory child, walk up */
+                }
+                if (obj != NULL) {
+                    obj = obj->memory_first_child;
+                }
+#endif
                 if (obj == NULL) {
                     opal_output_verbose(5, opal_hwloc_base_framework.framework_output,
                             "hwloc:base:get_sorted_numa_list: NUMA node closest to %s wasn't found.",
@@ -2045,7 +2063,7 @@ char* opal_hwloc_base_get_topo_signature(hwloc_topology_t topo)
     endian = "unknown";
 #endif
 
-    asprintf(&sig, "%dN:%dS:%dL3:%dL2:%dL1:%dC:%dH:%s:%s",
+    opal_asprintf(&sig, "%dN:%dS:%dL3:%dL2:%dL1:%dC:%dH:%s:%s",
              nnuma, nsocket, nl3, nl2, nl1, ncore, nhwt, arch, endian);
     return sig;
 }
@@ -2121,14 +2139,14 @@ char* opal_hwloc_base_get_locality_string(hwloc_topology_t topo,
             hwloc_bitmap_list_asprintf(&tmp, result);
             switch(obj->type) {
                 case HWLOC_OBJ_NODE:
-                    asprintf(&t2, "%sNM%s:", (NULL == locality) ? "" : locality, tmp);
+                    opal_asprintf(&t2, "%sNM%s:", (NULL == locality) ? "" : locality, tmp);
                     if (NULL != locality) {
                         free(locality);
                     }
                     locality = t2;
                     break;
                 case HWLOC_OBJ_SOCKET:
-                    asprintf(&t2, "%sSK%s:", (NULL == locality) ? "" : locality, tmp);
+                    opal_asprintf(&t2, "%sSK%s:", (NULL == locality) ? "" : locality, tmp);
                     if (NULL != locality) {
                         free(locality);
                     }
@@ -2137,21 +2155,21 @@ char* opal_hwloc_base_get_locality_string(hwloc_topology_t topo,
 #if HWLOC_API_VERSION < 0x20000
                 case HWLOC_OBJ_CACHE:
                     if (3 == obj->attr->cache.depth) {
-                        asprintf(&t2, "%sL3%s:", (NULL == locality) ? "" : locality, tmp);
+                        opal_asprintf(&t2, "%sL3%s:", (NULL == locality) ? "" : locality, tmp);
                         if (NULL != locality) {
                             free(locality);
                         }
                         locality = t2;
                         break;
                     } else if (2 == obj->attr->cache.depth) {
-                        asprintf(&t2, "%sL2%s:", (NULL == locality) ? "" : locality, tmp);
+                        opal_asprintf(&t2, "%sL2%s:", (NULL == locality) ? "" : locality, tmp);
                         if (NULL != locality) {
                             free(locality);
                         }
                         locality = t2;
                         break;
                     } else {
-                        asprintf(&t2, "%sL1%s:", (NULL == locality) ? "" : locality, tmp);
+                        opal_asprintf(&t2, "%sL1%s:", (NULL == locality) ? "" : locality, tmp);
                         if (NULL != locality) {
                             free(locality);
                         }
@@ -2161,21 +2179,21 @@ char* opal_hwloc_base_get_locality_string(hwloc_topology_t topo,
                     break;
 #else
                 case HWLOC_OBJ_L3CACHE:
-                    asprintf(&t2, "%sL3%s:", (NULL == locality) ? "" : locality, tmp);
+                    opal_asprintf(&t2, "%sL3%s:", (NULL == locality) ? "" : locality, tmp);
                     if (NULL != locality) {
                         free(locality);
                     }
                     locality = t2;
                     break;
                 case HWLOC_OBJ_L2CACHE:
-                    asprintf(&t2, "%sL2%s:", (NULL == locality) ? "" : locality, tmp);
+                    opal_asprintf(&t2, "%sL2%s:", (NULL == locality) ? "" : locality, tmp);
                     if (NULL != locality) {
                         free(locality);
                     }
                     locality = t2;
                     break;
                 case HWLOC_OBJ_L1CACHE:
-                    asprintf(&t2, "%sL1%s:", (NULL == locality) ? "" : locality, tmp);
+                    opal_asprintf(&t2, "%sL1%s:", (NULL == locality) ? "" : locality, tmp);
                     if (NULL != locality) {
                         free(locality);
                     }
@@ -2183,14 +2201,14 @@ char* opal_hwloc_base_get_locality_string(hwloc_topology_t topo,
                     break;
 #endif
                 case HWLOC_OBJ_CORE:
-                    asprintf(&t2, "%sCR%s:", (NULL == locality) ? "" : locality, tmp);
+                    opal_asprintf(&t2, "%sCR%s:", (NULL == locality) ? "" : locality, tmp);
                     if (NULL != locality) {
                         free(locality);
                     }
                     locality = t2;
                     break;
                 case HWLOC_OBJ_PU:
-                    asprintf(&t2, "%sHT%s:", (NULL == locality) ? "" : locality, tmp);
+                    opal_asprintf(&t2, "%sHT%s:", (NULL == locality) ? "" : locality, tmp);
                     if (NULL != locality) {
                         free(locality);
                     }

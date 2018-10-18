@@ -14,7 +14,7 @@
  * Copyright (c) 2009      Sun Microsystems, Inc.  All rights reserved.
  * Copyright (c) 2012-2017 Los Alamos National Security, LLC. All rights
  *                         reserved.
- * Copyright (c) 2015      Research Organization for Information Science
+ * Copyright (c) 2015-2018 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016-2018 IBM Corporation. All rights reserved.
  * Copyright (c) 2017-2018 Intel, Inc. All rights reserved.
@@ -41,7 +41,6 @@
 #include "opal/util/argv.h"
 #include "opal/util/opal_getcwd.h"
 #include "opal/util/output.h"
-#include "opal/util/strncpy.h"
 #include "opal/util/info_subscriber.h"
 
 static char* opal_infosubscribe_inform_subscribers(opal_infosubscriber_t * object, char *key, char *new_value, int *found_callback);
@@ -97,6 +96,10 @@ static void infosubscriber_destruct(opal_infosubscriber_t *obj) {
     }
 
     OBJ_DESTRUCT(&obj->s_subscriber_table);
+
+    if (NULL != obj->s_info) {
+        OBJ_RELEASE(obj->s_info);
+    }
 }
 
 static void opal_callback_list_item_destruct(opal_callback_list_item_t *obj) {

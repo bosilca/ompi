@@ -5,6 +5,7 @@
  * Copyright (c) 2014-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2015-2016 Los Alamos National Security, LLC.  All rights
  *                         reserved.
+ * Copyright (c) 2018      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -15,6 +16,7 @@
 #include "mtl_ofi.h"
 #include "opal/util/argv.h"
 #include "opal/util/show_help.h"
+#include "opal/util/printf.h"
 
 static int ompi_mtl_ofi_component_open(void);
 static int ompi_mtl_ofi_component_query(mca_base_module_t **module, int *priority);
@@ -124,7 +126,7 @@ ompi_mtl_ofi_component_register(void)
                                     MCA_BASE_VAR_SCOPE_READONLY,
                                     &param_priority);
 
-    prov_include = "psm,psm2,gni";
+    prov_include = NULL;
     mca_base_component_var_register(&mca_mtl_ofi_component.super.mtl_version,
                                     "provider_include",
                                     "Comma-delimited list of OFI providers that are considered for use (e.g., \"psm,psm2\"; an empty value means that all providers will be considered). Mutually exclusive with mtl_ofi_provider_exclude.",
@@ -133,7 +135,7 @@ ompi_mtl_ofi_component_register(void)
                                     MCA_BASE_VAR_SCOPE_READONLY,
                                     &prov_include);
 
-    prov_exclude = NULL;
+    prov_exclude = "shm,sockets,tcp,udp,rstream";
     mca_base_component_var_register(&mca_mtl_ofi_component.super.mtl_version,
                                     "provider_exclude",
                                     "Comma-delimited list of OFI providers that are not considered for use (default: \"sockets,mxm\"; empty value means that all providers will be considered). Mutually exclusive with mtl_ofi_provider_include.",
@@ -143,7 +145,7 @@ ompi_mtl_ofi_component_register(void)
                                     &prov_exclude);
 
     ompi_mtl_ofi.ofi_progress_event_count = 100;
-    asprintf(&desc, "Max number of events to read each call to OFI progress (default: %d events will be read per OFI progress call)", ompi_mtl_ofi.ofi_progress_event_count);
+    opal_asprintf(&desc, "Max number of events to read each call to OFI progress (default: %d events will be read per OFI progress call)", ompi_mtl_ofi.ofi_progress_event_count);
     mca_base_component_var_register(&mca_mtl_ofi_component.super.mtl_version,
                                     "progress_event_cnt",
                                     desc,
@@ -160,7 +162,7 @@ ompi_mtl_ofi_component_register(void)
     }
 
     ofi_tag_mode = MTL_OFI_TAG_AUTO;
-    asprintf(&desc, "Mode specifying how many bits to use for various MPI values in OFI/Libfabric"
+    opal_asprintf(&desc, "Mode specifying how many bits to use for various MPI values in OFI/Libfabric"
             " communications. Some Libfabric provider network types can support most of Open MPI"
             " needs; others can only supply a limited number of bits, which then must be split"
             " across the MPI communicator ID, MPI source rank, and MPI tag. Three different"
@@ -472,7 +474,11 @@ ompi_mtl_ofi_component_init(bool enable_progress_threads,
     hints->rx_attr->op_flags = FI_COMPLETION;
     hints->tx_attr->op_flags = FI_COMPLETION;
 
-    hints->domain_attr->threading        = FI_THREAD_UNSPEC;
+    if (enable_mpi_threads) {
+        hints->domain_attr->threading = FI_THREAD_SAFE;
+    } else {
+        hints->domain_attr->threading = FI_THREAD_DOMAIN;
+    }
 
     switch (control_progress) {
     case MTL_OFI_PROG_AUTO:
@@ -689,21 +695,6 @@ ompi_mtl_ofi_component_init(bool enable_progress_threads,
         goto error;
     }
 
-    /**
-     * Allocate memory for storing the CQ events read in OFI progress.
-     */
-    ompi_mtl_ofi.progress_entries = calloc(ompi_mtl_ofi.ofi_progress_event_count, sizeof(struct fi_cq_tagged_entry));
-    if (NULL == ompi_mtl_ofi.progress_entries) {
-        opal_output_verbose(1, ompi_mtl_base_framework.framework_output,
-                            "%s:%d: alloc of CQ event storage failed: %s\n",
-                            __FILE__, __LINE__, strerror(errno));
-        goto error;
-    }
-
-    /**
-     * The remote fi_addr will be stored in the ofi_endpoint struct.
-     */
-
     av_attr.type = (MTL_OFI_AV_TABLE == av_type) ? FI_AV_TABLE: FI_AV_MAP;
 
     ret = fi_av_open(ompi_mtl_ofi.domain, &av_attr, &ompi_mtl_ofi.av, NULL);
@@ -825,9 +816,6 @@ error:
     if (ompi_mtl_ofi.fabric) {
         (void) fi_close((fid_t)ompi_mtl_ofi.fabric);
     }
-    if (ompi_mtl_ofi.progress_entries) {
-        free(ompi_mtl_ofi.progress_entries);
-    }
 
     return NULL;
 }
@@ -859,8 +847,6 @@ ompi_mtl_ofi_finalize(struct mca_mtl_base_module_t *mtl)
     if ((ret = fi_close((fid_t)ompi_mtl_ofi.fabric))) {
         goto finalize_err;
     }
-
-    free(ompi_mtl_ofi.progress_entries);
 
     return OMPI_SUCCESS;
 

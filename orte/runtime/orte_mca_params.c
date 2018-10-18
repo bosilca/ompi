@@ -37,6 +37,7 @@
 #include "opal/mca/installdirs/installdirs.h"
 #include "opal/util/output.h"
 #include "opal/util/argv.h"
+#include "opal/util/printf.h"
 
 #include "orte/util/proc_info.h"
 #include "orte/mca/errmgr/errmgr.h"
@@ -380,7 +381,7 @@ int orte_register_params(void)
 
     if (NULL == orte_default_hostfile) {
         /* nothing was given, so define the default */
-        asprintf(&orte_default_hostfile, "%s/openmpi-default-hostfile", opal_install_dirs.sysconfdir);
+        opal_asprintf(&orte_default_hostfile, "%s/openmpi-default-hostfile", opal_install_dirs.sysconfdir);
         /* flag that nothing was given */
         orte_default_hostfile_given = false;
     } else if (0 == strcmp(orte_default_hostfile, "none")) {
@@ -789,13 +790,6 @@ int orte_register_params(void)
                                   MCA_BASE_VAR_TYPE_STRING, NULL, 0, 0,
                                   OPAL_INFO_LVL_3, MCA_BASE_VAR_SCOPE_ALL,
                                   &orte_data_server_uri);
-
-    orte_enable_instant_on_support = false;
-    (void) mca_base_var_register ("orte", "orte", NULL, "enable_instant_on_support",
-                                  "Enable PMIx-based instant on launch support (experimental)",
-                                  MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
-                                  OPAL_INFO_LVL_9, MCA_BASE_VAR_SCOPE_READONLY,
-                                  &orte_enable_instant_on_support);
 
     return ORTE_SUCCESS;
 }

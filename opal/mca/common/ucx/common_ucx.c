@@ -34,6 +34,50 @@ static void opal_common_ucx_mem_release_cb(void *buf, size_t length,
     ucm_vm_munmap(buf, length);
 }
 
+OPAL_DECLSPEC void opal_common_ucx_mca_var_register(const mca_base_component_t *component)
+{
+    static int registered = 0;
+    static int hook_index;
+    static int verbose_index;
+    static int progress_index;
+    if (!registered) {
+        verbose_index = mca_base_var_register("opal", "opal_common", "ucx", "verbose",
+                                              "Verbose level of the UCX components",
+                                              MCA_BASE_VAR_TYPE_INT, NULL, 0,
+                                              MCA_BASE_VAR_FLAG_SETTABLE, OPAL_INFO_LVL_3,
+                                              MCA_BASE_VAR_SCOPE_LOCAL,
+                                              &opal_common_ucx.verbose);
+        progress_index = mca_base_var_register("opal", "opal_common", "ucx", "progress_iterations",
+                                               "Set number of calls of internal UCX progress "
+                                               "calls per opal_progress call",
+                                               MCA_BASE_VAR_TYPE_INT, NULL, 0,
+                                               MCA_BASE_VAR_FLAG_SETTABLE, OPAL_INFO_LVL_3,
+                                               MCA_BASE_VAR_SCOPE_LOCAL,
+                                               &opal_common_ucx.progress_iterations);
+        hook_index = mca_base_var_register("opal", "opal_common", "ucx", "opal_mem_hooks",
+                                           "Use OPAL memory hooks, instead of UCX internal "
+                                           "memory hooks", MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
+                                           OPAL_INFO_LVL_3,
+                                           MCA_BASE_VAR_SCOPE_LOCAL,
+                                           &opal_common_ucx.opal_mem_hooks);
+        registered = 1;
+    }
+    if (component) {
+        mca_base_var_register_synonym(verbose_index, component->mca_project_name,
+                                      component->mca_type_name,
+                                      component->mca_component_name,
+                                      "verbose", 0);
+        mca_base_var_register_synonym(progress_index, component->mca_project_name,
+                                      component->mca_type_name,
+                                      component->mca_component_name,
+                                      "progress_iterations", 0);
+        mca_base_var_register_synonym(hook_index, component->mca_project_name,
+                                      component->mca_type_name,
+                                      component->mca_component_name,
+                                      "opal_mem_hooks", 0);
+    }
+}
+
 OPAL_DECLSPEC void opal_common_ucx_mca_register(void)
 {
     opal_common_ucx.registered++;
@@ -41,23 +85,6 @@ OPAL_DECLSPEC void opal_common_ucx_mca_register(void)
         /* process once */
         return;
     }
-
-    mca_base_var_register("opal", "opal_common", "ucx", "verbose",
-                          "Verbose level of the UCX components",
-                          MCA_BASE_VAR_TYPE_INT, NULL, 0, MCA_BASE_VAR_FLAG_SETTABLE,
-                          OPAL_INFO_LVL_9, MCA_BASE_VAR_SCOPE_LOCAL,
-                          &opal_common_ucx.verbose);
-    mca_base_var_register("opal", "opal_common", "ucx", "progress_iterations",
-                          "Set number of calls of internal UCX progress calls per opal_progress call",
-                          MCA_BASE_VAR_TYPE_INT, NULL, 0, MCA_BASE_VAR_FLAG_SETTABLE,
-                          OPAL_INFO_LVL_9, MCA_BASE_VAR_SCOPE_LOCAL,
-                          &opal_common_ucx.progress_iterations);
-    mca_base_var_register("opal", "opal_common", "ucx", "opal_mem_hooks",
-                          "Use OPAL memory hooks, instead of UCX internal memory hooks",
-                          MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
-                          OPAL_INFO_LVL_3,
-                          MCA_BASE_VAR_SCOPE_LOCAL,
-                          &opal_common_ucx.opal_mem_hooks);
 
     opal_common_ucx.output = opal_output_open(NULL);
     opal_output_set_verbosity(opal_common_ucx.output, opal_common_ucx.verbose);
@@ -97,14 +124,21 @@ static void opal_common_ucx_mca_fence_complete_cb(int status, void *fenced)
     *(int*)fenced = 1;
 }
 
-OPAL_DECLSPEC void opal_common_ucx_mca_pmix_fence(ucp_worker_h worker)
+OPAL_DECLSPEC int opal_common_ucx_mca_pmix_fence(ucp_worker_h worker)
 {
     volatile int fenced = 0;
+    int ret = OPAL_SUCCESS;
 
-    opal_pmix.fence_nb(NULL, 0, opal_common_ucx_mca_fence_complete_cb, (void*)&fenced);
+    if (OPAL_SUCCESS != (ret = opal_pmix.fence_nb(NULL, 0,
+                    opal_common_ucx_mca_fence_complete_cb, (void*)&fenced))){
+        return ret;
+    }
+
     while (!fenced) {
         ucp_worker_progress(worker);
     }
+
+    return ret;
 }
 
 
@@ -127,6 +161,7 @@ OPAL_DECLSPEC int opal_common_ucx_del_procs(opal_common_ucx_del_proc_t *procs, s
     void *dreq, **dreqs;
     size_t i;
     size_t n;
+    int ret = OPAL_SUCCESS;
 
     MCA_COMMON_UCX_ASSERT(procs || !count);
     MCA_COMMON_UCX_ASSERT(max_disconnect > 0);
@@ -168,7 +203,9 @@ OPAL_DECLSPEC int opal_common_ucx_del_procs(opal_common_ucx_del_proc_t *procs, s
     opal_common_ucx_wait_all_requests(dreqs, num_reqs, worker);
     free(dreqs);
 
-    opal_common_ucx_mca_pmix_fence(worker);
+    if (OPAL_SUCCESS != (ret = opal_common_ucx_mca_pmix_fence(worker))) {
+        return ret;
+    }
 
     return OPAL_SUCCESS;
 }

@@ -30,6 +30,7 @@
 #include "orte/mca/mca.h"
 #include "opal/util/argv.h"
 #include "opal/util/output.h"
+#include "opal/util/printf.h"
 #include "opal/mca/base/base.h"
 
 #include "orte/runtime/orte_globals.h"
@@ -283,7 +284,7 @@ static int orte_rmaps_base_open(mca_base_open_flag_t flags)
                        "rmaps_base_mapping_policy=ppr:<pattern>");
         /* if the mapping policy is NULL, then we can proceed */
         if (NULL == rmaps_base_mapping_policy) {
-            asprintf(&rmaps_base_mapping_policy, "ppr:%s", orte_rmaps_base.ppr);
+            opal_asprintf(&rmaps_base_mapping_policy, "ppr:%s", orte_rmaps_base.ppr);
         } else {
             return ORTE_ERR_SILENT;
         }
@@ -296,7 +297,7 @@ static int orte_rmaps_base_open(mca_base_open_flag_t flags)
                        "rmaps_base_cpus_per_proc", "rmaps_base_mapping_policy=<obj>:PE=N, default <obj>=NUMA");
     }
 
-    if (ORTE_SUCCESS != (rc = orte_rmaps_base_set_mapping_policy(&orte_rmaps_base.mapping,
+    if (ORTE_SUCCESS != (rc = orte_rmaps_base_set_mapping_policy(NULL, &orte_rmaps_base.mapping,
                                                                  &orte_rmaps_base.device,
                                                                  rmaps_base_mapping_policy))) {
         return rc;
@@ -453,7 +454,7 @@ static int orte_rmaps_base_open(mca_base_open_flag_t flags)
              ORTE_SET_MAPPING_POLICY(orte_rmaps_base.mapping, ORTE_MAPPING_PPR);
              ORTE_SET_MAPPING_DIRECTIVE(orte_rmaps_base.mapping, ORTE_MAPPING_GIVEN);
              /* define the ppr */
-             asprintf(&orte_rmaps_base.ppr, "%d:node", orte_rmaps_base_n_pernode);
+             opal_asprintf(&orte_rmaps_base.ppr, "%d:node", orte_rmaps_base_n_pernode);
          }
     }
 
@@ -464,7 +465,7 @@ static int orte_rmaps_base_open(mca_base_open_flag_t flags)
             ORTE_SET_MAPPING_POLICY(orte_rmaps_base.mapping, ORTE_MAPPING_PPR);
             ORTE_SET_MAPPING_DIRECTIVE(orte_rmaps_base.mapping, ORTE_MAPPING_GIVEN);
             /* define the ppr */
-            asprintf(&orte_rmaps_base.ppr, "%d:socket", orte_rmaps_base_n_persocket);
+            opal_asprintf(&orte_rmaps_base.ppr, "%d:socket", orte_rmaps_base_n_persocket);
         }
     }
 
@@ -593,7 +594,8 @@ static int check_modifiers(char *ck, orte_mapping_policy_t *tmp)
     return ORTE_ERR_TAKE_NEXT_OPTION;
 }
 
-int orte_rmaps_base_set_mapping_policy(orte_mapping_policy_t *policy,
+int orte_rmaps_base_set_mapping_policy(orte_job_t *jdata,
+                                       orte_mapping_policy_t *policy,
                                        char **device, char *inspec)
 {
     char *ck;
@@ -681,7 +683,11 @@ int orte_rmaps_base_set_mapping_policy(orte_mapping_policy_t *policy,
                     }
                 }
                 /* now save the pattern */
-                orte_rmaps_base.ppr = strdup(ck);
+                if (NULL == jdata || NULL == jdata->map) {
+                    orte_rmaps_base.ppr = strdup(ck);
+                } else {
+                    jdata->map->ppr = strdup(ck);
+                }
                 ORTE_SET_MAPPING_POLICY(tmp, ORTE_MAPPING_PPR);
                 ORTE_SET_MAPPING_DIRECTIVE(tmp, ORTE_MAPPING_GIVEN);
                 free(spec);
@@ -747,7 +753,11 @@ int orte_rmaps_base_set_mapping_policy(orte_mapping_policy_t *policy,
     }
 
  setpolicy:
-    *policy = tmp;
+    if (NULL == jdata || NULL == jdata->map) {
+        *policy = tmp;
+    } else {
+        jdata->map->mapping = tmp;
+    }
 
     return ORTE_SUCCESS;
 }

@@ -17,6 +17,7 @@
  * Copyright (c) 2015-2016 Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2015-2018 Cisco Systems, Inc.  All rights reserved
+ * Copyright (c) 2018      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -42,6 +43,7 @@
 #include "opal/util/net.h"
 #include "opal/util/proc.h"
 #include "opal/util/show_help.h"
+#include "opal/util/printf.h"
 
 #include "btl_tcp.h"
 #include "btl_tcp_proc.h"
@@ -413,7 +415,7 @@ int mca_btl_tcp_proc_insert( mca_btl_tcp_proc_t* btl_proc,
 {
     struct sockaddr_storage endpoint_addr_ss;
     const char *proc_hostname;
-    unsigned int perm_size;
+    unsigned int perm_size = 0;
     int rc, *a = NULL;
     size_t i, j;
     mca_btl_tcp_interface_t** peer_interfaces = NULL;
@@ -732,12 +734,12 @@ int mca_btl_tcp_proc_insert( mca_btl_tcp_proc_t* btl_proc,
         }
         free(proc_data->local_interfaces[i]);
     }
-    free(proc_data->local_interfaces);
+    free(proc_data->local_interfaces); proc_data->local_interfaces = NULL;
     proc_data->max_local_interfaces = 0;
 
-    free(proc_data->weights);
-    free(proc_data->best_addr);
-    free(proc_data->best_assignment);
+    free(proc_data->weights); proc_data->weights = NULL;
+    free(proc_data->best_addr); proc_data->best_addr = NULL;
+    free(proc_data->best_assignment); proc_data->best_assignment = NULL;
 
     OBJ_DESTRUCT(&_proc_data.local_kindex_to_index);
     OBJ_DESTRUCT(&_proc_data.peer_kindex_to_index);
@@ -901,17 +903,22 @@ void mca_btl_tcp_proc_accept(mca_btl_tcp_proc_t* btl_proc, struct sockaddr* addr
     /* No further use of this socket. Close it */
     CLOSE_THE_SOCKET(sd);
     {
-        char *addr_str = NULL, *tmp, *pnet;
+        char *addr_str = NULL, *tmp;
+        char ip[128];
+        ip[sizeof(ip) - 1] = '\0';
+
         for (size_t i = 0; i < btl_proc->proc_endpoint_count; i++) {
             mca_btl_base_endpoint_t* btl_endpoint = btl_proc->proc_endpoints[i];
             if (btl_endpoint->endpoint_addr->addr_family != addr->sa_family) {
                 continue;
             }
-            pnet = opal_net_get_hostname((struct sockaddr*)&btl_endpoint->endpoint_addr->addr_inet);
+            inet_ntop(btl_endpoint->endpoint_addr->addr_family,
+                      (void*) &(btl_endpoint->endpoint_addr->addr_inet),
+                      ip, sizeof(ip) - 1);
             if (NULL == addr_str) {
-                (void)asprintf(&tmp, "\n\t%s", pnet);
+                opal_asprintf(&tmp, "\n\t%s", ip);
             } else {
-                (void)asprintf(&tmp, "%s\n\t%s", addr_str, pnet);
+                opal_asprintf(&tmp, "%s\n\t%s", addr_str, ip);
                 free(addr_str);
             }
             addr_str = tmp;
@@ -922,6 +929,7 @@ void mca_btl_tcp_proc_accept(mca_btl_tcp_proc_t* btl_proc, struct sockaddr* addr
                        btl_proc->proc_opal->proc_hostname,
                        OPAL_NAME_PRINT(btl_proc->proc_opal->proc_name),
                        opal_net_get_hostname((struct sockaddr*)addr),
+                       btl_proc->proc_endpoint_count,
                        (NULL == addr_str) ? "NONE" : addr_str);
         if (NULL != addr_str) {
             free(addr_str);

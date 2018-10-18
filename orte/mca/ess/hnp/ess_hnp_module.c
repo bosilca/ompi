@@ -62,7 +62,6 @@
 #include "orte/mca/routed/base/base.h"
 #include "orte/mca/routed/routed.h"
 #include "orte/mca/rtc/base/base.h"
-#include "orte/mca/dfs/base/base.h"
 #include "orte/mca/errmgr/base/base.h"
 #include "orte/mca/grpcomm/base/base.h"
 #include "orte/mca/iof/base/base.h"
@@ -699,18 +698,6 @@ static int rte_init(void)
         goto error;
     }
 
-    /* setup the dfs framework */
-    if (ORTE_SUCCESS != (ret = mca_base_framework_open(&orte_dfs_base_framework, 0))) {
-        ORTE_ERROR_LOG(ret);
-        error = "orte_dfs_base_open";
-        goto error;
-    }
-    if (ORTE_SUCCESS != (ret = orte_dfs_base_select())) {
-        ORTE_ERROR_LOG(ret);
-        error = "orte_dfs_select";
-        goto error;
-    }
-
     /* setup to support debugging */
     orte_state.add_job_state(ORTE_JOB_STATE_READY_FOR_DEBUGGERS,
                              orte_debugger_init_after_spawn,
@@ -795,7 +782,6 @@ static int rte_finalize(void)
     /* shutdown the pmix server */
     pmix_server_finalize();
     (void) mca_base_framework_close(&opal_pmix_base_framework);
-    (void) mca_base_framework_close(&orte_dfs_base_framework);
     (void) mca_base_framework_close(&orte_filem_base_framework);
     /* output any lingering stdout/err data */
     fflush(stdout);
@@ -859,6 +845,52 @@ static int rte_finalize(void)
     if (orte_do_not_launch) {
         exit(0);
     }
+
+{
+    opal_pointer_array_t * array = orte_node_topologies;
+    int i;
+    if( array->number_free != array->size ) {
+        OPAL_THREAD_LOCK(&array->lock);
+        array->lowest_free = 0;
+        array->number_free = array->size;
+        for(i=0; i<array->size; i++) {
+            if(NULL != array->addr[i]) {
+                orte_topology_t * topo = (orte_topology_t *)array->addr[i];
+                topo->topo = NULL;
+                OBJ_RELEASE(topo);
+            }
+            array->addr[i] = NULL;
+        }
+        OPAL_THREAD_UNLOCK(&array->lock);
+    }
+}
+    OBJ_RELEASE(orte_node_topologies);
+
+{
+    opal_pointer_array_t * array = orte_node_pool;
+    int i;
+    orte_node_t* node = (orte_node_t *)opal_pointer_array_get_item(orte_node_pool, 0);
+    assert(NULL != node);
+    OBJ_RELEASE(node->daemon);
+    node->daemon = NULL;
+    if( array->number_free != array->size ) {
+        OPAL_THREAD_LOCK(&array->lock);
+        array->lowest_free = 0;
+        array->number_free = array->size;
+        for(i=0; i<array->size; i++) {
+            if(NULL != array->addr[i]) {
+                node= (orte_node_t*)array->addr[i];
+                OBJ_RELEASE(node);
+            }
+            array->addr[i] = NULL;
+        }
+        OPAL_THREAD_UNLOCK(&array->lock);
+    }
+}
+    OBJ_RELEASE(orte_node_pool);
+
+    free(orte_topo_signature);
+
     return ORTE_SUCCESS;
 }
 
