@@ -17,6 +17,7 @@
  * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
+ * Copyright (c) 2018      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -26,6 +27,7 @@
 
 #include "ompi_config.h"
 #include "opal/util/show_help.h"
+#include "opal/util/printf.h"
 
 #include <string.h>
 
@@ -411,7 +413,7 @@ component_select(struct ompi_win_t *win, void **base, size_t size, int disp_unit
     /* fill in window information */
     *model = MPI_WIN_UNIFIED;
     win->w_osc_module = (ompi_osc_base_module_t*) module;
-    asprintf(&name, "pt2pt window %d", ompi_comm_get_cid(module->comm));
+    opal_asprintf(&name, "pt2pt window %d", ompi_comm_get_cid(module->comm));
     ompi_win_set_name(win, name);
     free(name);
 
@@ -501,7 +503,7 @@ static void ompi_osc_pt2pt_peer_construct (ompi_osc_pt2pt_peer_t *peer)
 {
     OBJ_CONSTRUCT(&peer->queued_frags, opal_list_t);
     OBJ_CONSTRUCT(&peer->lock, opal_mutex_t);
-    peer->active_frag = NULL;
+    peer->active_frag = 0;
     peer->passive_incoming_frag_count = 0;
     peer->flags = 0;
 }

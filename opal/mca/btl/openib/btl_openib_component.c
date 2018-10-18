@@ -3,7 +3,7 @@
  * Copyright (c) 2004-2007 The Trustees of Indiana University and Indiana
  *                         University Research and Technology
  *                         Corporation.  All rights reserved.
- * Copyright (c) 2004-2013 The University of Tennessee and The University
+ * Copyright (c) 2004-2017 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2004-2005 High Performance Computing Center Stuttgart,
@@ -22,6 +22,7 @@
  * Copyright (c) 2014-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2014      Bull SAS.  All rights reserved.
+ * Copyright (c) 2018      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -64,6 +65,7 @@
 #include "opal/mca/installdirs/installdirs.h"
 #include "opal_stdint.h"
 #include "opal/util/show_help.h"
+#include "opal/util/printf.h"
 #include "opal/mca/btl/btl.h"
 #include "opal/mca/btl/base/base.h"
 #include "opal/mca/mpool/base/base.h"
@@ -1861,7 +1863,7 @@ static int init_one_device(opal_list_t *btl_list, struct ibv_device* ib_dev)
                        "eager RDMA and progress threads", true);
     }
 
-    asprintf (&rcache_resources.cache_name, "verbs.%" PRIu64, device->ib_dev_attr.node_guid);
+    opal_asprintf (&rcache_resources.cache_name, "verbs.%" PRIu64, device->ib_dev_attr.node_guid);
     rcache_resources.reg_data = (void*)device;
     rcache_resources.sizeof_reg = sizeof(mca_btl_openib_reg_t);
     rcache_resources.register_mem = openib_reg_mr;
@@ -2808,7 +2810,6 @@ btl_openib_component_init(int *num_btl_modules,
     ib_devs = opal_ibv_get_device_list(&num_devs);
 
     if(0 == num_devs || NULL == ib_devs) {
-        mca_btl_base_error_no_nics("OpenFabrics (openib)", "device");
         goto no_btls;
     }
 
@@ -3667,7 +3668,7 @@ error:
 #endif
 
     if(IBV_WC_WR_FLUSH_ERR != wc->status || !flush_err_printed[cq]++) {
-        BTL_PEER_ERROR(remote_proc, ("error polling %s with status %s "
+        BTL_PEER_ERROR(remote_proc, ("error polling %s with status %s"
                     "status number %d for wr_id %" PRIx64 " opcode %d  vendor error %d qp_idx %d",
                     cq_name[cq], btl_openib_component_status_to_string(wc->status),
                     wc->status, wc->wr_id,
@@ -3708,9 +3709,36 @@ error:
         }
     }
 
-    if(openib_btl)
+    if(openib_btl) {
+        /* return send wqe */
+        qp_put_wqe(endpoint, qp);
+
+        /* return wqes that were sent before this frag */
+        n = qp_frag_to_wqe(endpoint, qp, to_com_frag(des));
+
+        /* force emptying the pending frags toward the dead endpoint
+         * in progress_pending_frags* below */
+        endpoint->endpoint_state = MCA_BTL_IB_FAILED;
+
+        if(IBV_WC_SEND == wc->opcode && !BTL_OPENIB_QP_TYPE_PP(qp)) {
+            BTL_VERBOSE(("frag %p returning %d credits", (void*) frag, 1+n));
+            OPAL_THREAD_FETCH_ADD32(&openib_btl->qps[qp].u.srq_qp.sd_credits, 1+n);
+            /* new SRQ credit available. Try to progress pending frags*/
+            progress_pending_frags_srq(openib_btl, qp);
+        }
+        /* new wqe or/and get token available. Try to progress pending frags */
+        progress_pending_frags_wqe(endpoint, qp);
+        mca_btl_openib_frag_progress_pending_put_get(endpoint, qp);
+
+        if (des->des_flags & MCA_BTL_DES_SEND_ALWAYS_CALLBACK) {
+            des->des_cbfunc(&openib_btl->super, endpoint, des, wc->status);
+        }
+        if (des->des_flags & MCA_BTL_DES_FLAGS_BTL_OWNERSHIP) {
+            mca_btl_openib_free(&openib_btl->super, des);
+        }
         openib_btl->error_cb(&openib_btl->super, MCA_BTL_ERROR_FLAGS_FATAL,
                              (struct opal_proc_t*)remote_proc, NULL);
+    }
 }
 
 static int poll_device(mca_btl_openib_device_t* device, int count)

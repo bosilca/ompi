@@ -5,6 +5,7 @@
  * Copyright (c) 2014-2017 Cisco Systems, Inc.  All rights reserved
  * Copyright (c) 2015-2016 Los Alamos National Security, LLC.  All rights
  *                         reserved.
+ * Copyright (c) 2018      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -15,6 +16,7 @@
 #include "mtl_ofi.h"
 #include "opal/util/argv.h"
 #include "opal/util/show_help.h"
+#include "opal/util/printf.h"
 
 static int ompi_mtl_ofi_component_open(void);
 static int ompi_mtl_ofi_component_query(mca_base_module_t **module, int *priority);
@@ -124,7 +126,7 @@ ompi_mtl_ofi_component_register(void)
                                     MCA_BASE_VAR_SCOPE_READONLY,
                                     &param_priority);
 
-    prov_include = "psm,psm2,gni";
+    prov_include = NULL;
     mca_base_component_var_register(&mca_mtl_ofi_component.super.mtl_version,
                                     "provider_include",
                                     "Comma-delimited list of OFI providers that are considered for use (e.g., \"psm,psm2\"; an empty value means that all providers will be considered). Mutually exclusive with mtl_ofi_provider_exclude.",
@@ -133,7 +135,7 @@ ompi_mtl_ofi_component_register(void)
                                     MCA_BASE_VAR_SCOPE_READONLY,
                                     &prov_include);
 
-    prov_exclude = NULL;
+    prov_exclude = "shm,sockets,tcp,udp,rstream";
     mca_base_component_var_register(&mca_mtl_ofi_component.super.mtl_version,
                                     "provider_exclude",
                                     "Comma-delimited list of OFI providers that are not considered for use (default: \"sockets,mxm\"; empty value means that all providers will be considered). Mutually exclusive with mtl_ofi_provider_include.",
@@ -143,7 +145,7 @@ ompi_mtl_ofi_component_register(void)
                                     &prov_exclude);
 
     ompi_mtl_ofi.ofi_progress_event_count = 100;
-    asprintf(&desc, "Max number of events to read each call to OFI progress (default: %d events will be read per OFI progress call)", ompi_mtl_ofi.ofi_progress_event_count);
+    opal_asprintf(&desc, "Max number of events to read each call to OFI progress (default: %d events will be read per OFI progress call)", ompi_mtl_ofi.ofi_progress_event_count);
     mca_base_component_var_register(&mca_mtl_ofi_component.super.mtl_version,
                                     "progress_event_cnt",
                                     desc,
@@ -160,7 +162,7 @@ ompi_mtl_ofi_component_register(void)
     }
 
     ofi_tag_mode = MTL_OFI_TAG_AUTO;
-    asprintf(&desc, "Mode specifying how many bits to use for various MPI values in OFI/Libfabric"
+    opal_asprintf(&desc, "Mode specifying how many bits to use for various MPI values in OFI/Libfabric"
             " communications. Some Libfabric provider network types can support most of Open MPI"
             " needs; others can only supply a limited number of bits, which then must be split"
             " across the MPI communicator ID, MPI source rank, and MPI tag. Three different"

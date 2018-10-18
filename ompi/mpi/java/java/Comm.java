@@ -653,7 +653,7 @@ public class Comm implements Freeable, Cloneable
 
 	/**
 	 * Start a buffered mode, nonblocking send.
-	 * <p>Java binding of the MPI operation <tt>MPI_IBSEND</tt>.
+	 * <p>Java binding of the MPI operation {@code MPI_IBSEND}.
 	 * @param buf   send buffer
 	 * @param count number of items to send
 	 * @param type  datatype of each item in send buffer
@@ -1228,7 +1228,7 @@ public class Comm implements Freeable, Cloneable
 	private native void barrier(long comm) throws MPIException;
 
 	/**
-	 * Nonblocking barrier sinchronization.
+	 * Nonblocking barrier synchronization.
 	 * <p>Java binding of the MPI operation {@code MPI_IBARRIER}.
 	 * @return communication request
 	 * @throws MPIException Signals that an MPI exception of some sort has occurred.

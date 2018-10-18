@@ -23,7 +23,7 @@
  * @param[in] tl         btl uct tl pointer
  * @param[in] context_id identifier for this context (0..MCA_BTL_UCT_MAX_WORKERS-1)
  */
-mca_btl_uct_device_context_t *mca_btl_uct_context_create (mca_btl_uct_module_t *module, mca_btl_uct_tl_t *tl, int context_id);
+mca_btl_uct_device_context_t *mca_btl_uct_context_create (mca_btl_uct_module_t *module, mca_btl_uct_tl_t *tl, int context_id, bool enable_progress);
 
 /**
  * @brief Destroy a device context and release all resources
@@ -59,7 +59,7 @@ static inline void mca_btl_uct_context_unlock (mca_btl_uct_device_context_t *con
 
 static inline int mca_btl_uct_get_context_index (void)
 {
-    static volatile uint32_t next_uct_index = 0;
+    static opal_atomic_uint32_t next_uct_index = 0;
     int context_id;
 
 #if OPAL_C_HAVE__THREAD_LOCAL
@@ -68,7 +68,7 @@ static inline int mca_btl_uct_get_context_index (void)
 
         context_id = uct_index;
         if (OPAL_UNLIKELY(-1 == context_id)) {
-            context_id = uct_index = opal_atomic_fetch_add_32 ((volatile int32_t *) &next_uct_index, 1) %
+            context_id = uct_index = opal_atomic_fetch_add_32 ((opal_atomic_int32_t *) &next_uct_index, 1) %
                 mca_btl_uct_component.num_contexts_per_module;
         }
     } else {
@@ -89,14 +89,12 @@ mca_btl_uct_module_get_tl_context_specific (mca_btl_uct_module_t *module, mca_bt
     mca_btl_uct_device_context_t *context = tl->uct_dev_contexts[context_id];
 
     if (OPAL_UNLIKELY(NULL == context)) {
-        mca_btl_uct_device_context_t *new_context;
-
-        new_context = mca_btl_uct_context_create (module, tl, context_id);
-        if (!opal_atomic_compare_exchange_strong_ptr (&tl->uct_dev_contexts[context_id], &context, new_context)) {
-            mca_btl_uct_context_destroy (new_context);
-        } else {
-            context = new_context;
+        OPAL_THREAD_LOCK(&module->lock);
+        context = tl->uct_dev_contexts[context_id];
+        if (OPAL_UNLIKELY(NULL == context)) {
+            context = tl->uct_dev_contexts[context_id] = mca_btl_uct_context_create (module, tl, context_id, true);
         }
+        OPAL_THREAD_UNLOCK(&module->lock);
     }
 
     return context;

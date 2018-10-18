@@ -1,5 +1,6 @@
 /*
  * Copyright (C) Mellanox Technologies Ltd. 2001-2017. ALL RIGHTS RESERVED.
+ * Copyright (c) 2018      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -9,6 +10,8 @@
 
 #include "ompi_config.h"
 
+#include "opal/util/printf.h"
+
 #include "ompi/mca/osc/osc.h"
 #include "ompi/mca/osc/base/base.h"
 #include "ompi/mca/osc/base/osc_base_obj_convert.h"
@@ -16,6 +19,10 @@
 
 #include "osc_ucx.h"
 #include "osc_ucx_request.h"
+
+#define memcpy_off(_dst, _src, _len, _off)        \
+    memcpy(((char*)(_dst)) + (_off), _src, _len); \
+    (_off) += (_len);
 
 static int component_open(void);
 static int component_register(void);
@@ -100,7 +107,7 @@ static int component_open(void) {
 static int component_register(void) {
     char *description_str;
     mca_osc_ucx_component.priority = 0;
-    asprintf(&description_str, "Priority of the osc/ucx component (default: %d)",
+    opal_asprintf(&description_str, "Priority of the osc/ucx component (default: %d)",
              mca_osc_ucx_component.priority);
     (void) mca_base_component_var_register(&mca_osc_ucx_component.super.osc_version, "priority", description_str,
                                            MCA_BASE_VAR_TYPE_UNSIGNED_INT, NULL, 0, 0, OPAL_INFO_LVL_3,
@@ -275,6 +282,8 @@ static int component_select(struct ompi_win_t *win, void **base, size_t size, in
     int disps[comm_size];
     int rkey_sizes[comm_size];
     uint64_t zero = 0;
+    size_t info_offset;
+    uint64_t size_u64;
 
     /* the osc/sm component is the exclusive provider for support for
      * shared memory windows */
@@ -378,7 +387,7 @@ static int component_select(struct ompi_win_t *win, void **base, size_t size, in
     }
 
     *model = MPI_WIN_UNIFIED;
-    asprintf(&name, "ucx window %d", ompi_comm_get_cid(module->comm));
+    opal_asprintf(&name, "ucx window %d", ompi_comm_get_cid(module->comm));
     ompi_win_set_name(win, name);
     free(name);
 
@@ -518,22 +527,27 @@ static int component_select(struct ompi_win_t *win, void **base, size_t size, in
         goto error;
     }
 
-    my_info_len = 2 * sizeof(uint64_t) + rkey_buffer_size + state_rkey_buffer_size;
+    size_u64 = (uint64_t)size;
+    my_info_len = 3 * sizeof(uint64_t) + rkey_buffer_size + state_rkey_buffer_size;
     my_info = malloc(my_info_len);
     if (my_info == NULL) {
         ret = OMPI_ERR_TEMP_OUT_OF_RESOURCE;
         goto error;
     }
 
+    info_offset = 0;
+
     if (flavor == MPI_WIN_FLAVOR_ALLOCATE || flavor == MPI_WIN_FLAVOR_CREATE) {
-        memcpy(my_info, base, sizeof(uint64_t));
+        memcpy_off(my_info, base, sizeof(uint64_t), info_offset);
     } else {
-        memcpy(my_info, &zero, sizeof(uint64_t));
+        memcpy_off(my_info, &zero, sizeof(uint64_t), info_offset);
     }
-    memcpy((void *)((char *)my_info + sizeof(uint64_t)), &state_base, sizeof(uint64_t));
-    memcpy((void *)((char *)my_info + 2 * sizeof(uint64_t)), rkey_buffer, rkey_buffer_size);
-    memcpy((void *)((char *)my_info + 2 * sizeof(uint64_t) + rkey_buffer_size),
-           state_rkey_buffer, state_rkey_buffer_size);
+    memcpy_off(my_info, &state_base, sizeof(uint64_t), info_offset);
+    memcpy_off(my_info, &size_u64, sizeof(uint64_t), info_offset);
+    memcpy_off(my_info, rkey_buffer, rkey_buffer_size, info_offset);
+    memcpy_off(my_info, state_rkey_buffer, state_rkey_buffer_size, info_offset);
+
+    assert(my_info_len == info_offset);
 
     ret = allgather_len_and_info(my_info, (int)my_info_len, &recv_buf, disps, module->comm);
     if (ret != OMPI_SUCCESS) {
@@ -549,25 +563,32 @@ static int component_select(struct ompi_win_t *win, void **base, size_t size, in
 
     for (i = 0; i < comm_size; i++) {
         ucp_ep_h ep = OSC_UCX_GET_EP(module->comm, i);
+        uint64_t dest_size;
         assert(ep != NULL);
 
-        memcpy(&(module->win_info_array[i]).addr, &recv_buf[disps[i]], sizeof(uint64_t));
-        memcpy(&(module->state_info_array[i]).addr, &recv_buf[disps[i] + sizeof(uint64_t)], 
-               sizeof(uint64_t));
+        info_offset = disps[i];
+
+        memcpy(&(module->win_info_array[i]).addr, &recv_buf[info_offset], sizeof(uint64_t));
+        info_offset += sizeof(uint64_t);
+        memcpy(&(module->state_info_array[i]).addr, &recv_buf[info_offset], sizeof(uint64_t));
+        info_offset += sizeof(uint64_t);
+        memcpy(&dest_size, &recv_buf[info_offset], sizeof(uint64_t));
+        info_offset += sizeof(uint64_t);
 
         (module->win_info_array[i]).rkey_init = false;
-        if (size > 0 && (flavor == MPI_WIN_FLAVOR_ALLOCATE || flavor == MPI_WIN_FLAVOR_CREATE)) {
-            status = ucp_ep_rkey_unpack(ep, &(recv_buf[disps[i] + 2 * sizeof(uint64_t)]),
+        if (dest_size > 0 && (flavor == MPI_WIN_FLAVOR_ALLOCATE || flavor == MPI_WIN_FLAVOR_CREATE)) {
+            status = ucp_ep_rkey_unpack(ep, &recv_buf[info_offset],
                                         &((module->win_info_array[i]).rkey));
             if (status != UCS_OK) {
                 OSC_UCX_VERBOSE(1, "ucp_ep_rkey_unpack failed: %d", status);
                 ret = OMPI_ERROR;
                 goto error;
             }
+            info_offset += rkey_sizes[i];
             (module->win_info_array[i]).rkey_init = true;
         }
 
-        status = ucp_ep_rkey_unpack(ep, &(recv_buf[disps[i] + 2 * sizeof(uint64_t) + rkey_sizes[i]]),
+        status = ucp_ep_rkey_unpack(ep, &recv_buf[info_offset],
                                     &((module->state_info_array[i]).rkey));
         if (status != UCS_OK) {
             OSC_UCX_VERBOSE(1, "ucp_ep_rkey_unpack failed: %d", status);
@@ -803,6 +824,8 @@ int ompi_osc_ucx_free(struct ompi_win_t *win) {
         /* not sure if this is required */
         ucp_worker_progress(mca_osc_ucx_component.ucp_worker);
     }
+
+    opal_common_ucx_worker_flush(mca_osc_ucx_component.ucp_worker);
 
     ret = module->comm->c_coll->coll_barrier(module->comm,
                                              module->comm->c_coll->coll_barrier_module);
