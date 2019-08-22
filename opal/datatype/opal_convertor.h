@@ -302,6 +302,13 @@ opal_convertor_raw( opal_convertor_t* convertor,  /* [IN/OUT] */
                     uint32_t* iov_count,          /* [IN/OUT] */
                     size_t* length );             /* [OUT]    */
 
+typedef int (*opal_convertor_raw_user_callback_t)(void* base, size_t len, void*);
+
+int32_t
+opal_convertor_raw_parser( opal_convertor_t* pConvertor,
+                           opal_convertor_raw_user_callback_t fct,
+                           void* cb_data,
+                           size_t* length );
 
 /*
  * Upper level does not need to call the _nocheck function directly.
