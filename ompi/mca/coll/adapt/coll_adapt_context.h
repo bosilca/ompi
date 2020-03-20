@@ -95,6 +95,8 @@ struct mca_coll_adapt_constant_reduce_context_s {
     ompi_coll_tree_t *tree;
     /* Accumulate buff */
     char **accumbuf;
+    /* inbuf list address of accumbuf */ 
+    mca_coll_adapt_inbuf_t ** accumbuf_to_inbuf;  
     opal_free_list_t *inbuf_list;
     /* A list to store the segments which are received and not yet be sent */
     opal_list_t *recv_list;

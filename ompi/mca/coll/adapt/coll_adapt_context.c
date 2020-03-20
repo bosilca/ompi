@@ -18,7 +18,6 @@ static void mca_coll_adapt_bcast_context_constructor(mca_coll_adapt_bcast_contex
 
 static void mca_coll_adapt_bcast_context_destructor(mca_coll_adapt_bcast_context_t * bcast_context)
 {
-
 }
 
 static void
@@ -48,7 +47,6 @@ static void mca_coll_adapt_reduce_context_constructor(mca_coll_adapt_reduce_cont
 static void mca_coll_adapt_reduce_context_destructor(mca_coll_adapt_reduce_context_t *
                                                      reduce_context)
 {
-
 }
 
 static void

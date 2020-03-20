@@ -27,9 +27,11 @@ typedef int (*mca_coll_adapt_ibcast_fn_t) (void *buff,
                                            int root,
                                            struct ompi_communicator_t * comm,
                                            ompi_request_t ** request,
-                                           mca_coll_base_module_t * module, int ibcast_tag);
+                                           mca_coll_base_module_t * module,
+					   int ibcast_tag);
 
 static mca_coll_adapt_algorithm_index_t mca_coll_adapt_ibcast_algorithm_index[] = {
+    {0, (uintptr_t)mca_coll_adapt_ibcast_tuned},
     {1, (uintptr_t) mca_coll_adapt_ibcast_binomial},
     {2, (uintptr_t) mca_coll_adapt_ibcast_in_order_binomial},
     {3, (uintptr_t) mca_coll_adapt_ibcast_binary},
@@ -47,7 +49,7 @@ int mca_coll_adapt_ibcast_init(void)
 
     mca_coll_adapt_component.adapt_ibcast_algorithm = 1;
     mca_base_component_var_register(c, "bcast_algorithm",
-                                    "Algorithm of broadcast, 1: binomial, 2: in_order_binomial, 3: binary, 4: pipeline, 5: chain, 6: linear", MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                    "Algorithm of broadcast, 0: tuned, 1: binomial, 2: in_order_binomial, 3: binary, 4: pipeline, 5: chain, 6: linear", MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
                                     OPAL_INFO_LVL_5, MCA_BASE_VAR_SCOPE_READONLY,
                                     &mca_coll_adapt_component.adapt_ibcast_algorithm);
 

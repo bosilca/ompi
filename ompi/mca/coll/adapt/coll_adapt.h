@@ -21,7 +21,9 @@
 #include "ompi/mca/coll/coll.h"
 #include "ompi/mca/coll/base/coll_base_topo.h"
 
-BEGIN_C_DECLS typedef struct mca_coll_adapt_module_t mca_coll_adapt_module_t;
+BEGIN_C_DECLS 
+
+typedef struct mca_coll_adapt_module_t mca_coll_adapt_module_t;
 
 /*
  * Structure to hold the adapt coll component.  First it holds the

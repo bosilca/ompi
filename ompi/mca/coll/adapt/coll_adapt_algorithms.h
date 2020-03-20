@@ -52,7 +52,9 @@ int mca_coll_adapt_ibcast_chain(void *buff, int count, struct ompi_datatype_t *d
 int mca_coll_adapt_ibcast_linear(void *buff, int count, struct ompi_datatype_t *datatype, int root,
                                  struct ompi_communicator_t *comm, ompi_request_t ** request,
                                  mca_coll_base_module_t * module, int ibcast_tag);
-
+int mca_coll_adapt_ibcast_tuned(void *buff, int count, struct ompi_datatype_t *datatype, int root,
+				struct ompi_communicator_t *comm, ompi_request_t ** request,
+				mca_coll_base_module_t *module, int ibcast_tag); 
 
 /* Reduce */
 int mca_coll_adapt_ireduce_init(void);
@@ -68,6 +70,10 @@ int mca_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, int count,
                                    struct ompi_communicator_t *comm, ompi_request_t ** request,
                                    mca_coll_base_module_t * module, ompi_coll_tree_t * tree,
                                    size_t seg_size, int ireduce_tag);
+int mca_coll_adapt_ireduce_tuned(const void *sbuf, void *rbuf, int count,
+				 struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root,
+				 struct ompi_communicator_t *comm, ompi_request_t ** request,
+				 mca_coll_base_module_t *module, int ireduce_tag);
 int mca_coll_adapt_ireduce_binomial(const void *sbuf, void *rbuf, int count,
                                     struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root,
                                     struct ompi_communicator_t *comm, ompi_request_t ** request,
