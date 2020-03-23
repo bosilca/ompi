@@ -35,6 +35,7 @@ typedef int (*mca_coll_adapt_ireduce_fn_t) (const void *sbuf,
                                             mca_coll_base_module_t * module, int ireduce_tag);
 
 static mca_coll_adapt_algorithm_index_t mca_coll_adapt_ireduce_algorithm_index[] = {
+    {0, (uintptr_t)mca_coll_adapt_ireduce_tuned},
     {1, (uintptr_t) mca_coll_adapt_ireduce_binomial},
     {2, (uintptr_t) mca_coll_adapt_ireduce_in_order_binomial},
     {3, (uintptr_t) mca_coll_adapt_ireduce_binary},
@@ -372,7 +373,7 @@ static int recv_cb(ompi_request_t * req)
         if (MPI_SUCCESS != err) {
             return err;
         }
-        /* Invoke recvive call back */
+        /* Invoke receive call back */
         ompi_request_set_callback(recv_req, recv_cb, recv_context);
     }
 
@@ -448,7 +449,7 @@ static int recv_cb(ompi_request_t * req)
         OPAL_THREAD_UNLOCK(context->con->mutex_recv_list);
 
         if (item != NULL) {
-            /* Gt new context item from free list */
+            /* Get new context item from free list */
             mca_coll_adapt_reduce_context_t *send_context =
                 (mca_coll_adapt_reduce_context_t *) opal_free_list_wait(mca_coll_adapt_component.
                                                                         adapt_ireduce_context_free_list);
@@ -554,6 +555,16 @@ int mca_coll_adapt_ireduce(const void *sbuf, void *rbuf, int count, struct ompi_
 /*
  * Ireduce functions with different algorithms
  */
+int mca_coll_adapt_ireduce_tuned(const void *sbuf, void *rbuf, int count,
+				 struct ompi_datatype_t *dtype, struct ompi_op_t *op,
+				 int root, struct ompi_communicator_t *comm,
+				 ompi_request_t ** request,
+				 mca_coll_base_module_t *module, int ireduce_tag)
+{
+    OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "tuned not implemented\n"));
+    return OMPI_SUCCESS;
+}
+
 int mca_coll_adapt_ireduce_binomial(const void *sbuf, void *rbuf, int count,
                                     struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root,
                                     struct ompi_communicator_t *comm, ompi_request_t ** request,

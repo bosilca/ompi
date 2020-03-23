@@ -31,7 +31,7 @@ typedef int (*mca_coll_adapt_ibcast_fn_t) (void *buff,
 					   int ibcast_tag);
 
 static mca_coll_adapt_algorithm_index_t mca_coll_adapt_ibcast_algorithm_index[] = {
-    {0, (uintptr_t)mca_coll_adapt_ibcast_tuned},
+    {0, (uintptr_t) mca_coll_adapt_ibcast_tuned},
     {1, (uintptr_t) mca_coll_adapt_ibcast_binomial},
     {2, (uintptr_t) mca_coll_adapt_ibcast_in_order_binomial},
     {3, (uintptr_t) mca_coll_adapt_ibcast_binary},
@@ -369,6 +369,15 @@ int mca_coll_adapt_ibcast(void *buff, int count, struct ompi_datatype_t *datatyp
 /*
  * Ibcast functions with different algorithms
  */
+int mca_coll_adapt_ibcast_tuned(void *buff, int count, struct ompi_datatype_t *datatype,
+				int root, struct ompi_communicator_t *comm,
+				ompi_request_t ** request,
+				mca_coll_base_module_t *module, int ibcast_tag)
+{
+    OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output, "tuned not implemented\n"));
+    return OMPI_SUCCESS;
+}
+
 int mca_coll_adapt_ibcast_binomial(void *buff, int count, struct ompi_datatype_t *datatype,
                                    int root, struct ompi_communicator_t *comm,
                                    ompi_request_t ** request, mca_coll_base_module_t * module,

@@ -47,7 +47,8 @@
 /*
  * Local functions
  */
-static int adapt_module_enable(mca_coll_base_module_t * module, struct ompi_communicator_t *comm);
+static int adapt_module_enable(mca_coll_base_module_t * module,
+			       struct ompi_communicator_t *comm);
 
 /*
  * Module constructor
@@ -69,7 +70,8 @@ static void mca_coll_adapt_module_destruct(mca_coll_adapt_module_t * module)
 
 OBJ_CLASS_INSTANCE(mca_coll_adapt_module_t,
                    mca_coll_base_module_t,
-                   mca_coll_adapt_module_construct, mca_coll_adapt_module_destruct);
+                   mca_coll_adapt_module_construct,
+		   mca_coll_adapt_module_destruct);
 
 /*
  * Initial query function that is invoked during MPI_INIT, allowing
@@ -88,23 +90,27 @@ int mca_coll_adapt_init_query(bool enable_progress_threads, bool enable_mpi_thre
  * Look at the communicator and decide which set of functions and
  * priority we want to return.
  */
-mca_coll_base_module_t *mca_coll_adapt_comm_query(struct ompi_communicator_t * comm, int *priority)
+mca_coll_base_module_t *mca_coll_adapt_comm_query(struct ompi_communicator_t * comm,
+						  int *priority)
 {
     mca_coll_adapt_module_t *adapt_module;
 
     /* If we're intercomm, or if there's only one process in the communicator */
     if (OMPI_COMM_IS_INTER(comm) || 1 == ompi_comm_size(comm)) {
         opal_output_verbose(10, ompi_coll_base_framework.framework_output,
-                            "coll:adapt:comm_query (%d/%s): intercomm, comm is too small; disqualifying myself",
+                            "coll:adapt:comm_query (%d/%s): intercomm, "
+			    "comm is too small; disqualifying myself",
                             comm->c_contextid, comm->c_name);
         return NULL;
     }
 
-    /* Get the priority level attached to this module. If priority is less than or equal to 0, then the module is unavailable. */
+    /* Get the priority level attached to this module.
+       If priority is less than or equal to 0, then the module is unavailable. */
     *priority = mca_coll_adapt_component.adapt_priority;
     if (mca_coll_adapt_component.adapt_priority <= 0) {
         opal_output_verbose(10, ompi_coll_base_framework.framework_output,
-                            "coll:adapt:comm_query (%d/%s): priority too low; disqualifying myself",
+                            "coll:adapt:comm_query (%d/%s): priority too low; "
+			    "disqualifying myself",
                             comm->c_contextid, comm->c_name);
         return NULL;
     }
@@ -145,7 +151,8 @@ mca_coll_base_module_t *mca_coll_adapt_comm_query(struct ompi_communicator_t * c
 /*
  * Init module on the communicator
  */
-static int adapt_module_enable(mca_coll_base_module_t * module, struct ompi_communicator_t *comm)
+static int adapt_module_enable(mca_coll_base_module_t * module,
+			       struct ompi_communicator_t *comm)
 {
     return OMPI_SUCCESS;
 }
