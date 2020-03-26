@@ -53,7 +53,6 @@
 static void adapt_module_construct(mca_coll_adapt_module_t * module)
 {
     module->adapt_enabled = false;
-    module->adapt_component = &mca_coll_adapt_component;
 }
 
 /*
