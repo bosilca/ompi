@@ -104,26 +104,30 @@ mca_coll_han_allreduce_intra(const void *sbuf,
         uint32_t umod = mca_coll_han_component.han_auto_tuned[id].umod;
         uint32_t lmod = mca_coll_han_component.han_auto_tuned[id].lmod;
         uint32_t fs = mca_coll_han_component.han_auto_tuned[id].fs;
+        /* ualg and us are only available when using ADAPT */
+        /*
         uint32_t ualg = mca_coll_han_component.han_auto_tuned[id].ualg;
         uint32_t us = mca_coll_han_component.han_auto_tuned[id].us;
+        */
         /* Set up umod */
         up_comm = han_module->cached_up_comms[umod];
         /* Set up lmod */
         low_comm = han_module->cached_low_comms[lmod];
         /* Set up fs */
         COLL_BASE_COMPUTED_SEGCOUNT((size_t) fs, typelng, seg_count);
+        /* Set up ualg and us, which is only available when using ADAPT */
+        /*
         if (umod == 1) {
-            /* set up ualg */
             ((mca_coll_adapt_module_t *) (up_comm->c_coll->coll_ibcast_module))->adapt_component->
                 adapt_ibcast_algorithm = ualg;
             ((mca_coll_adapt_module_t *) (up_comm->c_coll->coll_ibcast_module))->adapt_component->
                 adapt_ibcast_algorithm = ualg;
-            /* set up us */
             ((mca_coll_adapt_module_t *) (up_comm->c_coll->coll_ibcast_module))->adapt_component->
                 adapt_ibcast_segment_size = us;
             ((mca_coll_adapt_module_t *) (up_comm->c_coll->coll_ibcast_module))->adapt_component->
                 adapt_ibcast_segment_size = us;
         }
+        */
     } else {
         low_comm = han_module->cached_low_comms[mca_coll_han_component.han_bcast_low_module];
         up_comm = han_module->cached_up_comms[mca_coll_han_component.han_bcast_up_module];

@@ -27,7 +27,6 @@
 #include "ompi/mca/coll/base/coll_tags.h"
 #include "ompi/mca/coll/base/coll_base_functions.h"
 #include "coll_han_trigger.h"
-#include "ompi/mca/coll/adapt/coll_adapt.h"
 
 BEGIN_C_DECLS typedef struct {
     uint32_t umod;

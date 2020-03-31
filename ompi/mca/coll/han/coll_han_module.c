@@ -33,7 +33,6 @@
 #include "ompi/group/group.h"
 #include "ompi/mca/coll/coll.h"
 #include "ompi/mca/coll/base/base.h"
-#include "ompi/mca/rte/rte.h"
 #include "ompi/proc/proc.h"
 #include "coll_han.h"
 
