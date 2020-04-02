@@ -52,7 +52,7 @@ void mac_coll_han_set_gather_argu(mca_gather_argu_t * argu,
 }
 
 int
-ompi_coll_han_gather_intra(const void *sbuf, int scount,
+mca_coll_han_gather_intra(const void *sbuf, int scount,
                            struct ompi_datatype_t *sdtype,
                            void *rbuf, int rcount,
                            struct ompi_datatype_t *rdtype,

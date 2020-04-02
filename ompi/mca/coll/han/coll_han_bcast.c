@@ -16,24 +16,21 @@
 #include "coll_han_trigger.h"
 
 void mac_coll_han_set_bcast_argu(mca_bcast_argu_t * argu, mca_coll_task_t * cur_task, void *buff,
-                                 int up_seg_count, int low_seg_count, struct ompi_datatype_t *dtype,
+                                 int seg_count, struct ompi_datatype_t *dtype,
                                  int root_up_rank, int root_low_rank,
                                  struct ompi_communicator_t *up_comm,
-                                 struct ompi_communicator_t *low_comm, int up_num, int low_num,
+                                 struct ompi_communicator_t *low_comm,
                                  int num_segments, int cur_seg, int w_rank, int last_seg_count,
                                  bool noop)
 {
     argu->cur_task = cur_task;
     argu->buff = buff;
-    argu->up_seg_count = up_seg_count;
-    argu->low_seg_count = low_seg_count;
+    argu->seg_count = seg_count;
     argu->dtype = dtype;
     argu->root_low_rank = root_low_rank;
     argu->root_up_rank = root_up_rank;
     argu->up_comm = up_comm;
     argu->low_comm = low_comm;
-    argu->up_num = up_num;
-    argu->low_num = low_num;
     argu->num_segments = num_segments;
     argu->cur_seg = cur_seg;
     argu->w_rank = w_rank;
@@ -42,12 +39,12 @@ void mac_coll_han_set_bcast_argu(mca_bcast_argu_t * argu, mca_coll_task_t * cur_
 }
 
 /* 
- * Each segment of the messsage needs to go though 2 steps to perform MPI_Allreduce: 
+ * Each segment of the messsage needs to go though 2 steps to perform MPI_Bcast: 
  *     ub: upper level (inter-node) bcast
  *     lb: low level (shared-memory or intra-node) bcast.
  * Hence, in each iteration, there is a combination of collective operations which is called a task.
  *        | seg 0 | seg 1 | seg 2 | seg 3 |
- * iter 0 |  ub   |       |       |       | task: t0, contains lb
+ * iter 0 |  ub   |       |       |       | task: t0, contains ub
  * iter 1 |  lb   |  ub   |       |       | task: t1, contains ub and lb
  * iter 2 |       |  lb   |  ub   |       | task: t1, contains ub and lb
  * iter 3 |       |       |  lb   |  ub   | task: t1, contains ub and lb
@@ -64,8 +61,7 @@ mca_coll_han_bcast_intra(void *buff,
     ompi_datatype_get_extent(dtype, &lb, &extent);
     int w_rank;
     w_rank = ompi_comm_rank(comm);
-    int up_seg_count = count;
-    int low_seg_count = count;
+    int seg_count = count;
     size_t typelng;
     ompi_datatype_type_size(dtype, &typelng);
 
@@ -95,8 +91,7 @@ mca_coll_han_bcast_intra(void *buff,
         /* Set up lmod */
         low_comm = han_module->cached_low_comms[lmod];
         /* Set up fs */
-        COLL_BASE_COMPUTED_SEGCOUNT((size_t) fs, typelng, up_seg_count);
-        low_seg_count = up_seg_count;
+        COLL_BASE_COMPUTED_SEGCOUNT((size_t) fs, typelng, seg_count);
         /* Set up ualg and us, which is only available when using ADAPT */
         /*
         if (umod == 1) {
@@ -111,20 +106,14 @@ mca_coll_han_bcast_intra(void *buff,
         /* If auto tune is disabled, use MCA parameters */
         low_comm = han_module->cached_low_comms[mca_coll_han_component.han_bcast_low_module];
         up_comm = han_module->cached_up_comms[mca_coll_han_component.han_bcast_up_module];
-        COLL_BASE_COMPUTED_SEGCOUNT(mca_coll_han_component.han_bcast_up_segsize, typelng,
-                                    up_seg_count);
-        COLL_BASE_COMPUTED_SEGCOUNT(mca_coll_han_component.han_bcast_low_segsize, typelng,
-                                    low_seg_count);
-        mca_coll_han_reset_seg_count(&up_seg_count, &low_seg_count, &count);
+        COLL_BASE_COMPUTED_SEGCOUNT(mca_coll_han_component.han_bcast_segsize, typelng,
+                                    seg_count);
     }
 
-    int max_seg_count = (up_seg_count > low_seg_count) ? up_seg_count : low_seg_count;
-    int up_num = max_seg_count / up_seg_count;
-    int low_num = max_seg_count / low_seg_count;
-    int num_segments = (count + max_seg_count - 1) / max_seg_count;
+    int num_segments = (count + seg_count - 1) / seg_count;
     OPAL_OUTPUT_VERBOSE((20, mca_coll_han_component.han_output,
-                         "In HAN up_count %d low_count %d count %d num_seg %d\n", up_seg_count,
-                         low_seg_count, count, num_segments));
+                         "In HAN seg_count %d count %d num_seg %d\n", 
+                         seg_count, count, num_segments));
 
     int *vranks = han_module->cached_vranks;
     int low_rank = ompi_comm_rank(low_comm);
@@ -141,9 +130,9 @@ mca_coll_han_bcast_intra(void *buff,
     mca_coll_task_t *t0 = OBJ_NEW(mca_coll_task_t);
     /* Setup up t0 task arguments */
     mca_bcast_argu_t *t = malloc(sizeof(mca_bcast_argu_t));
-    mac_coll_han_set_bcast_argu(t, t0, (char *) buff, up_seg_count, low_seg_count, dtype,
-                                root_up_rank, root_low_rank, up_comm, low_comm, up_num, low_num,
-                                num_segments, 0, w_rank, count - (num_segments - 1) * max_seg_count,
+    mac_coll_han_set_bcast_argu(t, t0, (char *) buff, seg_count, dtype,
+                                root_up_rank, root_low_rank, up_comm, low_comm,
+                                num_segments, 0, w_rank, count - (num_segments - 1) * seg_count,
                                 low_rank != root_low_rank);
     /* Init the first task */
     init_task(t0, mca_coll_han_bcast_t0_task, (void *) t);
@@ -162,7 +151,7 @@ mca_coll_han_bcast_intra(void *buff,
         mca_coll_task_t *t1 = OBJ_NEW(mca_coll_task_t);
         /* Setup up t1 task arguments */
         t->cur_task = t1;
-        t->buff = (char *) t->buff + extent * max_seg_count;
+        t->buff = (char *) t->buff + extent * seg_count;
         t->cur_seg = t->cur_seg + 1;
         /* Init the t1 task */
         init_task(t1, mca_coll_han_bcast_t1_task, (void *) t);
@@ -184,17 +173,12 @@ int mca_coll_han_bcast_t0_task(void *task_argu)
     if (t->noop) {
         return OMPI_SUCCESS;
     } else {
-        int i;
         ptrdiff_t extent, lb;
         ompi_datatype_get_extent(t->dtype, &lb, &extent);
-        ompi_request_t **reqs = malloc(sizeof(ompi_request_t *) * t->up_num);
-        for (i = 0; i < t->up_num; i++) {
-            t->up_comm->c_coll->coll_ibcast((char *) t->buff + extent * t->up_seg_count * i,
-                                            t->up_seg_count, t->dtype, t->root_up_rank, t->up_comm,
-                                            &(reqs[i]), t->up_comm->c_coll->coll_ibcast_module);
-        }
-        ompi_request_wait_all(t->up_num, reqs, MPI_STATUSES_IGNORE);
-        free(reqs);
+        ompi_request_t *ibcast_req;
+        t->up_comm->c_coll->coll_ibcast((char *) t->buff, t->seg_count, t->dtype, t->root_up_rank, 
+                                        t->up_comm, &ibcast_req, t->up_comm->c_coll->coll_ibcast_module);
+        ompi_request_wait(&ibcast_req, MPI_STATUSES_IGNORE);
         return OMPI_SUCCESS;
     }
 }
@@ -206,48 +190,33 @@ int mca_coll_han_bcast_t0_task(void *task_argu)
  */
 int mca_coll_han_bcast_t1_task(void *task_argu)
 {
-    int i;
     mca_bcast_argu_t *t = (mca_bcast_argu_t *) task_argu;
     OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output, "[%d]: in t1 %d\n", t->w_rank,
                          t->cur_seg));
     OBJ_RELEASE(t->cur_task);
     ptrdiff_t extent, lb;
     ompi_datatype_get_extent(t->dtype, &lb, &extent);
-    int max_seg_count = (t->up_seg_count > t->low_seg_count) ? t->up_seg_count : t->low_seg_count;
-    ompi_request_t **reqs = malloc(sizeof(ompi_request_t *) * t->up_num);
-    int req_count = 0;
-
+    ompi_request_t *ibcast_req;
+    int tmp_count = t->seg_count;
     if (!t->noop) {
-        if (t->cur_seg <= t->num_segments - 2) {
-            if (t->cur_seg == t->num_segments - 2 && t->last_seg_count != max_seg_count) {
-                t->up_comm->c_coll->coll_ibcast((char *) t->buff + extent * max_seg_count,
-                                                t->last_seg_count, t->dtype, t->root_up_rank,
-                                                t->up_comm, &(reqs[0]),
-                                                t->up_comm->c_coll->coll_ibcast_module);
-                req_count++;
-            } else {
-                for (i = 0; i < t->up_num; i++) {
-                    t->up_comm->c_coll->coll_ibcast((char *) t->buff + extent * max_seg_count +
-                                                    extent * t->up_seg_count * i, t->up_seg_count,
-                                                    t->dtype, t->root_up_rank, t->up_comm,
-                                                    &(reqs[i]),
-                                                    t->up_comm->c_coll->coll_ibcast_module);
-                    req_count++;
-                }
+        if (t->cur_seg <= t->num_segments - 2 ) {
+            if (t->cur_seg == t->num_segments - 2  && t->last_seg_count != t->seg_count) {
+                tmp_count = t->last_seg_count;
             }
+            t->up_comm->c_coll->coll_ibcast((char *) t->buff + extent * t->seg_count,
+                                            tmp_count, t->dtype, t->root_up_rank,
+                                            t->up_comm, &ibcast_req,
+                                            t->up_comm->c_coll->coll_ibcast_module);
         }
     }
 
-    for (i = 0; i < t->low_num; i++) {
-        t->low_comm->c_coll->coll_bcast((char *) t->buff + extent * t->low_seg_count * i,
-                                        t->low_seg_count, t->dtype, t->root_low_rank, t->low_comm,
-                                        t->low_comm->c_coll->coll_bcast_module);
-    }
+    t->low_comm->c_coll->coll_bcast((char *) t->buff,
+                                    t->seg_count, t->dtype, t->root_low_rank, t->low_comm,
+                                    t->low_comm->c_coll->coll_bcast_module);
 
     if (!t->noop) {
-        ompi_request_wait_all(req_count, reqs, MPI_STATUSES_IGNORE);
+        ompi_request_wait(&ibcast_req, MPI_STATUSES_IGNORE);
     }
-    free(reqs);
 
     return OMPI_SUCCESS;
 }

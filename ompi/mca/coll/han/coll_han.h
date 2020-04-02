@@ -39,15 +39,12 @@ BEGIN_C_DECLS typedef struct {
 struct mca_bcast_argu_s {
     mca_coll_task_t *cur_task;
     void *buff;
-    int up_seg_count;
-    int low_seg_count;
+    int seg_count;
     struct ompi_datatype_t *dtype;
     int root_low_rank;
     int root_up_rank;
     struct ompi_communicator_t *up_comm;
     struct ompi_communicator_t *low_comm;
-    int up_num;
-    int low_num;
     int num_segments;
     int cur_seg;
     int w_rank;
@@ -55,6 +52,25 @@ struct mca_bcast_argu_s {
     bool noop;
 };
 typedef struct mca_bcast_argu_s mca_bcast_argu_t;
+
+struct mca_reduce_argu_s {
+    mca_coll_task_t *cur_task;
+    void *sbuf;
+    void *rbuf;
+    int seg_count;
+    struct ompi_datatype_t *dtype;
+    struct ompi_op_t *op;
+    int root_low_rank;
+    int root_up_rank;
+    struct ompi_communicator_t *up_comm;
+    struct ompi_communicator_t *low_comm;
+    int num_segments;
+    int cur_seg;
+    int w_rank;
+    int last_seg_count;
+    bool noop;
+};
+typedef struct mca_reduce_argu_s mca_reduce_argu_t;
 
 struct mca_allreduce_argu_s {
     mca_coll_task_t *cur_task;
@@ -152,14 +168,18 @@ typedef struct mca_coll_han_component_t {
     int han_priority;
     /* whether output the log message */
     int han_output;
-    /* up level segment size for bcast */
-    uint32_t han_bcast_up_segsize;
-    /* low level segment size for bcast */
-    uint32_t han_bcast_low_segsize;
+    /* segment size for bcast */
+    uint32_t han_bcast_segsize;
     /* up level module for bcast */
     uint32_t han_bcast_up_module;
     /* low level module for bcast */
     uint32_t han_bcast_low_module;
+    /* segment size for reduce */
+    uint32_t han_reduce_segsize;
+    /* up level module for reduce */
+    uint32_t han_reduce_up_module;
+    /* low level module for reduce */
+    uint32_t han_reduce_low_module;    
     /* segment size for allreduce */
     uint32_t han_allreduce_segsize;
     /* up level module for allreduce */
@@ -237,7 +257,6 @@ int *mca_coll_han_topo_init(struct ompi_communicator_t *comm, mca_coll_han_modul
 void mca_coll_han_topo_print(int *topo, struct ompi_communicator_t *comm, int num_topo_level);
 
 /* Utils */
-void mca_coll_han_reset_seg_count(int *up_seg_count, int *low_seg_count, int *count);
 void mca_coll_han_get_ranks(int *vranks, int root, int low_size, int *root_low_rank,
                             int *root_up_rank);
 uint32_t han_auto_tuned_get_n(uint32_t n);
@@ -247,16 +266,39 @@ uint32_t han_auto_tuned_get_m(uint32_t m);
 
 /* Bcast */
 void mac_coll_han_set_bcast_argu(mca_bcast_argu_t * argu, mca_coll_task_t * cur_task, void *buff,
-                                 int up_seg_count, int low_seg_count, struct ompi_datatype_t *dtype,
+                                 int seg_count, struct ompi_datatype_t *dtype,
                                  int root_up_rank, int root_low_rank,
                                  struct ompi_communicator_t *up_comm,
-                                 struct ompi_communicator_t *low_comm, int up_num, int low_num,
+                                 struct ompi_communicator_t *low_comm,
                                  int num_segments, int cur_seg, int w_rank, int last_seg_count,
                                  bool noop);
 int mca_coll_han_bcast_intra(void *buff, int count, struct ompi_datatype_t *dtype, int root,
                              struct ompi_communicator_t *comm, mca_coll_base_module_t * module);
 int mca_coll_han_bcast_t0_task(void *task_argu);
 int mca_coll_han_bcast_t1_task(void *task_argu);
+
+/* Reduce */
+void mac_coll_han_set_reduce_argu(mca_reduce_argu_t * argu, mca_coll_task_t * cur_task, 
+                                  void *sbuf, 
+                                  void *rbuf, int seg_count, struct ompi_datatype_t *dtype, 
+                                  struct ompi_op_t *op,
+                                  int root_up_rank, int root_low_rank,
+                                  struct ompi_communicator_t *up_comm,
+                                  struct ompi_communicator_t *low_comm,
+                                  int num_segments, int cur_seg, int w_rank, int last_seg_count,
+                                  bool noop);
+
+int mca_coll_han_reduce_intra(const void *sbuf, 
+                              void *rbuf,
+                              int count,
+                              struct ompi_datatype_t *dtype,
+                              ompi_op_t* op,
+                              int root,
+                              struct ompi_communicator_t *comm, 
+                              mca_coll_base_module_t * module);
+
+int mca_coll_han_reduce_t0_task(void *task_argu);
+int mca_coll_han_reduce_t1_task(void *task_argu);
 
 /* Allreduce */
 void mac_coll_han_set_allreduce_argu(mca_allreduce_argu_t * argu,
@@ -275,13 +317,12 @@ void mac_coll_han_set_allreduce_argu(mca_allreduce_argu_t * argu,
                                      int w_rank,
                                      int last_seg_count,
                                      bool noop, ompi_request_t * req, int *completed);
-int
-mca_coll_han_allreduce_intra(const void *sbuf,
-                             void *rbuf,
-                             int count,
-                             struct ompi_datatype_t *dtype,
-                             struct ompi_op_t *op,
-                             struct ompi_communicator_t *comm, mca_coll_base_module_t * module);
+int mca_coll_han_allreduce_intra(const void *sbuf,
+                                 void *rbuf,
+                                 int count,
+                                 struct ompi_datatype_t *dtype,
+                                 struct ompi_op_t *op,
+                                 struct ompi_communicator_t *comm, mca_coll_base_module_t * module);
 int mca_coll_han_allreduce_t0_task(void *task_argu);
 int mca_coll_han_allreduce_t1_task(void *task_argu);
 int mca_coll_han_allreduce_t2_task(void *task_argu);
@@ -289,7 +330,7 @@ int mca_coll_han_allreduce_t3_task(void *task_argu);
 
 /* Scatter */
 int
-ompi_coll_han_scatter_intra(const void *sbuf, int scount,
+mca_coll_han_scatter_intra(const void *sbuf, int scount,
                             struct ompi_datatype_t *sdtype,
                             void *rbuf, int rcount,
                             struct ompi_datatype_t *rdtype,
@@ -316,7 +357,7 @@ void mac_coll_han_set_scatter_argu(mca_scatter_argu_t * argu,
 
 /* Gatter */
 int
-ompi_coll_han_gather_intra(const void *sbuf, int scount,
+mca_coll_han_gather_intra(const void *sbuf, int scount,
                            struct ompi_datatype_t *sdtype,
                            void *rbuf, int rcount,
                            struct ompi_datatype_t *rdtype,

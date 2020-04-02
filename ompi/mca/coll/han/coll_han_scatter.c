@@ -54,7 +54,7 @@ void mac_coll_han_set_scatter_argu(mca_scatter_argu_t * argu,
 }
 
 int
-ompi_coll_han_scatter_intra(const void *sbuf, int scount,
+mca_coll_han_scatter_intra(const void *sbuf, int scount,
                             struct ompi_datatype_t *sdtype,
                             void *rbuf, int rcount,
                             struct ompi_datatype_t *rdtype,

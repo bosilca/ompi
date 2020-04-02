@@ -136,19 +136,12 @@ static int han_register(void)
     cs->han_output = opal_output_open(NULL);
     opal_output_set_verbosity(cs->han_output, coll_han_verbose);
 
-    cs->han_bcast_up_segsize = 65536;
-    (void) mca_base_component_var_register(c, "bcast_up_segsize",
-                                           "up level segment size for bcast",
+    cs->han_bcast_segsize = 65536;
+    (void) mca_base_component_var_register(c, "bcast_segsize",
+                                           "segment size for bcast",
                                            MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
                                            OPAL_INFO_LVL_9,
-                                           MCA_BASE_VAR_SCOPE_READONLY, &cs->han_bcast_up_segsize);
-
-    cs->han_bcast_low_segsize = 524288;
-    (void) mca_base_component_var_register(c, "bcast_low_segsize",
-                                           "low level segment size for bcast",
-                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
-                                           OPAL_INFO_LVL_9,
-                                           MCA_BASE_VAR_SCOPE_READONLY, &cs->han_bcast_low_segsize);
+                                           MCA_BASE_VAR_SCOPE_READONLY, &cs->han_bcast_segsize);
 
     cs->han_bcast_up_module = 0;
     (void) mca_base_component_var_register(c, "bcast_up_module",
@@ -164,6 +157,28 @@ static int han_register(void)
                                            OPAL_INFO_LVL_9,
                                            MCA_BASE_VAR_SCOPE_READONLY, &cs->han_bcast_low_module);
 
+    cs->han_reduce_segsize = 524288;
+    (void) mca_base_component_var_register(c, "reduce_segsize",
+                                           "segment size for reduce",
+                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                           OPAL_INFO_LVL_9,
+                                           MCA_BASE_VAR_SCOPE_READONLY, &cs->han_reduce_segsize);
+
+    cs->han_reduce_up_module = 0;
+    (void) mca_base_component_var_register(c, "reduce_up_module",
+                                           "up level module for allreduce, 0 libnbc, 1 adapt",
+                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                           OPAL_INFO_LVL_9,
+                                           MCA_BASE_VAR_SCOPE_READONLY,
+                                           &cs->han_reduce_up_module);
+
+    cs->han_reduce_low_module = 0;
+    (void) mca_base_component_var_register(c, "reduce_low_module",
+                                           "low level module for allreduce, 0 sm, 1 shared",
+                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                           OPAL_INFO_LVL_9,
+                                           MCA_BASE_VAR_SCOPE_READONLY,
+                                           &cs->han_reduce_low_module);
     cs->han_allreduce_segsize = 524288;
     (void) mca_base_component_var_register(c, "allreduce_segsize",
                                            "segment size for allreduce",

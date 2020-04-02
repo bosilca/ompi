@@ -13,6 +13,7 @@ sources = \
 coll_han.h \
 coll_han_trigger.h \
 coll_han_bcast.c \
+coll_han_reduce.c \
 coll_han_scatter.c \
 coll_han_gather.c \
 coll_han_allreduce.c \

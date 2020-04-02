@@ -170,12 +170,12 @@ mca_coll_base_module_t *mca_coll_han_comm_query(struct ompi_communicator_t * com
     han_module->super.coll_barrier = NULL;
     han_module->super.coll_bcast = mca_coll_han_bcast_intra;
     han_module->super.coll_exscan = NULL;
-    han_module->super.coll_gather = ompi_coll_han_gather_intra;
+    han_module->super.coll_gather = mca_coll_han_gather_intra;
     han_module->super.coll_gatherv = NULL;
-    han_module->super.coll_reduce = NULL;
+    han_module->super.coll_reduce = mca_coll_han_reduce_intra;
     han_module->super.coll_reduce_scatter = NULL;
     han_module->super.coll_scan = NULL;
-    han_module->super.coll_scatter = ompi_coll_han_scatter_intra;
+    han_module->super.coll_scatter = mca_coll_han_scatter_intra;
     han_module->super.coll_scatterv = NULL;
 
     opal_output_verbose(10, ompi_coll_base_framework.framework_output,
