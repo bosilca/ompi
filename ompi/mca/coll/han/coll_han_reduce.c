@@ -158,7 +158,7 @@ int mca_coll_han_reduce_t1_task(void *task_argu) {
     OBJ_RELEASE(t->cur_task);
     ptrdiff_t extent, lb;
     ompi_datatype_get_extent(t->dtype, &lb, &extent);
-    ompi_request_t *ireduce_req;
+    ompi_request_t *ireduce_req = NULL;
     int tmp_count = t->seg_count;
     if (!t->noop) {
         int up_rank = ompi_comm_rank(t->up_comm);
@@ -184,7 +184,7 @@ int mca_coll_han_reduce_t1_task(void *task_argu) {
                                          t->low_comm->c_coll->coll_reduce_module);
 
     }
-    if (!t->noop) {
+    if (!t->noop && ireduce_req) {
         ompi_request_wait(&ireduce_req, MPI_STATUSES_IGNORE);
     }
 

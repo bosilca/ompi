@@ -196,7 +196,7 @@ int mca_coll_han_bcast_t1_task(void *task_argu)
     OBJ_RELEASE(t->cur_task);
     ptrdiff_t extent, lb;
     ompi_datatype_get_extent(t->dtype, &lb, &extent);
-    ompi_request_t *ibcast_req;
+    ompi_request_t *ibcast_req = NULL;
     int tmp_count = t->seg_count;
     if (!t->noop) {
         if (t->cur_seg <= t->num_segments - 2 ) {
@@ -214,7 +214,7 @@ int mca_coll_han_bcast_t1_task(void *task_argu)
                                     t->seg_count, t->dtype, t->root_low_rank, t->low_comm,
                                     t->low_comm->c_coll->coll_bcast_module);
 
-    if (!t->noop) {
+    if (!t->noop && ibcast_req != NULL) {
         ompi_request_wait(&ibcast_req, MPI_STATUSES_IGNORE);
     }
 

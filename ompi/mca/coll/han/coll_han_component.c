@@ -121,7 +121,7 @@ static int han_register(void)
     mca_base_component_t *c = &mca_coll_han_component.super.collm_version;
     mca_coll_han_component_t *cs = &mca_coll_han_component;
 
-    cs->han_priority = 0;
+    cs->han_priority = 50;
     (void) mca_base_component_var_register(c, "priority", "Priority of the han coll component",
                                            MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
                                            OPAL_INFO_LVL_9,

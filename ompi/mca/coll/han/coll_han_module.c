@@ -161,7 +161,7 @@ mca_coll_base_module_t *mca_coll_han_comm_query(struct ompi_communicator_t * com
     /* All is good -- return a module */
     han_module->super.coll_module_enable = han_module_enable;
     han_module->super.ft_event = NULL;
-    han_module->super.coll_allgather = mca_coll_han_allgather_intra;
+    han_module->super.coll_allgather = NULL; //mca_coll_han_allgather_intra;
     han_module->super.coll_allgatherv = NULL;
     han_module->super.coll_allreduce = mca_coll_han_allreduce_intra;
     han_module->super.coll_alltoall = NULL;
@@ -235,7 +235,7 @@ void mca_coll_han_comm_create(struct ompi_communicator_t *comm, mca_coll_han_mod
         mca_base_var_set_value(han_var_id, &tmp_han_priority, sizeof(int), MCA_BASE_VAR_SOURCE_SET,
                                NULL);
         comm->c_coll->coll_allreduce = ompi_coll_base_allreduce_intra_recursivedoubling;
-        comm->c_coll->coll_allgather = ompi_coll_base_allgather_intra_recursivedoubling;
+        comm->c_coll->coll_allgather = ompi_coll_base_allgather_intra_bruck;
 
         int var_id;
         int tmp_priority = 100;
@@ -296,8 +296,8 @@ void mca_coll_han_comm_create(struct ompi_communicator_t *comm, mca_coll_han_mod
         int *vranks = malloc(sizeof(int) * w_size);
         /* Do allgather to gather vrank from each process so every process knows other processes' vrank */
         int vrank = low_size * up_rank + low_rank;
-        comm->c_coll->coll_allgather(&vrank, 1, MPI_INT, vranks, 1, MPI_INT, comm,
-                                     comm->c_coll->coll_allgather_module);
+        ompi_coll_base_allgather_intra_bruck(&vrank, 1, MPI_INT, vranks, 1, MPI_INT, comm,
+                                             comm->c_coll->coll_allgather_module);
         han_module->cached_comm = comm;
         han_module->cached_low_comms = low_comms;
         han_module->cached_up_comms = up_comms;
@@ -423,8 +423,11 @@ int *mca_coll_han_topo_init(struct ompi_communicator_t *comm, mca_coll_han_modul
     int size;
     size = ompi_comm_size(comm);
     int *topo;
-    if (!((han_module->cached_topo) && (han_module->cached_comm == comm))) {
-        if (han_module->cached_topo) {
+    if ((han_module->cached_topo != NULL) && (han_module->cached_comm == comm)) {
+        topo = han_module->cached_topo;
+    }
+    else {
+        if (han_module->cached_topo != NULL) {
             free(han_module->cached_topo);
             han_module->cached_topo = NULL;
         }
@@ -441,8 +444,6 @@ int *mca_coll_han_topo_init(struct ompi_communicator_t *comm, mca_coll_han_modul
         }
         han_module->cached_topo = topo;
         han_module->cached_comm = comm;
-    } else {
-        topo = han_module->cached_topo;
     }
 
     mca_coll_han_topo_print(topo, comm, num_topo_level);
