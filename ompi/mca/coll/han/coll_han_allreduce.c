@@ -2,6 +2,8 @@
  * Copyright (c) 2018-2020 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2020      Bull S.A.S. All rights reserved. 
+ *
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -78,6 +80,17 @@ mca_coll_han_allreduce_intra(const void *sbuf,
                              struct ompi_op_t *op,
                              struct ompi_communicator_t *comm, mca_coll_base_module_t * module)
 {
+    // Fallback to another component if the op cannot commute
+    mca_coll_future_module_t *future_module = (mca_coll_future_module_t *)module;
+    if (! ompi_op_is_commute(op)) {
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_future_component.future_output,
+                    "future cannot handle allreduce with this communicator."
+                    "It need to fall back on another component\n"));
+        return future_module->previous_allreduce(sbuf, rbuf, count, dtype, op,
+                comm, future_module->previous_allreduce_module);
+    }
+
+    
     ptrdiff_t extent, lb;
     ompi_datatype_get_extent(dtype, &lb, &extent);
     int w_rank;
@@ -392,4 +405,86 @@ int mca_coll_han_allreduce_t3_task(void *task_argu)
                          t->completed[0]));
 
     return OMPI_SUCCESS;
+}
+
+int
+mca_coll_future_allreduce_intra_simple(const void *sbuf,
+                                       void *rbuf,
+                                       int count,
+                                       struct ompi_datatype_t *dtype,
+                                       struct ompi_op_t *op,
+                                       struct ompi_communicator_t *comm,
+                                       mca_coll_base_module_t *module)
+{
+    ompi_communicator_t *low_comm;
+    ompi_communicator_t *up_comm;
+    int root_low_rank = 0;
+    int low_rank;
+    int ret;
+    mca_coll_future_component_t *cs = &mca_coll_future_component;
+    mca_coll_future_module_t *future_module = (mca_coll_future_module_t *)module;
+    void *sav_rbuf = rbuf;
+
+    OPAL_OUTPUT_VERBOSE((10, cs->future_output,
+                    "[OMPI][future] in mca_coll_future_reduce_intra_simple\n"));
+
+    // Fallback to another component if the op cannot commute
+    if (! ompi_op_is_commute(op)) {
+        OPAL_OUTPUT_VERBOSE((30, cs->future_output,
+                    "future cannot handle allreduce with this operation."
+                    "It need to fall back on another component\n"));
+        goto prev_allreduce;
+    }
+
+    mca_coll_future_comm_create(comm, future_module);
+
+    /* TODO: check if possible to used reduce low_comm and allreduce up comm,
+     * and to end by bcast low comm: if they are compatible */
+    low_comm = future_module->cached_low_comms[cs->future_allreduce_low_module];
+    up_comm = future_module->cached_up_comms[cs->future_allreduce_up_module];
+    low_rank = ompi_comm_rank(low_comm);
+
+    /* Low_comm reduce */
+    ret = low_comm->c_coll->coll_reduce((char *)sbuf, (char *)rbuf,
+                count, dtype, op, root_low_rank,
+                low_comm, low_comm->c_coll->coll_reduce_module);
+    if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
+        OPAL_OUTPUT_VERBOSE((30, cs->future_output,
+                             "FUTURE/ALLREDUCE: low comm reduce failed. "
+                             "Falling back to another component\n"));
+        goto prev_allreduce;
+    }
+
+    /* Local roots perform a allreduce on the upper comm */
+    if (low_rank == root_low_rank) {
+        ret = up_comm->c_coll->coll_allreduce(MPI_IN_PLACE, rbuf, count, dtype, op,
+                    up_comm, up_comm->c_coll->coll_allreduce_module);
+        if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
+            OPAL_OUTPUT_VERBOSE((30, cs->future_output,
+                             "FUTURE/ALLREDUCE: up comm allreduce failed. \n"));
+            /*
+             * Do not fallback in such a case: only root_low_ranks follow this
+             * path, the other ranks are in another collective.
+             * ==> Falling back would potentially lead to a hang.
+             * Simply return the error
+             */
+            return ret;
+        }
+    }
+
+    /* Low_comm bcast */
+    ret = low_comm->c_coll->coll_bcast(rbuf, count, dtype,
+                root_low_rank, low_comm, low_comm->c_coll->coll_bcast_module);
+    if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
+        OPAL_OUTPUT_VERBOSE((30, cs->future_output,
+                             "FUTURE/ALLREDUCE: low comm bcast failed. "
+                             "Falling back to another component\n"));
+        goto prev_allreduce;
+    }
+
+    return OMPI_SUCCESS;
+
+prev_allreduce:
+    return future_module->previous_allreduce(sbuf, rbuf, count, dtype, op, comm,
+                                             future_module->previous_allreduce_module);
 }

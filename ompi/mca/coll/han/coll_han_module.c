@@ -2,6 +2,7 @@
  * Copyright (c) 2018-2020 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2020      Bull S.A.S. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -11,47 +12,36 @@
 
 #include "ompi_config.h"
 
-#include <stdio.h>
-#include <string.h>
-#ifdef HAVE_SCHED_H
-#include <sched.h>
-#endif
-#include <sys/types.h>
-#ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
-#endif                          /* HAVE_SYS_MMAN_H */
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif                          /* HAVE_UNISTD_H */
-
 #include "mpi.h"
-#include "opal_stdint.h"
-#include "opal/mca/hwloc/base/base.h"
-#include "opal/util/os_path.h"
-
-#include "ompi/communicator/communicator.h"
-#include "ompi/group/group.h"
-#include "ompi/mca/coll/coll.h"
-#include "ompi/mca/coll/base/base.h"
-#include "ompi/proc/proc.h"
 #include "coll_han.h"
-
-#include "ompi/mca/coll/base/coll_tags.h"
-#include "ompi/mca/pml/pml.h"
-#include <math.h>
-#include <limits.h>
+#include "coll_han_dynamic.h"
 
 
 /*
  * Local functions
  */
-static int han_module_enable(mca_coll_base_module_t * module, struct ompi_communicator_t *comm);
+static int han_module_enable(mca_coll_base_module_t * module, 
+			     struct ompi_communicator_t *comm);
 static int mca_coll_han_module_disable(mca_coll_base_module_t * module,
                                        struct ompi_communicator_t *comm);
 
 /*
  * Module constructor
  */
+static void han_module_clear(mca_coll_han_module_t *han_module)
+{
+    int i;
+
+    for (i = 0; i < COLLCOUNT; i++) {
+        /*
+         * Since the previous routines function pointers are declared as
+         * a union, initializing the dummy routineis enough
+         */
+        han_module->previous_routines[i].previous_routine.dummy = NULL;
+        han_module->previous_routines[i].previous_module = NULL;
+    }
+}
+
 static void mca_coll_han_module_construct(mca_coll_han_module_t * module)
 {
     module->enabled = false;
@@ -62,27 +52,45 @@ static void mca_coll_han_module_construct(mca_coll_han_module_t * module)
     module->cached_vranks = NULL;
     module->cached_topo = NULL;
     module->is_mapbycore = false;
+    module->storage_initialized = false;
+    for (i = 0 ; i < NB_TOPO_LVL ; i++) {
+        module->sub_comm[i] = NULL;
+    }
+    for (i=SELF ; i<COMPONENTS_COUNT ; i++) {
+        module->modules_storage.modules[i].module_handler = NULL;
+    }
+
+    han_module_clear(module);
 }
+
+
+#define OBJ_RELEASE_IF_NOT_NULL(obj) do {   \
+    if (NULL != (obj)) {                    \
+        OBJ_RELEASE(obj);                   \
+    }                                       \
+} while (0)
 
 /*
  * Module destructor
  */
 static void mca_coll_han_module_destruct(mca_coll_han_module_t * module)
 {
+    int i;
+
     module->enabled = false;
     if (module->cached_low_comms != NULL) {
-        ompi_comm_free(&(module->cached_low_comms[0]));
-        ompi_comm_free(&(module->cached_low_comms[1]));
-        module->cached_low_comms[0] = NULL;
-        module->cached_low_comms[1] = NULL;
+        for (i = 0; i < COLL_HAN_LOW_MODULES; i++) {
+            ompi_comm_free(&(module->cached_low_comms[i]));
+            module->cached_low_comms[i] = NULL;
+        }
         free(module->cached_low_comms);
         module->cached_low_comms = NULL;
     }
     if (module->cached_up_comms != NULL) {
-        ompi_comm_free(&(module->cached_up_comms[0]));
-        ompi_comm_free(&(module->cached_up_comms[1]));
-        module->cached_up_comms[0] = NULL;
-        module->cached_up_comms[1] = NULL;
+        for (i = 0; i < COLL_HAN_UP_MODULES; i++) {
+            ompi_comm_free(&(module->cached_up_comms[i]));
+            module->cached_up_comms[i] = NULL;
+        }
         free(module->cached_up_comms);
         module->cached_up_comms = NULL;
     }
@@ -94,15 +102,20 @@ static void mca_coll_han_module_destruct(mca_coll_han_module_t * module)
         free(module->cached_topo);
         module->cached_topo = NULL;
     }
-}
+    for(i=0 ; i<NB_TOPO_LVL ; i++) {
+        if(NULL != module->sub_comm[i]) {
+            ompi_comm_free(&(module->sub_comm[i]));
+        }
+    }
 
-/*
- * Module disable
- */
-static int mca_coll_han_module_disable(mca_coll_base_module_t * module,
-                                       struct ompi_communicator_t *comm)
-{
-    return OMPI_SUCCESS;
+    OBJ_RELEASE_IF_NOT_NULL(module->previous_allgather_module);
+    OBJ_RELEASE_IF_NOT_NULL(module->previous_allreduce_module);
+    OBJ_RELEASE_IF_NOT_NULL(module->previous_bcast_module);
+    OBJ_RELEASE_IF_NOT_NULL(module->previous_gather_module);
+    OBJ_RELEASE_IF_NOT_NULL(module->previous_reduce_module);
+    OBJ_RELEASE_IF_NOT_NULL(module->previous_scatter_module);
+
+    han_module_clear(module);
 }
 
 
@@ -116,7 +129,8 @@ OBJ_CLASS_INSTANCE(mca_coll_han_module_t,
  * required level of thread support.  This function is invoked exactly
  * once.
  */
-int mca_coll_han_init_query(bool enable_progress_threads, bool enable_mpi_threads)
+int mca_coll_han_init_query(bool enable_progress_threads, 
+			    bool enable_mpi_threads)
 {
     opal_output_verbose(10, ompi_coll_base_framework.framework_output,
                         "coll:han:init_query: pick me! pick me!");
@@ -129,16 +143,23 @@ int mca_coll_han_init_query(bool enable_progress_threads, bool enable_mpi_thread
  * Look at the communicator and decide which set of functions and
  * priority we want to return.
  */
-mca_coll_base_module_t *mca_coll_han_comm_query(struct ompi_communicator_t * comm, int *priority)
+mca_coll_base_module_t * 
+mca_coll_han_comm_query(struct ompi_communicator_t * comm, int *priority)
 {
     mca_coll_han_module_t *han_module;
 
-    /* If we're intercomm, or if there's only one process in the
-       communicator */
-    if (OMPI_COMM_IS_INTER(comm) || 1 == ompi_comm_size(comm)
-        || !ompi_group_have_remote_peers(comm->c_local_group)) {
+    /*
+     * If we're intercomm, or if there's only one process in the communicator
+     */
+    if (OMPI_COMM_IS_INTER(comm)) {
         opal_output_verbose(10, ompi_coll_base_framework.framework_output,
-                            "coll:han:comm_query (%d/%s): intercomm, comm is too small, only on one node; disqualifying myself",
+                            "coll:han:comm_query (%d/%s): intercomm; disqualifying myself",
+                            comm->c_contextid, comm->c_name);
+        return NULL;
+    }
+    if (1 == ompi_comm_size(comm)) {
+        opal_output_verbose(10, ompi_coll_base_framework.framework_output,
+                            "coll:han:comm_query (%d/%s): comm is too small; disqualifying myself",
                             comm->c_contextid, comm->c_name);
         return NULL;
     }
@@ -159,24 +180,65 @@ mca_coll_base_module_t *mca_coll_han_comm_query(struct ompi_communicator_t * com
     }
 
     /* All is good -- return a module */
-    han_module->super.coll_module_enable = han_module_enable;
-    han_module->super.ft_event = NULL;
-    han_module->super.coll_allgather = NULL; //mca_coll_han_allgather_intra;
-    han_module->super.coll_allgatherv = NULL;
-    han_module->super.coll_allreduce = mca_coll_han_allreduce_intra;
-    han_module->super.coll_alltoall = NULL;
-    han_module->super.coll_alltoallv = NULL;
-    han_module->super.coll_alltoallw = NULL;
-    han_module->super.coll_barrier = NULL;
-    han_module->super.coll_bcast = mca_coll_han_bcast_intra;
-    han_module->super.coll_exscan = NULL;
-    han_module->super.coll_gather = mca_coll_han_gather_intra;
-    han_module->super.coll_gatherv = NULL;
-    han_module->super.coll_reduce = mca_coll_han_reduce_intra;
-    han_module->super.coll_reduce_scatter = NULL;
-    han_module->super.coll_scan = NULL;
-    han_module->super.coll_scatter = mca_coll_han_scatter_intra;
-    han_module->super.coll_scatterv = NULL;
+    han_module->topologic_level = mca_coll_han_component.topo_level;
+
+    /*
+     * TODO: When the selector is fully implemented,
+     *       this if will be meaningless
+     */
+    if (GLOBAL_COMMUNICATOR == han_module->topologic_level) {
+        /* We are on the global communicator, return topological algorithms */
+        han_module->super.coll_module_enable = han_module_enable;
+        han_module->super.ft_event        = NULL;
+        han_module->super.coll_allgather  = NULL;
+        han_module->super.coll_allgatherv = NULL;
+        if(mca_coll_han_component.use_simple_algorithm[ALLREDUCE]){
+            OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                "Using simplified allreduce"));
+            han_module->super.coll_allreduce  = mca_coll_han_allreduce_intra_simple;
+        } else {
+            han_module->super.coll_allreduce  = mca_coll_han_allreduce_intra;
+        }
+        han_module->super.coll_alltoall   = NULL;
+        han_module->super.coll_alltoallv  = NULL;
+        han_module->super.coll_alltoallw  = NULL;
+        han_module->super.coll_barrier    = NULL;
+        han_module->super.coll_bcast      = mca_coll_han_bcast_intra_dynamic;
+        han_module->super.coll_exscan     = NULL;
+        han_module->super.coll_gather     = ompi_coll_han_gather_intra;
+        han_module->super.coll_gatherv    = NULL;
+        if(mca_coll_han_component.use_simple_algorithm[REDUCE]){
+            OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                "Using simplified reduce"));
+            han_module->super.coll_reduce  = ompi_coll_han_reduce_intra_simple;
+        } else {
+            han_module->super.coll_reduce  = ompi_coll_han_reduce_intra;
+        }
+        han_module->super.coll_reduce_scatter = NULL;
+        han_module->super.coll_scan       = NULL;
+        han_module->super.coll_scatter    = NULL;
+        han_module->super.coll_scatterv   = NULL;
+    } else {
+        /* We are on a topologic sub-communicator, return only the selector */
+        han_module->super.coll_module_enable = han_module_enable;
+        han_module->super.ft_event        = NULL;
+        han_module->super.coll_allgather  = NULL;
+        han_module->super.coll_allgatherv = NULL;
+        han_module->super.coll_allreduce  = NULL;
+        han_module->super.coll_alltoall   = NULL;
+        han_module->super.coll_alltoallv  = NULL;
+        han_module->super.coll_alltoallw  = NULL;
+        han_module->super.coll_barrier    = NULL;
+        han_module->super.coll_bcast      = mca_coll_han_bcast_intra_dynamic;
+        han_module->super.coll_exscan     = NULL;
+        han_module->super.coll_gather     = NULL;
+        han_module->super.coll_gatherv    = NULL;
+        han_module->super.coll_reduce     = NULL;
+        han_module->super.coll_reduce_scatter = NULL;
+        han_module->super.coll_scan       = NULL;
+        han_module->super.coll_scatter    = NULL;
+        han_module->super.coll_scatterv   = NULL;
+    }
 
     opal_output_verbose(10, ompi_coll_base_framework.framework_output,
                         "coll:han:comm_query (%d/%s): pick me! pick me!",
@@ -186,12 +248,63 @@ mca_coll_base_module_t *mca_coll_han_comm_query(struct ompi_communicator_t * com
 
 
 /*
+ * In this macro, the following variables are supposed to have been declared
+ * in the caller:
+ * . ompi_communicator_t *comm 
+ * . mca_coll_han_module_t *han_module
+ */ 
+#define HAN_SAVE_PREV_COLL_API(__api)   do {                                             \
+        han_module->previous_ ## __api            = comm->c_coll->coll_ ## __api;           \
+        han_module->previous_ ## __api ## _module = comm->c_coll->coll_ ## __api ## _module;\
+        if (!comm->c_coll->coll_ ## __api || !comm->c_coll->coll_ ## __api ## _module) {    \
+            opal_output_verbose(1, ompi_coll_base_framework.framework_output,               \
+                    "(%d/%s): no underlying " # __api"; disqualifying myself",              \
+                    comm->c_contextid, comm->c_name);                                       \
+                    return OMPI_ERROR;                                                      \
+        }                                                                                   \
+        /* TODO add a OBJ_RELEASE at module disabling */                                    \
+        /*   + FIXME find why releasing generates memory corruption */                      \
+        OBJ_RETAIN(han_module->previous_ ## __api ## _module);                           \
+    } while(0)
+
+/*
  * Init module on the communicator
  */
 static int han_module_enable(mca_coll_base_module_t * module, struct ompi_communicator_t *comm)
 {
+    mca_coll_han_module_t * han_module = (mca_coll_han_module_t*) module;
+
+    HAN_SAVE_PREV_COLL_API(allgather);
+    HAN_SAVE_PREV_COLL_API(allreduce);
+    HAN_SAVE_PREV_COLL_API(bcast);
+    HAN_SAVE_PREV_COLL_API(gather);
+    HAN_SAVE_PREV_COLL_API(reduce);
+    HAN_SAVE_PREV_COLL_API(scatter);
+
     return OMPI_SUCCESS;
 }
+
+
+/*
+ * Module disable
+ */
+static int mca_coll_han_module_disable(mca_coll_base_module_t * module,
+                                       struct ompi_communicator_t *comm)
+{
+    mca_coll_han_module_t * han_module = (mca_coll_han_module_t *) module;
+
+    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allgather_module);
+    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allreduce_module);
+    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_bcast_module);
+    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_gather_module);
+    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_reduce_module);
+    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_scatter_module);
+
+    han_module_clear(han_module);
+
+    return OMPI_SUCCESS;
+}
+
 
 /*
  * Free the han request
