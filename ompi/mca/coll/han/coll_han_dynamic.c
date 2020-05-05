@@ -55,8 +55,7 @@ static int
 get_all_coll_modules(struct ompi_communicator_t *comm,
                      mca_coll_han_module_t *han_module)
 {
-    int i;
-    int nb_modules=0, ret;
+    int nb_modules=0;
     mca_coll_base_avail_coll_t *item;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
 
@@ -296,7 +295,7 @@ get_dynamic_rule(COLLTYPE_T collective,
  * for a msg_size sized message on the comm communicator
  * following the dynamic rules
  */
-mca_coll_base_module_t *
+static mca_coll_base_module_t *
 get_module(COLLTYPE_T coll_id,
            int msg_size,
            struct ompi_communicator_t *comm,

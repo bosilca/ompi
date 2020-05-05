@@ -224,7 +224,7 @@ int mca_coll_base_comm_select(ompi_communicator_t * comm)
 
             COPY(avail->ac_module, comm, reduce_local);
         } else {
-        /* release the original module reference and the list item */
+            /* release the original module reference and the list item */
             OBJ_RELEASE(avail->ac_module);
             OBJ_RELEASE(avail);
         }
