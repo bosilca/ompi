@@ -81,13 +81,13 @@ mca_coll_han_allreduce_intra(const void *sbuf,
                              struct ompi_communicator_t *comm, mca_coll_base_module_t * module)
 {
     // Fallback to another component if the op cannot commute
-    mca_coll_future_module_t *future_module = (mca_coll_future_module_t *)module;
+    mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
     if (! ompi_op_is_commute(op)) {
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_future_component.future_output,
-                    "future cannot handle allreduce with this communicator."
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                    "han cannot handle allreduce with this communicator."
                     "It need to fall back on another component\n"));
-        return future_module->previous_allreduce(sbuf, rbuf, count, dtype, op,
-                comm, future_module->previous_allreduce_module);
+        return han_module->previous_allreduce(sbuf, rbuf, count, dtype, op,
+                comm, han_module->previous_allreduce_module);
     }
 
     
@@ -100,7 +100,6 @@ mca_coll_han_allreduce_intra(const void *sbuf,
     ompi_datatype_type_size(dtype, &typelng);
 
     /* Create the subcommunicators */
-    mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
     mca_coll_han_comm_create(comm, han_module);
     ompi_communicator_t *low_comm;
     ompi_communicator_t *up_comm;
@@ -408,7 +407,7 @@ int mca_coll_han_allreduce_t3_task(void *task_argu)
 }
 
 int
-mca_coll_future_allreduce_intra_simple(const void *sbuf,
+mca_coll_han_allreduce_intra_simple(const void *sbuf,
                                        void *rbuf,
                                        int count,
                                        struct ompi_datatype_t *dtype,
@@ -421,27 +420,27 @@ mca_coll_future_allreduce_intra_simple(const void *sbuf,
     int root_low_rank = 0;
     int low_rank;
     int ret;
-    mca_coll_future_component_t *cs = &mca_coll_future_component;
-    mca_coll_future_module_t *future_module = (mca_coll_future_module_t *)module;
+    mca_coll_han_component_t *cs = &mca_coll_han_component;
+    mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
     void *sav_rbuf = rbuf;
 
-    OPAL_OUTPUT_VERBOSE((10, cs->future_output,
-                    "[OMPI][future] in mca_coll_future_reduce_intra_simple\n"));
+    OPAL_OUTPUT_VERBOSE((10, cs->han_output,
+                    "[OMPI][han] in mca_coll_han_reduce_intra_simple\n"));
 
     // Fallback to another component if the op cannot commute
     if (! ompi_op_is_commute(op)) {
-        OPAL_OUTPUT_VERBOSE((30, cs->future_output,
-                    "future cannot handle allreduce with this operation."
+        OPAL_OUTPUT_VERBOSE((30, cs->han_output,
+                    "han cannot handle allreduce with this operation."
                     "It need to fall back on another component\n"));
         goto prev_allreduce;
     }
 
-    mca_coll_future_comm_create(comm, future_module);
+    mca_coll_han_comm_create(comm, han_module);
 
     /* TODO: check if possible to used reduce low_comm and allreduce up comm,
      * and to end by bcast low comm: if they are compatible */
-    low_comm = future_module->cached_low_comms[cs->future_allreduce_low_module];
-    up_comm = future_module->cached_up_comms[cs->future_allreduce_up_module];
+    low_comm = han_module->cached_low_comms[cs->han_allreduce_low_module];
+    up_comm = han_module->cached_up_comms[cs->han_allreduce_up_module];
     low_rank = ompi_comm_rank(low_comm);
 
     /* Low_comm reduce */
@@ -449,8 +448,8 @@ mca_coll_future_allreduce_intra_simple(const void *sbuf,
                 count, dtype, op, root_low_rank,
                 low_comm, low_comm->c_coll->coll_reduce_module);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
-        OPAL_OUTPUT_VERBOSE((30, cs->future_output,
-                             "FUTURE/ALLREDUCE: low comm reduce failed. "
+        OPAL_OUTPUT_VERBOSE((30, cs->han_output,
+                             "HAN/ALLREDUCE: low comm reduce failed. "
                              "Falling back to another component\n"));
         goto prev_allreduce;
     }
@@ -460,8 +459,8 @@ mca_coll_future_allreduce_intra_simple(const void *sbuf,
         ret = up_comm->c_coll->coll_allreduce(MPI_IN_PLACE, rbuf, count, dtype, op,
                     up_comm, up_comm->c_coll->coll_allreduce_module);
         if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
-            OPAL_OUTPUT_VERBOSE((30, cs->future_output,
-                             "FUTURE/ALLREDUCE: up comm allreduce failed. \n"));
+            OPAL_OUTPUT_VERBOSE((30, cs->han_output,
+                             "HAN/ALLREDUCE: up comm allreduce failed. \n"));
             /*
              * Do not fallback in such a case: only root_low_ranks follow this
              * path, the other ranks are in another collective.
@@ -476,8 +475,8 @@ mca_coll_future_allreduce_intra_simple(const void *sbuf,
     ret = low_comm->c_coll->coll_bcast(rbuf, count, dtype,
                 root_low_rank, low_comm, low_comm->c_coll->coll_bcast_module);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
-        OPAL_OUTPUT_VERBOSE((30, cs->future_output,
-                             "FUTURE/ALLREDUCE: low comm bcast failed. "
+        OPAL_OUTPUT_VERBOSE((30, cs->han_output,
+                             "HAN/ALLREDUCE: low comm bcast failed. "
                              "Falling back to another component\n"));
         goto prev_allreduce;
     }
@@ -485,6 +484,6 @@ mca_coll_future_allreduce_intra_simple(const void *sbuf,
     return OMPI_SUCCESS;
 
 prev_allreduce:
-    return future_module->previous_allreduce(sbuf, rbuf, count, dtype, op, comm,
-                                             future_module->previous_allreduce_module);
+    return han_module->previous_allreduce(sbuf, rbuf, count, dtype, op, comm,
+                                             han_module->previous_allreduce_module);
 }

@@ -20,8 +20,8 @@
 /*
  * Local functions
  */
-static int han_module_enable(mca_coll_base_module_t * module, 
-			     struct ompi_communicator_t *comm);
+static int han_module_enable(mca_coll_base_module_t * module,
+                             struct ompi_communicator_t *comm);
 static int mca_coll_han_module_disable(mca_coll_base_module_t * module,
                                        struct ompi_communicator_t *comm);
 
@@ -44,6 +44,8 @@ static void han_module_clear(mca_coll_han_module_t *han_module)
 
 static void mca_coll_han_module_construct(mca_coll_han_module_t * module)
 {
+    int i;
+
     module->enabled = false;
     module->super.coll_module_disable = mca_coll_han_module_disable;
     module->cached_comm = NULL;
@@ -121,7 +123,8 @@ static void mca_coll_han_module_destruct(mca_coll_han_module_t * module)
 
 OBJ_CLASS_INSTANCE(mca_coll_han_module_t,
                    mca_coll_base_module_t,
-                   mca_coll_han_module_construct, mca_coll_han_module_destruct);
+                   mca_coll_han_module_construct,
+                   mca_coll_han_module_destruct);
 
 /*
  * Initial query function that is invoked during MPI_INIT, allowing
@@ -129,8 +132,8 @@ OBJ_CLASS_INSTANCE(mca_coll_han_module_t,
  * required level of thread support.  This function is invoked exactly
  * once.
  */
-int mca_coll_han_init_query(bool enable_progress_threads, 
-			    bool enable_mpi_threads)
+int mca_coll_han_init_query(bool enable_progress_threads,
+                            bool enable_mpi_threads)
 {
     opal_output_verbose(10, ompi_coll_base_framework.framework_output,
                         "coll:han:init_query: pick me! pick me!");
@@ -143,7 +146,7 @@ int mca_coll_han_init_query(bool enable_progress_threads,
  * Look at the communicator and decide which set of functions and
  * priority we want to return.
  */
-mca_coll_base_module_t * 
+mca_coll_base_module_t *
 mca_coll_han_comm_query(struct ompi_communicator_t * comm, int *priority)
 {
     mca_coll_han_module_t *han_module;
@@ -205,14 +208,14 @@ mca_coll_han_comm_query(struct ompi_communicator_t * comm, int *priority)
         han_module->super.coll_barrier    = NULL;
         han_module->super.coll_bcast      = mca_coll_han_bcast_intra_dynamic;
         han_module->super.coll_exscan     = NULL;
-        han_module->super.coll_gather     = ompi_coll_han_gather_intra;
+        han_module->super.coll_gather     = mca_coll_han_gather_intra;
         han_module->super.coll_gatherv    = NULL;
         if(mca_coll_han_component.use_simple_algorithm[REDUCE]){
             OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                 "Using simplified reduce"));
-            han_module->super.coll_reduce  = ompi_coll_han_reduce_intra_simple;
+            han_module->super.coll_reduce  = mca_coll_han_reduce_intra_simple;
         } else {
-            han_module->super.coll_reduce  = ompi_coll_han_reduce_intra;
+            han_module->super.coll_reduce  = mca_coll_han_reduce_intra;
         }
         han_module->super.coll_reduce_scatter = NULL;
         han_module->super.coll_scan       = NULL;
@@ -420,162 +423,5 @@ void mca_coll_han_comm_create(struct ompi_communicator_t *comm, mca_coll_han_mod
                                NULL);
         comm->c_coll->coll_allreduce = mca_coll_han_allreduce_intra;
         comm->c_coll->coll_allgather = mca_coll_han_allgather_intra;
-    }
-}
-
-int mca_coll_han_pow10_int(int pow_value)
-{
-    int i, result = 1;
-    for (i = 0; i < pow_value; i++) {
-        result *= 10;
-    }
-    return result;
-}
-
-int mca_coll_han_hostname_to_number(char *hostname, int size)
-{
-    int i = 0, j = 0;
-    char *number_array = (char *) malloc(sizeof(char) * size);
-    while (hostname[i] != '\0') {
-        if (hostname[i] >= '0' && hostname[i] <= '9') {
-            number_array[j++] = hostname[i];
-        }
-        i++;
-    }
-    int number = 0;
-    for (i = 0; i < j; i++) {
-        number += (number_array[i] - '0') * mca_coll_han_pow10_int(j - 1 - i);
-    }
-    free(number_array);
-    return number;
-}
-
-void mca_coll_han_topo_get(int *topo, struct ompi_communicator_t *comm, int num_topo_level)
-{
-    int *self_topo = (int *) malloc(sizeof(int) * num_topo_level);
-    /* Set daemon vpid */
-    char hostname[1024];
-    gethostname(hostname, 1024);
-    self_topo[0] = mca_coll_han_hostname_to_number(hostname, 1024);
-    /* Set core id */
-    self_topo[1] = ompi_comm_rank(comm);
-
-    /* Allgather all the topology information */
-    ompi_coll_base_allgather_intra_bruck(self_topo, num_topo_level, MPI_INT, topo, num_topo_level,
-                                         MPI_INT, comm, comm->c_coll->coll_allgather_module);
-    free(self_topo);
-    return;
-}
-
-void mca_coll_han_topo_sort(int *topo, int start, int end, int size, int level, int num_topo_level)
-{
-    if (level > num_topo_level - 1 || start >= end) {
-        return;
-    }
-    int i, j;
-    int min = INT_MAX;
-    int min_loc = -1;
-    for (i = start; i <= end; i++) {
-        /* Find min */
-        for (j = i; j <= end; j++) {
-            if (topo[j * num_topo_level + level] < min) {
-                min = topo[j * num_topo_level + level];
-                min_loc = j;
-
-            }
-        }
-        /* Swap i and min_loc */
-        int temp;
-        for (j = 0; j < num_topo_level; j++) {
-            temp = topo[i * num_topo_level + j];
-            topo[i * num_topo_level + j] = topo[min_loc * num_topo_level + j];
-            topo[min_loc * num_topo_level + j] = temp;
-        }
-        min = INT_MAX;
-        min_loc = -1;
-    }
-    int last = 0;
-    int new_start = 0;
-    int new_end = 0;
-    for (i = start; i <= end; i++) {
-        if (i == start) {
-            last = topo[i * num_topo_level + level];
-            new_start = start;
-        } else if (i == end) {
-            new_end = end;
-            mca_coll_han_topo_sort(topo, new_start, new_end, size, level + 1, num_topo_level);
-        } else if (last != topo[i * num_topo_level + level]) {
-            new_end = i - 1;
-            mca_coll_han_topo_sort(topo, new_start, new_end, size, level + 1, num_topo_level);
-            new_start = i;
-            last = topo[i * num_topo_level + level];
-        }
-    }
-    return;
-}
-
-/* Check if the current processes are mapped by core */
-bool mca_coll_han_topo_is_mapbycore(int *topo, struct ompi_communicator_t * comm,
-                                    int num_topo_level)
-{
-    int i;
-    int size = ompi_comm_size(comm);
-    for (i = 1; i < size; i++) {
-        if (topo[(i - 1) * num_topo_level] > topo[i * num_topo_level]
-            || topo[(i - 1) * num_topo_level + 1] > topo[i * num_topo_level + 1]) {
-            return false;
-
-        }
-    }
-    return true;
-}
-
-int *mca_coll_han_topo_init(struct ompi_communicator_t *comm, mca_coll_han_module_t * han_module,
-                            int num_topo_level)
-{
-    int size;
-    size = ompi_comm_size(comm);
-    int *topo;
-    if ((han_module->cached_topo != NULL) && (han_module->cached_comm == comm)) {
-        topo = han_module->cached_topo;
-    }
-    else {
-        if (han_module->cached_topo != NULL) {
-            free(han_module->cached_topo);
-            han_module->cached_topo = NULL;
-        }
-        topo = (int *) malloc(sizeof(int) * size * num_topo_level);
-        /* Get topo infomation */
-        mca_coll_han_topo_get(topo, comm, num_topo_level);
-        mca_coll_han_topo_print(topo, comm, num_topo_level);
-
-        /* Check if the processes are mapped by core */
-        han_module->is_mapbycore = mca_coll_han_topo_is_mapbycore(topo, comm, num_topo_level);
-        /* Sort the topo such that each group is contiguous */
-        if (!han_module->is_mapbycore) {
-            mca_coll_han_topo_sort(topo, 0, size - 1, size, 0, num_topo_level);
-        }
-        han_module->cached_topo = topo;
-        han_module->cached_comm = comm;
-    }
-
-    mca_coll_han_topo_print(topo, comm, num_topo_level);
-    return topo;
-}
-
-/* Print out the topology info, for debugging purpose */
-void mca_coll_han_topo_print(int *topo, struct ompi_communicator_t *comm, int num_topo_level)
-{
-    int rank = ompi_comm_rank(comm);
-    int size = ompi_comm_size(comm);
-
-    if (rank == 0) {
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output, "[%d]: HAN topo: ", rank));
-        int i;
-        for (i = 0; i < size * num_topo_level; i++) {
-            OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output, "%d ", topo[i]));
-        }
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output, "\n"));
-
     }
 }

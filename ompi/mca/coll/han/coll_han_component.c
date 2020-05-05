@@ -87,6 +87,7 @@ mca_coll_han_component_t mca_coll_han_component = {
  */
 static int han_open(void)
 {
+    int param;
     mca_coll_han_component_t *cs = &mca_coll_han_component;
     if (cs->han_auto_tune) {
         cs->han_auto_tuned =

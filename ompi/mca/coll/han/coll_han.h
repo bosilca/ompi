@@ -30,8 +30,8 @@ BEGIN_C_DECLS
  * . only 2 modules available for internode (up) level
  */
 
-#define COLL_FUTURE_LOW_MODULES 2
-#define COLL_FUTURE_UP_MODULES 2
+#define COLL_HAN_LOW_MODULES 2
+#define COLL_HAN_UP_MODULES 2
 
 typedef struct {
     uint32_t umod;
@@ -357,7 +357,7 @@ int mca_coll_han_bcast_t1_task(void *task_argu);
 
 /* Reduce */
 int
-ompi_coll_han_reduce_intra_simple(const void *sbuf,
+mca_coll_han_reduce_intra_simple(const void *sbuf,
                                      void* rbuf,
                                      int count,
                                      struct ompi_datatype_t *dtype,

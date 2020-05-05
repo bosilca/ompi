@@ -60,7 +60,7 @@ mca_coll_han_gather_intra(const void *sbuf, int scount,
                            int root,
                            struct ompi_communicator_t *comm, mca_coll_base_module_t * module)
 {
-    int i, j;
+    int i;
     int w_rank, w_size; /* information about the global communicator */
     int root_low_rank, root_up_rank; /* root ranks for both sub-communicators */
     char *reorder_buf = NULL, *reorder_rbuf = NULL;

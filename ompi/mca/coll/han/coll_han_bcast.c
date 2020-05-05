@@ -64,13 +64,10 @@ mca_coll_han_bcast_intra(void *buff,
     int seg_count = count;
     size_t typelng;
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
-    int max_seg_count, num_segments;
-    int up_num, low_num;
 
     ompi_datatype_type_size(dtype, &typelng);
 
     /* Create the subcommunicators */
-    mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
     mca_coll_han_comm_create(comm, han_module);
     ompi_communicator_t *low_comm;
     ompi_communicator_t *up_comm;

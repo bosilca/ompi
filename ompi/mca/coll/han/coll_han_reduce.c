@@ -195,7 +195,7 @@ int mca_coll_han_reduce_t1_task(void *task_argu) {
 /* In case of non regular situation (imbalanced number of processes per nodes),
  * a fallback is made on the next component that provides a reduce in priority order */
 int
-ompi_coll_future_reduce_intra_simple(const void *sbuf,
+mca_coll_han_reduce_intra_simple(const void *sbuf,
                                      void* rbuf,
                                      int count,
                                      struct ompi_datatype_t *dtype,
@@ -211,38 +211,38 @@ ompi_coll_future_reduce_intra_simple(const void *sbuf,
     ptrdiff_t rsize, rgap = 0;
     void * tmp_buf;
 
-    mca_coll_future_module_t *future_module = (mca_coll_future_module_t *)module;
+    mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
 
     /* Do not initialize topology if the operation cannot commute */
     if(!ompi_op_is_commute(op)){
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_future_component.future_output,
-                    "future cannot handle reduce with this operation. It needs to fall back on another component\n"));
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                    "han cannot handle reduce with this operation. It needs to fall back on another component\n"));
         goto prev_reduce_intra_simple;
     }
 
     /* Topo must be initialized to know rank distribution which then is used to
-     * determine if future can be used */
-    mca_coll_future_topo_init(comm, future_module, 2);
-    if (future_module->are_ppn_imbalanced){
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_future_component.future_output,
-                    "future cannot handle reduce with this communicator. It needs to fall back on another component\n"));
+     * determine if han can be used */
+    mca_coll_han_topo_init(comm, han_module, 2);
+    if (han_module->are_ppn_imbalanced){
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                    "han cannot handle reduce with this communicator. It needs to fall back on another component\n"));
         goto prev_reduce_intra_simple;
     }
 
-    mca_coll_future_comm_create(comm, future_module);
+    mca_coll_han_comm_create(comm, han_module);
     ompi_communicator_t *low_comm =
-         future_module->cached_low_comms[mca_coll_future_component.future_reduce_low_module];
+         han_module->cached_low_comms[mca_coll_han_component.han_reduce_low_module];
     ompi_communicator_t *up_comm =
-         future_module->cached_up_comms[mca_coll_future_component.future_reduce_up_module];
+         han_module->cached_up_comms[mca_coll_han_component.han_reduce_up_module];
 
     /* Get the 'virtual ranks' mapping corresponding to the communicators */
-    vranks = future_module->cached_vranks;
+    vranks = han_module->cached_vranks;
     w_rank = ompi_comm_rank(comm);
     low_rank = ompi_comm_rank(low_comm);
 
     low_size = ompi_comm_size(low_comm);
     /* Get root ranks for low and up comms */
-    mca_coll_future_get_ranks(vranks, root, low_size, &root_low_rank, &root_up_rank);
+    mca_coll_han_get_ranks(vranks, root, low_size, &root_low_rank, &root_up_rank);
 
     if (root_low_rank == low_rank && w_rank != root) {
         rsize = opal_datatype_span(&dtype->super, (int64_t)count, &rgap);
@@ -265,8 +265,8 @@ ompi_coll_future_reduce_intra_simple(const void *sbuf,
         if (root_low_rank == low_rank && w_rank != root){
             free(tmp_buf);
         }
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_future_component.future_output,
-                             "FUTURE/REDUCE: low comm reduce failed. "
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                             "HAN/REDUCE: low comm reduce failed. "
                              "Falling back to another component\n"));
         goto prev_reduce_intra_simple;
     }
@@ -286,8 +286,8 @@ ompi_coll_future_reduce_intra_simple(const void *sbuf,
                         up_comm, up_comm->c_coll->coll_reduce_module);
         }
         if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)){
-            OPAL_OUTPUT_VERBOSE((30, mca_coll_future_component.future_output,
-                                 "FUTURE/REDUCE: low comm reduce failed.\n"));
+            OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                                 "HAN/REDUCE: low comm reduce failed.\n"));
             return ret;
         }
 
@@ -295,7 +295,7 @@ ompi_coll_future_reduce_intra_simple(const void *sbuf,
     return OMPI_SUCCESS;
 
 prev_reduce_intra_simple:
-    return future_module->previous_reduce(sbuf, rbuf, count, dtype, op, root,
+    return han_module->previous_reduce(sbuf, rbuf, count, dtype, op, root,
                                           comm,
-                                          future_module->previous_reduce_module);
+                                          han_module->previous_reduce_module);
 }
