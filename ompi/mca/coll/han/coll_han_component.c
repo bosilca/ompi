@@ -103,16 +103,7 @@ static int han_open(void)
     /*
      * Get the global coll verbosity: it will be ours
      */
-    param = mca_base_var_find("ompi", "coll", "base", "verbose");
-    if (param >= 0) {
-        const int *verbose = NULL;
-        mca_base_var_get_value(param, &verbose, NULL, NULL);
-        if (verbose && verbose[0] > 0) {
-            cs->han_output = opal_output_open(NULL);
-            opal_output_set_verbosity(cs->han_output, verbose[0]);
-        }
-    }
-
+    cs->han_output = ompi_coll_base_framework.framework_output;
     opal_output_verbose(1, cs->han_output,
                         "coll:han:component_open: done!");
 
@@ -234,15 +225,6 @@ static int han_register(void)
                                            MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
                                            OPAL_INFO_LVL_9,
                                            MCA_BASE_VAR_SCOPE_READONLY, &cs->han_priority);
-
-    int coll_han_verbose = 0;
-    (void) mca_base_component_var_register(c, "verbose",
-                                           "Verbose level",
-                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
-                                           OPAL_INFO_LVL_9,
-                                           MCA_BASE_VAR_SCOPE_READONLY, &coll_han_verbose);
-    cs->han_output = opal_output_open(NULL);
-    opal_output_set_verbosity(cs->han_output, coll_han_verbose);
 
     cs->han_bcast_segsize = 65536;
     (void) mca_base_component_var_register(c, "bcast_segsize",
