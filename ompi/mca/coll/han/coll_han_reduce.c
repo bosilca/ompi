@@ -75,7 +75,7 @@ mca_coll_han_reduce_intra(const void *sbuf,
     if(!ompi_op_is_commute(op)){
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                     "han cannot handle reduce with this operation. It needs to fall back on another component\n"));
-        goto prev_reduce_intra_simple;
+        goto prev_reduce_intra;
     }
 
     /* Topo must be initialized to know rank distribution which then is used to
@@ -84,7 +84,7 @@ mca_coll_han_reduce_intra(const void *sbuf,
     if (han_module->are_ppn_imbalanced){
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                     "han cannot handle reduce with this communicator. It needs to fall back on another component\n"));
-        goto prev_reduce_intra_simple;
+        goto prev_reduce_intra;
     }
 
     /* Create the subcommunicators */
@@ -151,7 +151,7 @@ mca_coll_han_reduce_intra(const void *sbuf,
 
     return OMPI_SUCCESS;
 
-prev_reduce_intra_simple:
+prev_reduce_intra:
     return han_module->previous_reduce(sbuf, rbuf, count, dtype, op, root,
                                        comm,
                                        han_module->previous_reduce_module);

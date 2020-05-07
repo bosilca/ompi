@@ -219,7 +219,7 @@ mca_coll_han_comm_query(struct ompi_communicator_t * comm, int *priority)
         }
         han_module->super.coll_reduce_scatter = NULL;
         han_module->super.coll_scan       = NULL;
-        han_module->super.coll_scatter    = NULL;
+        han_module->super.coll_scatter    = mca_coll_han_scatter_intra;
         han_module->super.coll_scatterv   = NULL;
     } else {
         /* We are on a topologic sub-communicator, return only the selector */
