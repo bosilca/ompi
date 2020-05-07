@@ -66,6 +66,17 @@ mca_coll_han_bcast_intra(void *buff,
     size_t typelng;
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
 
+    /* Topo must be initialized to know rank distribution which then is used to
+     * determine if han can be used */
+    mca_coll_han_topo_init(comm, han_module, 2);
+
+    if (han_module->are_ppn_imbalanced){
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                        "han cannot handle bcast with this communicator. It need to fall back on another component\n"));
+        return han_module->previous_bcast(buff, count, dtype, root,
+                    comm, han_module->previous_bcast_module);
+    }
+
     ompi_datatype_type_size(dtype, &typelng);
 
     /* Create the subcommunicators */
@@ -246,10 +257,24 @@ mca_coll_han_bcast_intra_simple(void *buff,
     int root_low_rank;
     int root_up_rank;
 
-    OPAL_OUTPUT_VERBOSE((10, mca_coll_han_component.han_output,"[OMPI][han] in mca_coll_han_bcast_intra_simple\n"));
+    /* Topo must be initialized to know rank distribution which then is used to
+     * determine if han can be used */
+    mca_coll_han_topo_init(comm, han_module, 2);
+
+    if (han_module->are_ppn_imbalanced){
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                        "han cannot handle bcast with this communicator. It need to fall back on another component\n"));
+        return han_module->previous_bcast(buff, count, dtype, root,
+                    comm, han_module->previous_bcast_module);
+    } else {
+        OPAL_OUTPUT_VERBOSE((10, mca_coll_han_component.han_output,
+                            "[OMPI][han] in mca_coll_han_bcast_intra_simple\n"));
+    }
 
     mca_coll_han_get_ranks(vranks, root, low_size, &root_low_rank, &root_up_rank);
-    OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output, "[%d]: root_low_rank %d root_up_rank %d\n", w_rank, root_low_rank, root_up_rank));
+    OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                        "[%d]: root_low_rank %d root_up_rank %d\n",
+                         w_rank, root_low_rank, root_up_rank));
 
     if (low_rank == root_low_rank) {
         up_comm->c_coll->coll_bcast(buff, count, dtype, root_up_rank, up_comm, up_comm->c_coll->coll_bcast_module);
