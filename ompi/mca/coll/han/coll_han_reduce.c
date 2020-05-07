@@ -70,8 +70,24 @@ mca_coll_han_reduce_intra(const void *sbuf,
     size_t typelng;
     ompi_datatype_type_size(dtype, &typelng);
 
-    /* Create the subcommunicators */
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
+    /* Do not initialize topology if the operation cannot commute */
+    if(!ompi_op_is_commute(op)){
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                    "han cannot handle reduce with this operation. It needs to fall back on another component\n"));
+        goto prev_reduce_intra_simple;
+    }
+
+    /* Topo must be initialized to know rank distribution which then is used to
+     * determine if han can be used */
+    mca_coll_han_topo_init(comm, han_module, 2);
+    if (han_module->are_ppn_imbalanced){
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                    "han cannot handle reduce with this communicator. It needs to fall back on another component\n"));
+        goto prev_reduce_intra_simple;
+    }
+
+    /* Create the subcommunicators */
     mca_coll_han_comm_create(comm, han_module);
     ompi_communicator_t *low_comm;
     ompi_communicator_t *up_comm;
@@ -134,6 +150,11 @@ mca_coll_han_reduce_intra(const void *sbuf,
     free(t);
 
     return OMPI_SUCCESS;
+
+prev_reduce_intra_simple:
+    return han_module->previous_reduce(sbuf, rbuf, count, dtype, op, root,
+                                       comm,
+                                       han_module->previous_reduce_module);
 }
 
 /* t0 task: issue and wait for the low level reduce of segment 0 */
@@ -296,6 +317,6 @@ mca_coll_han_reduce_intra_simple(const void *sbuf,
 
 prev_reduce_intra_simple:
     return han_module->previous_reduce(sbuf, rbuf, count, dtype, op, root,
-                                          comm,
-                                          han_module->previous_reduce_module);
+                                       comm,
+                                       han_module->previous_reduce_module);
 }
