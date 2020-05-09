@@ -2,6 +2,7 @@
  * Copyright (c) 2018-2020 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2020      Bull S.A.S. All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -16,19 +17,23 @@
 
 #include "mpi.h"
 #include "ompi/mca/mca.h"
-#include "ompi/mca/coll/coll.h"
-#include "ompi/communicator/communicator.h"
-#include "ompi/include/mpi.h"
-#include "ompi/mca/coll/base/coll_base_functions.h"
-#include "opal/util/info.h"
-#include "ompi/op/op.h"
-#include "opal/runtime/opal_progress.h"
-#include "ompi/mca/pml/pml.h"
-#include "ompi/mca/coll/base/coll_tags.h"
+#include "opal/util/output.h"
 #include "ompi/mca/coll/base/coll_base_functions.h"
 #include "coll_han_trigger.h"
+#include "ompi/mca/coll/han/coll_han_dynamic.h" 
 
-BEGIN_C_DECLS typedef struct {
+BEGIN_C_DECLS
+
+/*
+ * Today;
+ * . only 2 modules available for intranode (low) level
+ * . only 2 modules available for internode (up) level
+ */
+
+#define COLL_HAN_LOW_MODULES 2
+#define COLL_HAN_UP_MODULES 2
+
+typedef struct {
     uint32_t umod;
     uint32_t lmod;
     uint32_t fs;
@@ -209,7 +214,37 @@ typedef struct mca_coll_han_component_t {
     uint32_t han_auto_tune_c;
     uint32_t han_auto_tune_m;
     selection *han_auto_tuned;
+    bool use_simple_algorithm[COLLCOUNT];
+
+    /* Dynamic configuration rules */
+    bool use_dynamic_file_rules;
+    bool dump_dynamic_rules;
+    char* dynamic_rules_filename;
+    /* Dynamic rules from file */
+    mca_coll_han_dynamic_rules_t dynamic_rules;
+    /* Dynamic rules from mca parameter */
+    COMPONENT_T mca_rules[COLLCOUNT][NB_TOPO_LVL];
+    int topo_level; 
 } mca_coll_han_component_t;
+
+typedef void (*previous_dummy_fn_t) (void);
+
+/*
+ * Structure used to store what is necessary for the collective operations
+ * routines in case of fallback.
+ */
+typedef struct collective_fallback_t {
+    union {
+        mca_coll_base_module_allgather_fn_t allgather;
+        mca_coll_base_module_allreduce_fn_t allreduce;
+        mca_coll_base_module_bcast_fn_t bcast;
+        mca_coll_base_module_gather_fn_t gather;
+        mca_coll_base_module_reduce_fn_t reduce;
+        mca_coll_base_module_scatter_fn_t scatter;
+        previous_dummy_fn_t dummy;
+    } previous_routine;
+    mca_coll_base_module_t *previous_module;
+} collective_fallback_t;
 
 /** Coll han module */
 typedef struct mca_coll_han_module_t {
@@ -225,8 +260,40 @@ typedef struct mca_coll_han_module_t {
     int *cached_vranks;
     int *cached_topo;
     bool is_mapbycore;
+    bool are_ppn_imbalanced;
+
+    /* To be able to fallback when the cases are not supported */
+    struct collective_fallback_t previous_routines[COLLCOUNT];
+
+    /* Topological level of this communicator */
+    int topologic_level;
+
+    /* Collective module storage for module choice */
+    mca_coll_han_collective_modules_storage_t modules_storage;
+    bool storage_initialized;
+
+    /* Sub-communicator */
+    struct ompi_communicator_t *sub_comm[NB_TOPO_LVL];
 } mca_coll_han_module_t;
 OBJ_CLASS_DECLARATION(mca_coll_han_module_t);
+
+/*
+ * Some defines to stick to the naming used in the other components in terms of
+ * fallback routines
+ */
+#define previous_allgather previous_routines[ALLGATHER].previous_routine.allgather
+#define previous_allreduce previous_routines[ALLREDUCE].previous_routine.allreduce
+#define previous_bcast     previous_routines[BCAST].previous_routine.bcast
+#define previous_gather    previous_routines[GATHER].previous_routine.gather
+#define previous_reduce    previous_routines[REDUCE].previous_routine.reduce
+#define previous_scatter   previous_routines[SCATTER].previous_routine.scatter
+
+#define previous_allgather_module previous_routines[ALLGATHER].previous_module
+#define previous_allreduce_module previous_routines[ALLREDUCE].previous_module
+#define previous_bcast_module     previous_routines[BCAST].previous_module
+#define previous_gather_module    previous_routines[GATHER].previous_module
+#define previous_reduce_module    previous_routines[REDUCE].previous_module
+#define previous_scatter_module   previous_routines[SCATTER].previous_module
 
 /**
  * Global component instance
@@ -244,17 +311,10 @@ int han_request_free(ompi_request_t ** request);
 
 /* Subcommunicator creation */
 void mca_coll_han_comm_create(struct ompi_communicator_t *comm, mca_coll_han_module_t * han_module);
-
+void mca_coll_han_comm_create_new(struct ompi_communicator_t *comm, mca_coll_han_module_t *han_module); 
 /* Gather topology information */
-int mca_coll_han_pow10_int(int pow_value);
-int mca_coll_han_hostname_to_number(char *hostname, int size);
-void mca_coll_han_topo_get(int *topo, struct ompi_communicator_t *comm, int num_topo_level);
-void mca_coll_han_topo_sort(int *topo, int start, int end, int size, int level, int num_topo_level);
-bool mca_coll_han_topo_is_mapbycore(int *topo, struct ompi_communicator_t *comm,
-                                    int num_topo_level);
 int *mca_coll_han_topo_init(struct ompi_communicator_t *comm, mca_coll_han_module_t * han_module,
                             int num_topo_level);
-void mca_coll_han_topo_print(int *topo, struct ompi_communicator_t *comm, int num_topo_level);
 
 /* Utils */
 void mca_coll_han_get_ranks(int *vranks, int root, int low_size, int *root_low_rank,
@@ -263,8 +323,26 @@ uint32_t han_auto_tuned_get_n(uint32_t n);
 uint32_t han_auto_tuned_get_c(uint32_t c);
 uint32_t han_auto_tuned_get_m(uint32_t m);
 
+const char* mca_coll_han_colltype_to_str(COLLTYPE_T coll);
+const char* mca_coll_han_topo_lvl_to_str(TOPO_LVL_T topo_lvl);
+
+/** Dynamic component choice */
+int
+mca_coll_han_bcast_intra_dynamic(void *buff,
+                                    int count,
+                                    struct ompi_datatype_t *dtype,
+                                    int root,
+                                    struct ompi_communicator_t *comm,
+                                    mca_coll_base_module_t *module);
+
 
 /* Bcast */
+int mca_coll_han_bcast_intra_simple(void *buff,
+				       int count,
+				       struct ompi_datatype_t *dtype,
+				       int root,
+				       struct ompi_communicator_t *comm,
+				       mca_coll_base_module_t *module);
 void mac_coll_han_set_bcast_argu(mca_bcast_argu_t * argu, mca_coll_task_t * cur_task, void *buff,
                                  int seg_count, struct ompi_datatype_t *dtype,
                                  int root_up_rank, int root_low_rank,
@@ -278,6 +356,16 @@ int mca_coll_han_bcast_t0_task(void *task_argu);
 int mca_coll_han_bcast_t1_task(void *task_argu);
 
 /* Reduce */
+int
+mca_coll_han_reduce_intra_simple(const void *sbuf,
+                                     void* rbuf,
+                                     int count,
+                                     struct ompi_datatype_t *dtype,
+                                     ompi_op_t *op,
+                                     int root,
+                                     struct ompi_communicator_t *comm,
+                                     mca_coll_base_module_t *module);
+
 void mac_coll_han_set_reduce_argu(mca_reduce_argu_t * argu, mca_coll_task_t * cur_task, 
                                   void *sbuf, 
                                   void *rbuf, int seg_count, struct ompi_datatype_t *dtype, 
@@ -301,6 +389,15 @@ int mca_coll_han_reduce_t0_task(void *task_argu);
 int mca_coll_han_reduce_t1_task(void *task_argu);
 
 /* Allreduce */
+int
+mca_coll_han_allreduce_intra_simple(const void *sbuf,
+                                       void *rbuf,
+                                       int count,
+                                       struct ompi_datatype_t *dtype,
+                                       struct ompi_op_t *op,
+                                       struct ompi_communicator_t *comm,
+                                       mca_coll_base_module_t *module);
+
 void mac_coll_han_set_allreduce_argu(mca_allreduce_argu_t * argu,
                                      mca_coll_task_t * cur_task,
                                      void *sbuf,
