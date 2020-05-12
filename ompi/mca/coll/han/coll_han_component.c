@@ -344,6 +344,16 @@ static int han_register(void)
                                            OPAL_INFO_LVL_9,
                                            MCA_BASE_VAR_SCOPE_READONLY, &cs->han_auto_tune);
 
+    cs->han_reproducible = 0;
+    (void) mca_base_component_var_register(c, "reproducible",
+                                           "whether we need reproducible results "
+                                           "(enabling this disables optimisations using topology)"
+                                           "0 disable 1 enable, default 0",
+                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                           OPAL_INFO_LVL_3,
+                                           MCA_BASE_VAR_SCOPE_READONLY,
+                                           &cs->han_reproducible);
+
     /* Simple algorithms MCA parameters */
     for(coll = 0 ; coll < COLLCOUNT ; coll++) {
         cs->use_simple_algorithm[coll] = false;
@@ -377,7 +387,7 @@ static int han_register(void)
         cs->mca_rules[coll][INTER_NODE] = BASIC;
         cs->mca_rules[coll][GLOBAL_COMMUNICATOR] = HAN;
 
-        for(topo_lvl = 0 ; topo_lvl <= NB_TOPO_LVL ; topo_lvl++) {
+        for(topo_lvl = 0 ; topo_lvl < NB_TOPO_LVL ; topo_lvl++) {
 
             snprintf(param_name, 100, "%s_dynamic_%s_module",
                      mca_coll_han_colltype_to_str(coll),
@@ -486,6 +496,19 @@ static int han_register(void)
                             "Check coll_han_use_dynamic_file_rules "
                             "MCA parameter");
     }
+
+    cs->max_dynamic_errors = 10;
+    (void) mca_base_component_var_register(&mca_coll_han_component.super.collm_version,
+                                           "max_dynamic_errors",
+                                           "Number of dynamic rules module/function "
+                                           "errors printed on rank 0 "
+                                           "with a 0 verbosity."
+                                           "Useless if coll_base_verbose is 30 or more.",
+                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                           OPAL_INFO_LVL_6,
+                                           MCA_BASE_VAR_SCOPE_READONLY,
+                                           &(cs->max_dynamic_errors));
+
 
     return OMPI_SUCCESS;
 }

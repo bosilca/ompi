@@ -54,11 +54,12 @@ void mac_coll_han_set_gather_argu(mca_gather_argu_t * argu,
 
 int
 mca_coll_han_gather_intra(const void *sbuf, int scount,
-                           struct ompi_datatype_t *sdtype,
-                           void *rbuf, int rcount,
-                           struct ompi_datatype_t *rdtype,
-                           int root,
-                           struct ompi_communicator_t *comm, mca_coll_base_module_t * module)
+                          struct ompi_datatype_t *sdtype,
+                          void *rbuf, int rcount,
+                          struct ompi_datatype_t *rdtype,
+                          int root,
+                          struct ompi_communicator_t *comm,
+                          mca_coll_base_module_t * module)
 {
     int i;
     int w_rank, w_size; /* information about the global communicator */
@@ -100,10 +101,8 @@ mca_coll_han_gather_intra(const void *sbuf, int scount,
 
     /* create the subcommunicators */
     mca_coll_han_comm_create(comm, han_module);
-    ompi_communicator_t *low_comm =
-         han_module->cached_low_comms[mca_coll_han_component.han_gather_low_module];
-    ompi_communicator_t *up_comm =
-         han_module->cached_up_comms[mca_coll_han_component.han_gather_up_module];
+    ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
+    ompi_communicator_t *up_comm = han_module->sub_comm[INTER_NODE];
 
     /* Get the 'virtual ranks' mapping correspondong to the communicators */
     vranks = han_module->cached_vranks;

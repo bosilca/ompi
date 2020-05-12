@@ -320,3 +320,69 @@ prev_reduce_intra_simple:
                                        comm,
                                        han_module->previous_reduce_module);
 }
+
+
+/* Find a fallback on reproducible algorithm
+ * use tuned or basic or if impossible whatever available
+ */
+int
+mca_coll_han_reduce_reproducible_decision(struct ompi_communicator_t *comm,
+                                          mca_coll_base_module_t *module)
+{
+    int w_rank = ompi_comm_rank(comm);
+    mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
+
+    /* populate previous modules_storage*/
+    mca_coll_han_get_all_coll_modules(comm, han_module);
+
+    /* try availability of reproducible modules */
+    int fallbacks[] = {TUNED, BASIC};
+    int fallbacks_len = sizeof(fallbacks) / sizeof(*fallbacks);
+    int i;
+    for (i=0; i<fallbacks_len; i++) {
+        int fallback = fallbacks[i];
+        mca_coll_base_module_t *fallback_module = han_module->modules_storage
+            .modules[fallback]
+            .module_handler;
+        if (fallback_module != NULL && fallback_module->coll_reduce != NULL) {
+            if (0 == w_rank) {
+                opal_output_verbose(30, mca_coll_han_component.han_output,
+                                    "coll:han:reduce_reproducible: "
+                                    "fallback on %s\n",
+                                    components_name[fallback]);
+            }
+            han_module->reproducible_reduce_module = fallback_module;
+            han_module->reproducible_reduce = fallback_module->coll_reduce;
+            return OMPI_SUCCESS;
+        }
+    }
+   /* fallback of the fallback */
+    if (0 == w_rank) {
+        opal_output_verbose(5, mca_coll_han_component.han_output,
+                            "coll:han:reduce_reproducible_decision: "
+                            "no reproducible fallback\n");
+    }
+    han_module->reproducible_reduce_module =
+        han_module->previous_reduce_module;
+    han_module->reproducible_reduce = han_module->previous_reduce;
+    return  OMPI_SUCCESS;
+}
+
+
+/* Fallback on reproducible algorithm */
+int
+mca_coll_han_reduce_reproducible(const void *sbuf,
+                                 void *rbuf,
+                                  int count,
+                                  struct ompi_datatype_t *dtype,
+                                  struct ompi_op_t *op,
+                                  int root,
+                                  struct ompi_communicator_t *comm,
+                                  mca_coll_base_module_t *module)
+{
+    mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
+    return han_module->reproducible_reduce(sbuf, rbuf, count, dtype,
+                                           op, root, comm,
+                                           han_module
+                                           ->reproducible_reduce_module);
+}

@@ -65,11 +65,9 @@ mca_coll_han_allgather_intra(const void *sbuf, int scount,
 
     /* Create the subcommunicators */
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
-    mca_coll_han_comm_create(comm, han_module);
-    ompi_communicator_t *low_comm =
-        han_module->cached_low_comms[mca_coll_han_component.han_allgather_low_module];
-    ompi_communicator_t *up_comm =
-        han_module->cached_up_comms[mca_coll_han_component.han_allgather_up_module];
+    mca_coll_han_comm_create_new(comm, han_module);
+    ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
+    ompi_communicator_t *up_comm = han_module->sub_comm[INTER_NODE];
     int low_rank = ompi_comm_rank(low_comm);
 
     ompi_request_t *temp_request = NULL;

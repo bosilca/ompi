@@ -79,10 +79,8 @@ mca_coll_han_scatter_intra(const void *sbuf, int scount,
 
     /* Create the subcommunicators */
     mca_coll_han_comm_create(comm, han_module);
-    ompi_communicator_t *low_comm =
-        han_module->cached_low_comms[mca_coll_han_component.han_scatter_low_module];
-    ompi_communicator_t *up_comm =
-        han_module->cached_up_comms[mca_coll_han_component.han_scatter_up_module];
+    ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
+    ompi_communicator_t *up_comm = han_module->sub_comm[INTER_NODE];
     int *vranks = han_module->cached_vranks;
     int low_rank = ompi_comm_rank(low_comm);
     int low_size = ompi_comm_size(low_comm);
