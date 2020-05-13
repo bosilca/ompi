@@ -521,7 +521,7 @@ void mac_coll_han_set_scatter_argu(mca_scatter_argu_t * argu,
                                    struct ompi_communicator_t *low_comm,
                                    int w_rank, bool noop, ompi_request_t * req);
 
-/* Gatter */
+/* Gather */
 int
 mca_coll_han_gather_intra(const void *sbuf, int scount,
                            struct ompi_datatype_t *sdtype,
@@ -546,6 +546,23 @@ void mac_coll_han_set_gather_argu(mca_gather_argu_t * argu,
                                   struct ompi_communicator_t *up_comm,
                                   struct ompi_communicator_t *low_comm,
                                   int w_rank, bool noop, ompi_request_t * req);
+int
+mca_coll_han_gather_intra_simple(const void *sbuf, int scount,
+                                     struct ompi_datatype_t *sdtype,
+                                     void *rbuf, int rcount,
+                                     struct ompi_datatype_t *rdtype,
+                                     int root,
+                                     struct ompi_communicator_t *comm,
+                                     mca_coll_base_module_t *module);
+/* reordering after gather, for unordered ranks */
+void
+ompi_coll_han_reorder_gather(const void *sbuf,
+                                     void *rbuf, int rcount,
+                                     struct ompi_datatype_t *rdtype,
+                                     struct ompi_communicator_t *comm,
+                                     int * topo);
+
+
 
 /* Allgather */
 int
@@ -571,6 +588,13 @@ void mac_coll_han_set_allgather_argu(mca_allgather_argu_t * argu,
                                      struct ompi_communicator_t *low_comm,
                                      int w_rank,
                                      bool noop, bool is_mapbycore, int *topo, ompi_request_t * req);
+int
+mca_coll_han_allgather_intra_simple(const void *sbuf, int scount,
+                                        struct ompi_datatype_t *sdtype,
+                                        void* rbuf, int rcount,
+                                        struct ompi_datatype_t *rdtype,
+                                        struct ompi_communicator_t *comm,
+                                        mca_coll_base_module_t *module);
 
 END_C_DECLS
 #endif                          /* MCA_COLL_HAN_EXPORT_H */

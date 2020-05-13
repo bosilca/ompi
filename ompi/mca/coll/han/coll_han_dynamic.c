@@ -62,8 +62,7 @@ int
 mca_coll_han_get_all_coll_modules(struct ompi_communicator_t *comm,
                      mca_coll_han_module_t *han_module)
 {
-    int i;
-    int nb_modules=0, ret;
+    int nb_modules=0;
     mca_coll_base_avail_coll_t *item;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
     mca_coll_base_module_t *han_base_module = (mca_coll_base_module_t *) han_module;
@@ -410,7 +409,7 @@ mca_coll_han_allgather_intra_dynamic(const void *sbuf, int scount,
         opal_output_verbose(verbosity, mca_coll_han_component.han_output,
                             "coll:han:mca_coll_han_allgather_intra_dynamic "
                             "Han did not find any valid module for "
-                            "collective %d (%s)"
+                            "collective %d (%s) "
                             "with topological level %d (%s) "
                             "on communicator (%d/%s). "
                             "Please check dynamic file/mca parameters\n",
@@ -469,15 +468,12 @@ mca_coll_han_allgather_intra_dynamic(const void *sbuf, int scount,
          * Call han topological collective algorithm
          */
         mca_coll_base_module_allgather_fn_t allgather;
-        allgather = mca_coll_han_allgather_intra;
-        /*
-         * TODO: Uncomment when allgather simple is merged
-         * if(mca_coll_han_component.use_simple_algorithm[ALLGATHER]) {
-         * allgather = mca_coll_han_allgather_intra_simple;
-         * } else {
-         * allgather = mca_coll_han_allgather_intra;
-         * }
-         */
+        if(mca_coll_han_component.use_simple_algorithm[ALLGATHER]) {
+            allgather = mca_coll_han_allgather_intra_simple;
+        } else {
+            allgather = mca_coll_han_allgather_intra;
+        }
+
         return allgather(sbuf, scount, sdtype,
                          rbuf, rcount, rdtype,
                          comm,
@@ -514,8 +510,7 @@ mca_coll_han_allgatherv_intra_dynamic(const void *sbuf, int scount,
                                          struct ompi_communicator_t *comm,
                                          mca_coll_base_module_t *module)
 {
-    size_t dtype_size;
-    int msg_size;
+    size_t dtype_size, msg_size;
     int rank;
     int verbosity;
     int comm_size;
@@ -530,6 +525,7 @@ mca_coll_han_allgatherv_intra_dynamic(const void *sbuf, int scount,
     comm_size = ompi_comm_size(comm);
     ompi_datatype_type_size(rdtype, &dtype_size);
 
+    msg_size = 0;
     for(i = 0 ; i < comm_size ; i++) {
         if(dtype_size * rcounts[i] > msg_size) {
             msg_size = dtype_size * rcounts[i];
@@ -560,7 +556,7 @@ mca_coll_han_allgatherv_intra_dynamic(const void *sbuf, int scount,
         opal_output_verbose(verbosity, mca_coll_han_component.han_output,
                             "coll:han:mca_coll_han_allgatherv_intra_dynamic "
                             "Han did not find any valid module for "
-                            "collective %d (%s)"
+                            "collective %d (%s) "
                             "with topological level %d (%s) "
                             "on communicator (%d/%s). "
                             "Please check dynamic file/mca parameters\n",
@@ -841,7 +837,7 @@ mca_coll_han_bcast_intra_dynamic(void *buff,
         opal_output_verbose(verbosity, mca_coll_han_component.han_output,
                             "coll:han:mca_coll_han_bcast_intra_dynamic "
                             "Han did not find any valid module for "
-                            "collective %d (%s)"
+                            "collective %d (%s) "
                             "with topological level %d (%s) "
                             "on communicator (%d/%s). "
                             "Please check dynamic file/mca parameters\n",
@@ -976,7 +972,7 @@ mca_coll_han_gather_intra_dynamic(const void *sbuf, int scount,
         opal_output_verbose(verbosity, mca_coll_han_component.han_output,
                             "coll:han:mca_coll_han_gather_intra_dynamic "
                             "Han did not find any valid module for "
-                            "collective %d (%s)"
+                            "collective %d (%s) "
                             "with topological level %d (%s) "
                             "on communicator (%d/%s). "
                             "Please check dynamic file/mca parameters\n",
@@ -1035,15 +1031,13 @@ mca_coll_han_gather_intra_dynamic(const void *sbuf, int scount,
          * Call han topological collective algorithm
          */
         mca_coll_base_module_gather_fn_t gather;
-        gather = mca_coll_han_gather_intra;
-        /*
-         * TODO: Uncomment when gather simple is merged
-         * if(mca_coll_han_component.use_simple_algorithm[GATHER]) {
-         * gather = mca_coll_han_gather_intra_simple;
-         * } else {
-         * gather = mca_coll_han_gather_intra;
-         * }
-         */
+        if(mca_coll_han_component.use_simple_algorithm[GATHER]) {
+            gather = mca_coll_han_gather_intra_simple;
+        } else {
+            gather = mca_coll_han_gather_intra;
+        }
+
+
         return gather(sbuf, scount, sdtype,
                       rbuf, rcount, rdtype,
                       root, comm,
@@ -1315,7 +1309,7 @@ mca_coll_han_scatter_intra_dynamic(const void *sbuf, int scount,
         mca_coll_base_module_scatter_fn_t scatter;
         scatter = mca_coll_han_scatter_intra;
         /*
-         * TODO: Uncomment when gather simple is merged
+         * TODO: Uncomment when scatter simple is merged
          * if(mca_coll_han_component.use_simple_algorithm[SCATTER]) {
          * scatter = mca_coll_han_scatter_intra_simple;
          * } else {

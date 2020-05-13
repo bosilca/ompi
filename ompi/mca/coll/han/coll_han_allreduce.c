@@ -422,7 +422,6 @@ mca_coll_han_allreduce_intra_simple(const void *sbuf,
     int ret;
     mca_coll_han_component_t *cs = &mca_coll_han_component;
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
-    void *sav_rbuf = rbuf;
 
     OPAL_OUTPUT_VERBOSE((10, cs->han_output,
                     "[OMPI][han] in mca_coll_han_reduce_intra_simple\n"));
