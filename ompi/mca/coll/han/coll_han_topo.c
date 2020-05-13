@@ -114,11 +114,11 @@ static void mca_coll_han_topo_get(int *topo,
  *
  * @param topo (IN/OUT)         topology description array (sorted in out)
  * @param start (IN)            where to begin the processing
- *                              The index in topo will actually be: 
+ *                              The index in topo will actually be:
  *                              start * num_topo_level + level
  *                              topo contains num_topo_level ids per rank.
  * @param end (IN)              where to stop the processing
- *                              The index in topo will actually be: 
+ *                              The index in topo will actually be:
  *                              end * num_topo_level + level
  *                              topo contains num_topo_level ids per rank.
  * @param level (IN)            level number we are currently processing

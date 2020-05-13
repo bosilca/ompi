@@ -205,6 +205,10 @@ typedef struct mca_coll_han_component_t {
     uint32_t han_scatter_low_module;
     /* whether enable auto tune */
     uint32_t han_auto_tune;
+    /* whether we need reproducible results
+     * (but disables topological optimisations)
+     */
+    uint32_t han_reproducible;
     /* create a 3D array
      * num_processes (n): 2 4 8 16 32 64 (6)
      * num_core (c): 2 4 8 12 (4)
@@ -225,6 +229,9 @@ typedef struct mca_coll_han_component_t {
     /* Dynamic rules from mca parameter */
     COMPONENT_T mca_rules[COLLCOUNT][NB_TOPO_LVL];
     int topo_level; 
+
+    /* Define maximum dynamic errors printed by rank 0 with a 0 verbosity level */
+    int max_dynamic_errors;
 } mca_coll_han_component_t;
 
 typedef void (*previous_dummy_fn_t) (void);
@@ -236,6 +243,7 @@ typedef void (*previous_dummy_fn_t) (void);
 typedef struct collective_fallback_t {
     union {
         mca_coll_base_module_allgather_fn_t allgather;
+        mca_coll_base_module_allgatherv_fn_t allgatherv;
         mca_coll_base_module_allreduce_fn_t allreduce;
         mca_coll_base_module_bcast_fn_t bcast;
         mca_coll_base_module_gather_fn_t gather;
@@ -265,12 +273,25 @@ typedef struct mca_coll_han_module_t {
     /* To be able to fallback when the cases are not supported */
     struct collective_fallback_t previous_routines[COLLCOUNT];
 
+    /* To be able to fallback on reproducible algorithm */
+    mca_coll_base_module_reduce_fn_t reproducible_reduce;
+    mca_coll_base_module_t *reproducible_reduce_module;
+    mca_coll_base_module_allreduce_fn_t reproducible_allreduce;
+    mca_coll_base_module_t *reproducible_allreduce_module;
+
     /* Topological level of this communicator */
     int topologic_level;
 
     /* Collective module storage for module choice */
     mca_coll_han_collective_modules_storage_t modules_storage;
     bool storage_initialized;
+
+    /*
+     * Number of dynamic errors encountered
+     * The first mca_coll_han_component.max_dynamic_errors
+     * of rank 0 are printed with verbosity = 0
+     */
+    int dynamic_errors;
 
     /* Sub-communicator */
     struct ompi_communicator_t *sub_comm[NB_TOPO_LVL];
@@ -281,19 +302,21 @@ OBJ_CLASS_DECLARATION(mca_coll_han_module_t);
  * Some defines to stick to the naming used in the other components in terms of
  * fallback routines
  */
-#define previous_allgather previous_routines[ALLGATHER].previous_routine.allgather
-#define previous_allreduce previous_routines[ALLREDUCE].previous_routine.allreduce
-#define previous_bcast     previous_routines[BCAST].previous_routine.bcast
-#define previous_gather    previous_routines[GATHER].previous_routine.gather
-#define previous_reduce    previous_routines[REDUCE].previous_routine.reduce
-#define previous_scatter   previous_routines[SCATTER].previous_routine.scatter
+#define previous_allgather  previous_routines[ALLGATHER].previous_routine.allgather
+#define previous_allgatherv previous_routines[ALLGATHERV].previous_routine.allgatherv
+#define previous_allreduce  previous_routines[ALLREDUCE].previous_routine.allreduce
+#define previous_bcast      previous_routines[BCAST].previous_routine.bcast
+#define previous_gather     previous_routines[GATHER].previous_routine.gather
+#define previous_reduce     previous_routines[REDUCE].previous_routine.reduce
+#define previous_scatter    previous_routines[SCATTER].previous_routine.scatter
 
-#define previous_allgather_module previous_routines[ALLGATHER].previous_module
-#define previous_allreduce_module previous_routines[ALLREDUCE].previous_module
-#define previous_bcast_module     previous_routines[BCAST].previous_module
-#define previous_gather_module    previous_routines[GATHER].previous_module
-#define previous_reduce_module    previous_routines[REDUCE].previous_module
-#define previous_scatter_module   previous_routines[SCATTER].previous_module
+#define previous_allgather_module  previous_routines[ALLGATHER].previous_module
+#define previous_allgatherv_module previous_routines[ALLGATHERV].previous_module
+#define previous_allreduce_module  previous_routines[ALLREDUCE].previous_module
+#define previous_bcast_module      previous_routines[BCAST].previous_module
+#define previous_gather_module     previous_routines[GATHER].previous_module
+#define previous_reduce_module     previous_routines[REDUCE].previous_module
+#define previous_scatter_module    previous_routines[SCATTER].previous_module
 
 /**
  * Global component instance
@@ -327,14 +350,35 @@ const char* mca_coll_han_colltype_to_str(COLLTYPE_T coll);
 const char* mca_coll_han_topo_lvl_to_str(TOPO_LVL_T topo_lvl);
 
 /** Dynamic component choice */
+/*
+ * Get all the collective modules initialized on this communicator
+ * This function must be call at the start of every selector implementation
+ */
 int
-mca_coll_han_bcast_intra_dynamic(void *buff,
-                                    int count,
-                                    struct ompi_datatype_t *dtype,
-                                    int root,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module);
+mca_coll_han_get_all_coll_modules(struct ompi_communicator_t *comm,
+			                      mca_coll_han_module_t *han_module);
 
+int
+mca_coll_han_allgather_intra_dynamic(ALLGATHER_BASE_ARGS,
+                                     mca_coll_base_module_t *module);
+int
+mca_coll_han_allgatherv_intra_dynamic(ALLGATHERV_BASE_ARGS,
+                                      mca_coll_base_module_t *module);
+int
+mca_coll_han_allreduce_intra_dynamic(ALLREDUCE_BASE_ARGS,
+                                     mca_coll_base_module_t *module);
+int
+mca_coll_han_bcast_intra_dynamic(BCAST_BASE_ARGS,
+                                 mca_coll_base_module_t *module);
+int
+mca_coll_han_gather_intra_dynamic(GATHER_BASE_ARGS,
+                                  mca_coll_base_module_t *module);
+int
+mca_coll_han_reduce_intra_dynamic(REDUCE_BASE_ARGS,
+                                  mca_coll_base_module_t *module);
+int
+mca_coll_han_scatter_intra_dynamic(SCATTER_BASE_ARGS,
+                                   mca_coll_base_module_t *module);
 
 /* Bcast */
 int mca_coll_han_bcast_intra_simple(void *buff,
@@ -358,13 +402,27 @@ int mca_coll_han_bcast_t1_task(void *task_argu);
 /* Reduce */
 int
 mca_coll_han_reduce_intra_simple(const void *sbuf,
-                                     void* rbuf,
-                                     int count,
-                                     struct ompi_datatype_t *dtype,
-                                     ompi_op_t *op,
-                                     int root,
-                                     struct ompi_communicator_t *comm,
-                                     mca_coll_base_module_t *module);
+                                 void* rbuf,
+                                 int count,
+                                 struct ompi_datatype_t *dtype,
+                                 ompi_op_t *op,
+                                 int root,
+                                 struct ompi_communicator_t *comm,
+                                 mca_coll_base_module_t *module);
+int
+mca_coll_han_reduce_reproducible_decision(struct ompi_communicator_t *comm,
+                                          mca_coll_base_module_t *module);
+int
+mca_coll_han_reduce_reproducible(const void *sbuf,
+                                 void *rbuf,
+                                 int count,
+                                 struct ompi_datatype_t *dtype,
+                                 struct ompi_op_t *op,
+                                 int root,
+                                 struct ompi_communicator_t *comm,
+                                 mca_coll_base_module_t *module);
+
+
 
 void mac_coll_han_set_reduce_argu(mca_reduce_argu_t * argu, mca_coll_task_t * cur_task, 
                                   void *sbuf, 
@@ -397,6 +455,17 @@ mca_coll_han_allreduce_intra_simple(const void *sbuf,
                                        struct ompi_op_t *op,
                                        struct ompi_communicator_t *comm,
                                        mca_coll_base_module_t *module);
+int
+mca_coll_han_allreduce_reproducible_decision(struct ompi_communicator_t *comm,
+                                             mca_coll_base_module_t *module);
+int
+mca_coll_han_allreduce_reproducible(const void *sbuf,
+                                    void *rbuf,
+                                     int count,
+                                     struct ompi_datatype_t *dtype,
+                                     struct ompi_op_t *op,
+                                     struct ompi_communicator_t *comm,
+                                     mca_coll_base_module_t *module);
 
 void mac_coll_han_set_allreduce_argu(mca_allreduce_argu_t * argu,
                                      mca_coll_task_t * cur_task,
@@ -452,7 +521,7 @@ void mac_coll_han_set_scatter_argu(mca_scatter_argu_t * argu,
                                    struct ompi_communicator_t *low_comm,
                                    int w_rank, bool noop, ompi_request_t * req);
 
-/* Gatter */
+/* Gather */
 int
 mca_coll_han_gather_intra(const void *sbuf, int scount,
                            struct ompi_datatype_t *sdtype,
@@ -477,6 +546,23 @@ void mac_coll_han_set_gather_argu(mca_gather_argu_t * argu,
                                   struct ompi_communicator_t *up_comm,
                                   struct ompi_communicator_t *low_comm,
                                   int w_rank, bool noop, ompi_request_t * req);
+int
+mca_coll_han_gather_intra_simple(const void *sbuf, int scount,
+                                     struct ompi_datatype_t *sdtype,
+                                     void *rbuf, int rcount,
+                                     struct ompi_datatype_t *rdtype,
+                                     int root,
+                                     struct ompi_communicator_t *comm,
+                                     mca_coll_base_module_t *module);
+/* reordering after gather, for unordered ranks */
+void
+ompi_coll_han_reorder_gather(const void *sbuf,
+                                     void *rbuf, int rcount,
+                                     struct ompi_datatype_t *rdtype,
+                                     struct ompi_communicator_t *comm,
+                                     int * topo);
+
+
 
 /* Allgather */
 int
@@ -502,6 +588,13 @@ void mac_coll_han_set_allgather_argu(mca_allgather_argu_t * argu,
                                      struct ompi_communicator_t *low_comm,
                                      int w_rank,
                                      bool noop, bool is_mapbycore, int *topo, ompi_request_t * req);
+int
+mca_coll_han_allgather_intra_simple(const void *sbuf, int scount,
+                                        struct ompi_datatype_t *sdtype,
+                                        void* rbuf, int rcount,
+                                        struct ompi_datatype_t *rdtype,
+                                        struct ompi_communicator_t *comm,
+                                        mca_coll_base_module_t *module);
 
 END_C_DECLS
 #endif                          /* MCA_COLL_HAN_EXPORT_H */

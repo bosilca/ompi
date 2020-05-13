@@ -169,7 +169,8 @@ mca_coll_han_init_dynamic_rules(void)
                                 "for topo level count "
                                 "or the reader encountered an unexpected EOF\n",
                                 fname,
-                                fileline);
+                                fileline,
+                                nb_topo);
             coll_rules[i].nb_topologic_levels = 0;
             mca_coll_han_component.dynamic_rules.nb_collectives = i+1;
             goto file_reading_error;

@@ -40,6 +40,10 @@ static void han_module_clear(mca_coll_han_module_t *han_module)
         han_module->previous_routines[i].previous_routine.dummy = NULL;
         han_module->previous_routines[i].previous_module = NULL;
     }
+    han_module->reproducible_reduce = NULL;
+    han_module->reproducible_reduce_module = NULL;
+    han_module->reproducible_allreduce = NULL;
+    han_module->reproducible_allreduce_module = NULL;
 }
 
 static void mca_coll_han_module_construct(mca_coll_han_module_t * module)
@@ -61,6 +65,8 @@ static void mca_coll_han_module_construct(mca_coll_han_module_t * module)
     for (i=SELF ; i<COMPONENTS_COUNT ; i++) {
         module->modules_storage.modules[i].module_handler = NULL;
     }
+
+    module->dynamic_errors = 0;
 
     han_module_clear(module);
 }
@@ -193,53 +199,41 @@ mca_coll_han_comm_query(struct ompi_communicator_t * comm, int *priority)
         /* We are on the global communicator, return topological algorithms */
         han_module->super.coll_module_enable = han_module_enable;
         han_module->super.ft_event        = NULL;
-        han_module->super.coll_allgather  = NULL;
+        han_module->super.coll_allgather  = mca_coll_han_allgather_intra_dynamic;
         han_module->super.coll_allgatherv = NULL;
-        if(mca_coll_han_component.use_simple_algorithm[ALLREDUCE]){
-            OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                "Using simplified allreduce"));
-            han_module->super.coll_allreduce  = mca_coll_han_allreduce_intra_simple;
-        } else {
-            han_module->super.coll_allreduce  = mca_coll_han_allreduce_intra;
-        }
+        han_module->super.coll_allreduce  = mca_coll_han_allreduce_intra_dynamic;
         han_module->super.coll_alltoall   = NULL;
         han_module->super.coll_alltoallv  = NULL;
         han_module->super.coll_alltoallw  = NULL;
         han_module->super.coll_barrier    = NULL;
         han_module->super.coll_bcast      = mca_coll_han_bcast_intra_dynamic;
         han_module->super.coll_exscan     = NULL;
-        han_module->super.coll_gather     = mca_coll_han_gather_intra;
+        han_module->super.coll_gather     = mca_coll_han_gather_intra_dynamic;
         han_module->super.coll_gatherv    = NULL;
-        if(mca_coll_han_component.use_simple_algorithm[REDUCE]){
-            OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                "Using simplified reduce"));
-            han_module->super.coll_reduce  = mca_coll_han_reduce_intra_simple;
-        } else {
-            han_module->super.coll_reduce  = mca_coll_han_reduce_intra;
-        }
+        han_module->super.coll_reduce     = mca_coll_han_reduce_intra_dynamic;
         han_module->super.coll_reduce_scatter = NULL;
         han_module->super.coll_scan       = NULL;
-        han_module->super.coll_scatter    = mca_coll_han_scatter_intra;
+        han_module->super.coll_scatter    = mca_coll_han_scatter_intra_dynamic;
         han_module->super.coll_scatterv   = NULL;
     } else {
         /* We are on a topologic sub-communicator, return only the selector */
         han_module->super.coll_module_enable = han_module_enable;
         han_module->super.ft_event        = NULL;
-        han_module->super.coll_allgather  = NULL;
-        han_module->super.coll_allgatherv = NULL;
-        han_module->super.coll_allreduce  = NULL;
+        han_module->super.coll_allgather  = mca_coll_han_allgather_intra_dynamic;
+        han_module->super.coll_allgatherv = mca_coll_han_allgatherv_intra_dynamic;
+        han_module->super.coll_allreduce  = mca_coll_han_allreduce_intra_dynamic;
         han_module->super.coll_alltoall   = NULL;
         han_module->super.coll_alltoallv  = NULL;
         han_module->super.coll_alltoallw  = NULL;
         han_module->super.coll_barrier    = NULL;
         han_module->super.coll_bcast      = mca_coll_han_bcast_intra_dynamic;
         han_module->super.coll_exscan     = NULL;
-        han_module->super.coll_gather     = NULL;
+        han_module->super.coll_gather     = mca_coll_han_gather_intra_dynamic;
         han_module->super.coll_gatherv    = NULL;
-        han_module->super.coll_reduce     = NULL;
+        han_module->super.coll_reduce     = mca_coll_han_reduce_intra_dynamic;
         han_module->super.coll_reduce_scatter = NULL;
         han_module->super.coll_scan       = NULL;
-        han_module->super.coll_scatter    = NULL;
+        han_module->super.coll_scatter    = mca_coll_han_scatter_intra_dynamic;
         han_module->super.coll_scatterv   = NULL;
     }
 
@@ -273,20 +267,25 @@ mca_coll_han_comm_query(struct ompi_communicator_t * comm, int *priority)
 /*
  * Init module on the communicator
  */
-static int han_module_enable(mca_coll_base_module_t * module, struct ompi_communicator_t *comm)
+static int han_module_enable(mca_coll_base_module_t * module,
+                             struct ompi_communicator_t *comm)
 {
     mca_coll_han_module_t * han_module = (mca_coll_han_module_t*) module;
 
     HAN_SAVE_PREV_COLL_API(allgather);
+    HAN_SAVE_PREV_COLL_API(allgatherv);
     HAN_SAVE_PREV_COLL_API(allreduce);
     HAN_SAVE_PREV_COLL_API(bcast);
     HAN_SAVE_PREV_COLL_API(gather);
     HAN_SAVE_PREV_COLL_API(reduce);
     HAN_SAVE_PREV_COLL_API(scatter);
 
+    /* set reproducible algos */
+    mca_coll_han_reduce_reproducible_decision(comm, module);
+    mca_coll_han_allreduce_reproducible_decision(comm, module);
+
     return OMPI_SUCCESS;
 }
-
 
 /*
  * Module disable
@@ -297,6 +296,7 @@ static int mca_coll_han_module_disable(mca_coll_base_module_t * module,
     mca_coll_han_module_t * han_module = (mca_coll_han_module_t *) module;
 
     OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allgather_module);
+    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allgatherv_module);
     OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allreduce_module);
     OBJ_RELEASE_IF_NOT_NULL(han_module->previous_bcast_module);
     OBJ_RELEASE_IF_NOT_NULL(han_module->previous_gather_module);

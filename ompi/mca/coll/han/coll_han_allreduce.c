@@ -422,7 +422,6 @@ mca_coll_han_allreduce_intra_simple(const void *sbuf,
     int ret;
     mca_coll_han_component_t *cs = &mca_coll_han_component;
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
-    void *sav_rbuf = rbuf;
 
     OPAL_OUTPUT_VERBOSE((10, cs->han_output,
                     "[OMPI][han] in mca_coll_han_reduce_intra_simple\n"));
@@ -435,12 +434,10 @@ mca_coll_han_allreduce_intra_simple(const void *sbuf,
         goto prev_allreduce;
     }
 
-    mca_coll_han_comm_create(comm, han_module);
+    mca_coll_han_comm_create_new(comm, han_module);
 
-    /* TODO: check if possible to used reduce low_comm and allreduce up comm,
-     * and to end by bcast low comm: if they are compatible */
-    low_comm = han_module->cached_low_comms[cs->han_allreduce_low_module];
-    up_comm = han_module->cached_up_comms[cs->han_allreduce_up_module];
+    low_comm = han_module->sub_comm[INTRA_NODE];
+    up_comm = han_module->sub_comm[INTER_NODE];
     low_rank = ompi_comm_rank(low_comm);
 
     /* Low_comm reduce */
@@ -485,5 +482,68 @@ mca_coll_han_allreduce_intra_simple(const void *sbuf,
 
 prev_allreduce:
     return han_module->previous_allreduce(sbuf, rbuf, count, dtype, op, comm,
-                                             han_module->previous_allreduce_module);
+                                          han_module->previous_allreduce_module);
+}
+
+/* Find a fallback on reproducible algorithm
+ * use tuned, or if impossible whatever available
+ */
+int
+mca_coll_han_allreduce_reproducible_decision(struct ompi_communicator_t *comm,
+                                             mca_coll_base_module_t *module)
+{
+    int w_rank = ompi_comm_rank(comm);
+    mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
+
+    /* populate previous modules_storage*/
+    mca_coll_han_get_all_coll_modules(comm, han_module);
+
+    /* try availability of reproducible modules*/
+    int fallbacks[] = {TUNED, BASIC};
+    int fallbacks_len = sizeof(fallbacks) / sizeof(*fallbacks);
+    int i;
+    for (i=0; i<fallbacks_len; i++) {
+        int fallback = fallbacks[i];
+        mca_coll_base_module_t *fallback_module = han_module->modules_storage
+            .modules[fallback]
+            .module_handler;
+        if (NULL != fallback_module && NULL != fallback_module->coll_allreduce) {
+            if (0 == w_rank) {
+                opal_output_verbose(30, mca_coll_han_component.han_output,
+                                    "coll:han:allreduce_reproducible: "
+                                    "fallback on %s\n",
+                                    components_name[fallback]);
+            }
+            han_module->reproducible_allreduce_module = fallback_module;
+            han_module->reproducible_allreduce = fallback_module->coll_allreduce;
+            return OMPI_SUCCESS;
+        }
+    }
+    /* fallback of the fallback */
+    if (0 == w_rank) {
+        opal_output_verbose(5, mca_coll_han_component.han_output,
+                            "coll:han:allreduce_reproducible_decision: "
+                            "no reproducible fallback\n");
+    }
+    han_module->reproducible_allreduce_module =
+        han_module->previous_allreduce_module;
+    han_module->reproducible_allreduce = han_module->previous_allreduce;
+    return OMPI_SUCCESS;
+}
+
+/* Fallback on reproducible algorithm */
+int
+mca_coll_han_allreduce_reproducible(const void *sbuf,
+                                    void *rbuf,
+                                     int count,
+                                     struct ompi_datatype_t *dtype,
+                                     struct ompi_op_t *op,
+                                     struct ompi_communicator_t *comm,
+                                     mca_coll_base_module_t *module)
+{
+    mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
+    return han_module->reproducible_allreduce(sbuf, rbuf, count, dtype,
+                                              op, comm,
+                                              han_module
+                                              ->reproducible_allreduce_module);
 }
