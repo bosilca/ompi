@@ -90,19 +90,6 @@ mca_coll_han_component_t mca_coll_han_component = {
  */
 static int han_open(void)
 {
-#if OMPI_MCA_COLL_HAN_AUTO_TUNE
-    if( mca_coll_han_component.han_auto_tune &&
-        (NULL != mca_coll_han_component.han_auto_tune_filename) ) {
-        mca_coll_han_component.han_auto_tuned =
-            (selection *) malloc(2 * mca_coll_han_component.han_auto_tune_n * mca_coll_han_component.han_auto_tune_c *
-                                 mca_coll_han_component.han_auto_tune_m * sizeof(selection));
-        FILE *file = fopen(mca_coll_han_component.han_auto_tune_filename, "r");
-        fread(mca_coll_han_component.han_auto_tuned, sizeof(selection),
-              2 * mca_coll_han_component.han_auto_tune_n * mca_coll_han_component.han_auto_tune_c * mca_coll_han_component.han_auto_tune_m, file);
-        fclose(file);
-    }
-#endif  /* OMPI_MCA_COLL_HAN_AUTO_TUNE */
-
     /* Get the global coll verbosity: it will be ours */
     mca_coll_han_component.han_output = ompi_coll_base_framework.framework_output;
 
@@ -116,12 +103,6 @@ static int han_open(void)
  */
 static int han_close(void)
 {
-#if OMPI_MCA_COLL_HAN_AUTO_TUNE
-    if( NULL != mca_coll_han_component.han_auto_tuned ) {
-        free(mca_coll_han_component.han_auto_tuned);
-        mca_coll_han_component.han_auto_tuned = NULL;
-    }
-#endif  /* OMPI_MCA_COLL_HAN_AUTO_TUNE */
     mca_coll_han_free_dynamic_rules();
     return OMPI_SUCCESS;
 }
@@ -413,44 +394,6 @@ static int han_register(void)
                                             &(cs->mca_rules[coll][topo_lvl]));
         }
     }
-
-#if OMPI_MCA_COLL_HAN_AUTO_TUNE
-    cs->han_auto_tune = 0;
-    (void) mca_base_component_var_register(c, "auto_tune",
-                                           "whether enable auto tune, 0 disable, 1 enable, default 0",
-                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
-                                           OPAL_INFO_LVL_9,
-                                           MCA_BASE_VAR_SCOPE_READONLY, &cs->han_auto_tune);
-
-    cs->han_auto_tune_n = 5;
-    (void) mca_base_component_var_register(c, "auto_tune_n",
-                                           "auto tune n",
-                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
-                                           OPAL_INFO_LVL_9,
-                                           MCA_BASE_VAR_SCOPE_READONLY, &cs->han_auto_tune_n);
-
-    cs->han_auto_tune_c = 3;
-    (void) mca_base_component_var_register(c, "auto_tune_c",
-                                           "auto tune c",
-                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
-                                           OPAL_INFO_LVL_9,
-                                           MCA_BASE_VAR_SCOPE_READONLY, &cs->han_auto_tune_c);
-
-    cs->han_auto_tune_m = 21;
-    (void) mca_base_component_var_register(c, "auto_tune_m",
-                                           "auto tune n",
-                                           MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
-                                           OPAL_INFO_LVL_9,
-                                           MCA_BASE_VAR_SCOPE_READONLY,
-                                           &cs->han_auto_tune_m);
-    cs->han_auto_tune_filename = NULL;
-    (void) mca_base_component_var_register(c, "auto_tune_file",
-                                           "Autotuning file name",
-                                           MCA_BASE_VAR_TYPE_STRING, NULL, 0, 0,
-                                           OPAL_INFO_LVL_9,
-                                           MCA_BASE_VAR_SCOPE_READONLY,
-                                           &cs->han_auto_tune_filename);
-#endif  /* OMPI_MCA_COLL_HAN_AUTO_TUNE */
 
     /* Dynamic rules */
     cs->use_dynamic_file_rules = false;

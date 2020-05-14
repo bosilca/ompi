@@ -24,11 +24,6 @@
 
 BEGIN_C_DECLS
 
-/**
- * Auto-tuning is disabled for now.
- */
-#define OMPI_MCA_COLL_HAN_AUTO_TUNE 0
-
 /*
  * Today;
  * . only 2 modules available for intranode (low) level
@@ -37,14 +32,6 @@ BEGIN_C_DECLS
 
 #define COLL_HAN_LOW_MODULES 2
 #define COLL_HAN_UP_MODULES 2
-
-typedef struct {
-    uint32_t umod;
-    uint32_t lmod;
-    uint32_t fs;
-    uint32_t ualg;
-    uint32_t us;
-} selection;
 
 struct mca_bcast_argu_s {
     mca_coll_task_t *cur_task;
@@ -212,20 +199,6 @@ typedef struct mca_coll_han_component_t {
      * (but disables topological optimisations)
      */
     uint32_t han_reproducible;
-#if OMPI_MCA_COLL_HAN_AUTO_TUNE
-    /* whether enable auto tune */
-    uint32_t han_auto_tune;
-    /* create a 3D array
-     * num_processes (n): 2 4 8 16 32 64 (6)
-     * num_core (c): 2 4 8 12 (4)
-     * message size (m): 1 - 4194304 (23)
-     */
-    uint32_t   han_auto_tune_n;
-    uint32_t   han_auto_tune_c;
-    uint32_t   han_auto_tune_m;
-    char*      han_auto_tune_filename;
-    selection* han_auto_tuned;
-#endif  /* OMPI_MCA_COLL_HAN_AUTO_TUNE */
     bool use_simple_algorithm[COLLCOUNT];
 
     /* Dynamic configuration rules */
@@ -350,9 +323,6 @@ int *mca_coll_han_topo_init(struct ompi_communicator_t *comm, mca_coll_han_modul
 /* Utils */
 void mca_coll_han_get_ranks(int *vranks, int root, int low_size, int *root_low_rank,
                             int *root_up_rank);
-uint32_t han_auto_tuned_get_n(uint32_t n);
-uint32_t han_auto_tuned_get_c(uint32_t c);
-uint32_t han_auto_tuned_get_m(uint32_t m);
 
 const char* mca_coll_han_colltype_to_str(COLLTYPE_T coll);
 const char* mca_coll_han_topo_lvl_to_str(TOPO_LVL_T topo_lvl);
