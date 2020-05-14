@@ -286,7 +286,7 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, int scount,
         ptrdiff_t rsize, rgap = 0;
         /* Compute the size to receive all the local data, including datatypes empty gaps */
         rsize = opal_datatype_span(&rdtype->super, (int64_t)rcount * low_size, &rgap);
-        // intermediary buffer on node leaders to gather on low comm
+        /* intermediary buffer on node leaders to gather on low comm */
         tmp_buf = (char *) malloc(rsize);
         tmp_buf_start = tmp_buf - rgap;
     }
@@ -298,9 +298,10 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, int scount,
     /* 2. allgather between node leaders, from tmp_buf to reorder_buf */
     if (low_rank == root_low_rank) {
         /* allocate buffer to store unordered result on node leaders
- *          * if the processes are mapped-by core, no need to reorder:
- *                   * distribution of ranks on core first and node next,
- *                            * in a increasing order for both patterns */
+         * if the processes are mapped-by core, no need to reorder:
+         * distribution of ranks on core first and node next,
+         * in a increasing order for both patterns.
+         */
         char *reorder_buf = NULL;
         char *reorder_buf_start = NULL;
         if (han_module->is_mapbycore) {
@@ -308,7 +309,7 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, int scount,
         } else {
             if (0 == low_rank && 0 == up_rank) { // first rank displays message
                 OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                                "[%d]: Future Allgather needs reordering: ", w_rank));
+                                "[%d]: Future Allgather needs reordering: ", up_rank));
             }
             ptrdiff_t rsize, rgap = 0;
             rsize = opal_datatype_span(&rdtype->super, (int64_t)rcount * low_size * up_size, &rgap);

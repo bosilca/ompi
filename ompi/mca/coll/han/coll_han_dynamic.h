@@ -107,14 +107,7 @@ typedef enum COMPONENTS {
     COMPONENTS_COUNT
 } COMPONENT_T;
 
-static const char *components_name[]={"self",
-                                      "basic",
-                                      "libnbc",
-                                      "tuned",
-                                      "sm",
-                                      "shared",
-                                      "adapt",
-                                      "han"};
+extern const char *components_name[COMPONENTS_COUNT];
 
 /* Topologic levels */
 typedef enum TOPO_LVL {

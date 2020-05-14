@@ -103,6 +103,7 @@ mca_coll_han_allreduce_intra(const void *sbuf,
     mca_coll_han_comm_create(comm, han_module);
     ompi_communicator_t *low_comm;
     ompi_communicator_t *up_comm;
+#if OMPI_MCA_COLL_HAN_AUTO_TUNE
     /* Auto tune is enabled */
     if (mca_coll_han_component.han_auto_tune && mca_coll_han_component.han_auto_tuned != NULL) {
         uint32_t n = han_auto_tuned_get_n(ompi_comm_size(han_module->cached_up_comms[0]));
@@ -140,12 +141,14 @@ mca_coll_han_allreduce_intra(const void *sbuf,
                 adapt_ibcast_segment_size = us;
         }
         */
-    } else {
-        low_comm = han_module->cached_low_comms[mca_coll_han_component.han_bcast_low_module];
-        up_comm = han_module->cached_up_comms[mca_coll_han_component.han_bcast_up_module];
-        COLL_BASE_COMPUTED_SEGCOUNT(mca_coll_han_component.han_allreduce_segsize, typelng,
-                                    seg_count);
-    }
+    } else
+#endif  /* OMPI_MCA_COLL_HAN_AUTO_TUNE */
+        {
+            low_comm = han_module->cached_low_comms[mca_coll_han_component.han_bcast_low_module];
+            up_comm = han_module->cached_up_comms[mca_coll_han_component.han_bcast_up_module];
+            COLL_BASE_COMPUTED_SEGCOUNT(mca_coll_han_component.han_allreduce_segsize, typelng,
+                                        seg_count);
+        }
 
     /* Determine number of elements sent per task. */
     OPAL_OUTPUT_VERBOSE((10, mca_coll_han_component.han_output,

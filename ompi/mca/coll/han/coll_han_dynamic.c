@@ -300,7 +300,7 @@ get_dynamic_rule(COLLTYPE_T collective,
  * for a msg_size sized message on the comm communicator
  * following the dynamic rules
  */
-mca_coll_base_module_t *
+static mca_coll_base_module_t*
 get_module(COLLTYPE_T coll_id,
            int msg_size,
            struct ompi_communicator_t *comm,

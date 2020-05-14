@@ -338,7 +338,7 @@ mca_coll_han_gather_intra_simple(const void *sbuf, int scount,
     }
 
     /* allocate the intermediary buffer
- *      * to gather on leaders on the low sub communicator */
+     * to gather on leaders on the low sub communicator */
     char *tmp_buf = NULL; // allocated memory
     char *tmp_buf_start = NULL; // start of the data
     if (low_rank == root_low_rank) {
@@ -379,7 +379,7 @@ mca_coll_han_gather_intra_simple(const void *sbuf, int scount,
             tmp_buf_start = NULL;
         }
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                        "[%d] Future Gather:  ug gather finish\n", t->w_rank));
+                        "[%d] Future Gather:  ug gather finish\n", w_rank));
     }
 
     /* 3. reorder data on root into rbuf
@@ -388,8 +388,8 @@ mca_coll_han_gather_intra_simple(const void *sbuf, int scount,
      */
     if (w_rank == root && !han_module->is_mapbycore) {
         ompi_coll_han_reorder_gather(reorder_buf_start,
-                                       rbuf, rcount, rdtype,
-                                       comm, topo);
+                                     rbuf, rcount, rdtype,
+                                     comm, topo);
         free(reorder_buf);
     }
 
