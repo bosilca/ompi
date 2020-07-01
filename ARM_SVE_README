@@ -1,0 +1,30 @@
+Configuration and installation details please check script arm_install.sh
+
+Run test: (Test example takes 4 args)
+arg1 :  elements count for operation
+arg2 :  elements type could be : i (integer), f (float), d (double) 
+arg3:   type size in bits, only apply when you set arg2 to i.  eg: i 8 will be converted to int8;  i 16 to int16
+arg4:   operation type. Could be : max, min, sum , mul, band , bor,  bxor
+If you want to use SVE module for MPI ops, you need to pass mca params as : -mca op sve -mca op_sve_hardware_available 1
+=======
+Example for test
+$PATH_To_BIN/mpirun -mca op sve -mca op_sve_hardware_available 1 -mca pml ob1  -np 1  armie -msve-vector-bits=256 --iclient libinscount_emulated.so  --unsafe-ldstex   --  /ccsopen/home/dzhong/Downloads/github/intel_to_arm/ompi/test/datatype/Reduce_local_float 33 i 8 min 
+
+If you don't need armie you can remove the ARMIE part in the command line as : 
+$PATH_To_BIN//mpirun -mca op sve -mca op_sve_hardware_available 1 -mca pml ob1  -np 1 /ompi/test/datatype/Reduce_local_float 33 i 8 min 
+
+How we evaluate the performance?
+======
+Logical:
+
+Start_time;
+MPI_reduce_local(...);
+End_time;
+
+Reduce_time = Start_time - End_time;
+
+Possible issues (this happened on thunder2 machine):
+======
+Reason for "-mca pml ob1" : on Arm machine the default pml module will cause a problem with armie (instruction not supported, I don't know why), but with ob1 it works.
+
+
