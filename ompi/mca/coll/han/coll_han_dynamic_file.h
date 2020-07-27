@@ -63,10 +63,9 @@
  *           communicator and the corresponding level for sub-communicators
  *           created by han.
  *     - Configuration size:
- *           The configuration size is the number of elements of the actual
- *           topology level in the upper topology level. For example, if
- *           topology levels are intra-node and inter-node, it can be the
- *           number of MPI ranks per node or the number of nodes in the global
+ *           The configuration size is the number of elements in a topology level. 
+ *           For example, if topology levels are intra-node and inter-node, it can
+ *           be the number of MPI ranks per node or the number of nodes in the global
  *           communicator. For the GLOBAL_COMMUNICATOR topologic level,
  *           the configuration size is the communicator size.
  *     - Message_size Component:

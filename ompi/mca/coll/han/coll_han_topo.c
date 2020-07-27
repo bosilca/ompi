@@ -340,7 +340,7 @@ mca_coll_han_topo_print(int *topo,
     int size = ompi_comm_size(comm);
 
     if (rank == 0) {
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output, "[%d]: Han Scatter topo: ", rank));
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output, "[%d]: Han topo: ", rank));
         for( int i = 0; i < size*num_topo_level; i++ ) {
             OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output, "%d ", topo[i]));
         }

@@ -12,18 +12,10 @@
 #ifndef MCA_COLL_HAN_TRIGGER_EXPORT_H
 #define MCA_COLL_HAN_TRIGGER_EXPORT_H
 
-#include "ompi_config.h"
-#include "mpi.h"
-#include "ompi/mca/mca.h"
-#include "ompi/mca/coll/coll.h"
 #include "ompi/communicator/communicator.h"
-#include "ompi/win/win.h"
-#include "ompi/mca/coll/base/coll_base_functions.h"
-#include "opal/util/info.h"
 #include "ompi/op/op.h"
-#include "opal/runtime/opal_progress.h"
-#include "ompi/mca/pml/pml.h"
-#include "ompi/mca/coll/base/coll_tags.h"
+#include "ompi/datatype/ompi_datatype.h"
+
 
 typedef int (*task_func_ptr) (void *);
 
