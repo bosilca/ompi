@@ -108,22 +108,49 @@ int mca_coll_han_allgather_lg_task(void *task_args)
 {
     mca_coll_han_allgather_t *t = (mca_coll_han_allgather_t *) task_args;
     char *tmp_buf = NULL, *tmp_rbuf = NULL;
-
+    char *tmp_send = NULL;
+    
     OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output, "[%d] HAN Allgather:  lg\n",
                          t->w_rank));
 
     /* If the process is one of the node leader */
+    ptrdiff_t rlb, rext;
+    ompi_datatype_get_extent (t->rdtype, &rlb, &rext);
+    if (MPI_IN_PLACE == t->sbuf) {
+        t->sdtype = t->rdtype;
+        t->scount = t->rcount;
+    }
     if (!t->noop) {
         int low_size = ompi_comm_size(t->low_comm);
         ptrdiff_t rsize, rgap = 0;
         rsize = opal_datatype_span(&t->rdtype->super, (int64_t) t->rcount * low_size, &rgap);
         tmp_buf = (char *) malloc(rsize);
         tmp_rbuf = tmp_buf - rgap;
+        if (MPI_IN_PLACE == t->sbuf) {
+            tmp_send = ((char*)t->rbuf) + (ptrdiff_t)t->w_rank * (ptrdiff_t)t->rcount * rext;
+            ompi_datatype_copy_content_same_ddt(t->rdtype, t->rcount, tmp_rbuf, tmp_send);
+        }
     }
     /* Lower level (shared memory or intra-node) gather */
-    t->low_comm->c_coll->coll_gather((char *) t->sbuf, t->scount, t->sdtype, tmp_rbuf, t->rcount,
-                                     t->rdtype, t->root_low_rank, t->low_comm,
-                                     t->low_comm->c_coll->coll_gather_module);
+    if (MPI_IN_PLACE == t->sbuf) {
+        if (!t->noop) {
+            t->low_comm->c_coll->coll_gather(MPI_IN_PLACE, t->scount, t->sdtype, 
+                                             tmp_rbuf, t->rcount, t->rdtype, t->root_low_rank, 
+                                             t->low_comm, t->low_comm->c_coll->coll_gather_module);
+        }
+        else {
+            tmp_send = ((char*)t->rbuf) + (ptrdiff_t)t->w_rank * (ptrdiff_t)t->rcount * rext;
+            t->low_comm->c_coll->coll_gather(tmp_send, t->rcount, t->rdtype, 
+                                             NULL, t->rcount, t->rdtype, t->root_low_rank, 
+                                             t->low_comm, t->low_comm->c_coll->coll_gather_module);
+        }
+    }
+    else {
+        t->low_comm->c_coll->coll_gather((char *) t->sbuf, t->scount, t->sdtype, tmp_rbuf, t->rcount,
+                                         t->rdtype, t->root_low_rank, t->low_comm,
+                                         t->low_comm->c_coll->coll_gather_module);
+    }
+    
     t->sbuf = tmp_rbuf;
     t->sbuf_inter_free = tmp_buf;
 
@@ -260,6 +287,7 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, int scount,
                                               comm, han_module->previous_allgather_module);
     }
 
+    int w_rank = ompi_comm_rank(comm);
     /* setup up/low coordinates */
     int low_rank = ompi_comm_rank(low_comm);
     int low_size = ompi_comm_size(low_comm);
@@ -269,8 +297,15 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, int scount,
 
     /* allocate the intermediary buffer
      * to gather on leaders on the low sub communicator */
+    ptrdiff_t rlb, rext;
+    ompi_datatype_get_extent (rdtype, &rlb, &rext);
     char *tmp_buf = NULL;
     char *tmp_buf_start = NULL;
+    char *tmp_send = NULL;
+    if (MPI_IN_PLACE == sbuf) {
+        scount = rcount;
+        sdtype = rdtype;
+    }
     if (low_rank == root_low_rank) {
         ptrdiff_t rsize, rgap = 0;
         /* Compute the size to receive all the local data, including datatypes empty gaps */
@@ -278,12 +313,32 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, int scount,
         /* intermediary buffer on node leaders to gather on low comm */
         tmp_buf = (char *) malloc(rsize);
         tmp_buf_start = tmp_buf - rgap;
+        if (MPI_IN_PLACE == sbuf) {
+            tmp_send = ((char*)rbuf) + (ptrdiff_t)w_rank * (ptrdiff_t)rcount * rext;
+            ompi_datatype_copy_content_same_ddt(rdtype, rcount, tmp_buf_start, tmp_send);
+        }
     }
+    
 
     /* 1. low gather on node leaders into tmp_buf */
-    low_comm->c_coll->coll_gather((char *)sbuf, scount, sdtype,
-                                  tmp_buf_start, rcount, rdtype, root_low_rank,
-                                  low_comm, low_comm->c_coll->coll_gather_module);
+    if (MPI_IN_PLACE == sbuf) {
+        if (low_rank == root_low_rank) {
+            low_comm->c_coll->coll_gather(MPI_IN_PLACE, scount, sdtype,
+                                          tmp_buf_start, rcount, rdtype, root_low_rank,
+                                          low_comm, low_comm->c_coll->coll_gather_module);
+        }
+        else {
+            tmp_send = ((char*)rbuf) + (ptrdiff_t)w_rank * (ptrdiff_t)rcount * rext;
+            low_comm->c_coll->coll_gather(tmp_send, rcount, rdtype,
+                                          NULL, rcount, rdtype, root_low_rank,
+                                          low_comm, low_comm->c_coll->coll_gather_module);
+        }
+    }
+    else {
+        low_comm->c_coll->coll_gather((char *)sbuf, scount, sdtype,
+                                      tmp_buf_start, rcount, rdtype, root_low_rank,
+                                      low_comm, low_comm->c_coll->coll_gather_module);
+    }
     /* 2. allgather between node leaders, from tmp_buf to reorder_buf */
     if (low_rank == root_low_rank) {
         /* allocate buffer to store unordered result on node leaders

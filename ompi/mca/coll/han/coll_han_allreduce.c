@@ -194,9 +194,23 @@ int mca_coll_han_allreduce_t0_task(void *task_args)
     OBJ_RELEASE(t->cur_task);
     ptrdiff_t extent, lb;
     ompi_datatype_get_extent(t->dtype, &lb, &extent);
-    t->low_comm->c_coll->coll_reduce((char *) t->sbuf, (char *) t->rbuf, t->seg_count, t->dtype,
-                                     t->op, t->root_low_rank, t->low_comm,
-                                     t->low_comm->c_coll->coll_reduce_module);
+    if (MPI_IN_PLACE == t->sbuf) {
+        if (!t->noop) {
+            t->low_comm->c_coll->coll_reduce(MPI_IN_PLACE, (char *) t->rbuf, t->seg_count, t->dtype,
+                                             t->op, t->root_low_rank, t->low_comm,
+                                             t->low_comm->c_coll->coll_reduce_module);
+        }
+        else {
+            t->low_comm->c_coll->coll_reduce((char *) t->rbuf, NULL, t->seg_count, t->dtype,
+                                             t->op, t->root_low_rank, t->low_comm,
+                                             t->low_comm->c_coll->coll_reduce_module);
+        }
+    }
+    else {
+        t->low_comm->c_coll->coll_reduce((char *) t->sbuf, (char *) t->rbuf, t->seg_count, t->dtype,
+                                         t->op, t->root_low_rank, t->low_comm,
+                                         t->low_comm->c_coll->coll_reduce_module);
+    }
     return OMPI_SUCCESS;
 }
 
@@ -408,9 +422,23 @@ mca_coll_han_allreduce_intra_simple(const void *sbuf,
     low_rank = ompi_comm_rank(low_comm);
 
     /* Low_comm reduce */
-    ret = low_comm->c_coll->coll_reduce((char *)sbuf, (char *)rbuf,
+    if (MPI_IN_PLACE == sbuf) {
+        if (low_rank == root_low_rank) {
+            ret = low_comm->c_coll->coll_reduce(MPI_IN_PLACE, (char *)rbuf,
                 count, dtype, op, root_low_rank,
                 low_comm, low_comm->c_coll->coll_reduce_module);
+        }
+        else {
+            ret = low_comm->c_coll->coll_reduce((char *)rbuf, NULL,
+                count, dtype, op, root_low_rank,
+                low_comm, low_comm->c_coll->coll_reduce_module);
+        }
+    }
+    else {
+        ret = low_comm->c_coll->coll_reduce((char *)sbuf, (char *)rbuf,
+                count, dtype, op, root_low_rank,
+                low_comm, low_comm->c_coll->coll_reduce_module);
+    }
     if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
         OPAL_OUTPUT_VERBOSE((30, cs->han_output,
                              "HAN/ALLREDUCE: low comm reduce failed. "
