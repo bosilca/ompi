@@ -73,10 +73,43 @@ typedef struct mca_coll_adapt_component_t {
 
 } mca_coll_adapt_component_t;
 
+/*
+ * Structure used to store what is necessary for the collective operations
+ * routines in case of fallback.
+ */
+typedef struct mca_coll_adapt_collective_fallback_s {
+    union {
+        mca_coll_base_module_reduce_fn_t   reduce;
+        mca_coll_base_module_ireduce_fn_t ireduce;
+    } previous_routine;
+    mca_coll_base_module_t *previous_module;
+} mca_coll_adapt_collective_fallback_t;
+
+
+typedef enum mca_coll_adapt_colltype {
+    ADAPT_REDUCE  = 0,
+    ADAPT_IREDUCE = 1,
+    ADAPT_COLLCOUNT
+} mca_coll_adapt_colltype_t;
+
+/*
+ * Some defines to stick to the naming used in the other components in terms of
+ * fallback routines
+ */
+#define previous_reduce     previous_routines[ADAPT_REDUCE].previous_routine.reduce
+#define previous_ireduce    previous_routines[ADAPT_IREDUCE].previous_routine.ireduce
+
+#define previous_reduce_module     previous_routines[ADAPT_REDUCE].previous_module
+#define previous_ireduce_module    previous_routines[ADAPT_IREDUCE].previous_module
+
+
 /* Coll adapt module per communicator*/
 struct mca_coll_adapt_module_t {
     /* Base module */
     mca_coll_base_module_t super;
+
+    /* To be able to fallback when the cases are not supported */
+    struct mca_coll_adapt_collective_fallback_s previous_routines[ADAPT_COLLCOUNT];
 
     /* Whether this module has been lazily initialized or not yet */
     bool adapt_enabled;

@@ -70,11 +70,36 @@ OBJ_CLASS_INSTANCE(mca_coll_adapt_module_t,
             adapt_module_destruct);
 
 /*
+ * In this macro, the following variables are supposed to have been declared
+ * in the caller:
+ * . ompi_communicator_t *comm
+ * . mca_coll_adapt_module_t *adapt_module
+ */
+#define ADAPT_SAVE_PREV_COLL_API(__api)                                 \
+    do {                                                                \
+        adapt_module->previous_ ## __api            = comm->c_coll->coll_ ## __api; \
+        adapt_module->previous_ ## __api ## _module = comm->c_coll->coll_ ## __api ## _module; \
+        if (!comm->c_coll->coll_ ## __api || !comm->c_coll->coll_ ## __api ## _module) { \
+            opal_output_verbose(1, ompi_coll_base_framework.framework_output, \
+                                "(%d/%s): no underlying " # __api"; disqualifying myself", \
+                                comm->c_contextid, comm->c_name); \
+            return OMPI_ERROR;                                  \
+        }                                                       \
+        OBJ_RETAIN(adapt_module->previous_ ## __api ## _module);  \
+    } while(0)
+
+
+/*
  * Init module on the communicator
  */
 static int adapt_module_enable(mca_coll_base_module_t * module,
             struct ompi_communicator_t *comm)
 {
+    mca_coll_adapt_module_t * adapt_module = (mca_coll_adapt_module_t*) module;
+
+    ADAPT_SAVE_PREV_COLL_API(reduce);
+    ADAPT_SAVE_PREV_COLL_API(ireduce);
+
     return OMPI_SUCCESS;
 }
 
