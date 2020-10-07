@@ -66,33 +66,38 @@ mca_coll_han_reduce_intra(const void *sbuf,
                           struct ompi_communicator_t *comm,
                           mca_coll_base_module_t * module)
 {
-    ptrdiff_t extent, lb;
-    ompi_datatype_get_extent(dtype, &lb, &extent);
-    int w_rank;
-    w_rank = ompi_comm_rank(comm);
-    int seg_count = count;
-    size_t dtype_size;
-    ompi_datatype_type_size(dtype, &dtype_size);
-
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
-    /* Do not initialize topology if the operation cannot commute */
-    if(!ompi_op_is_commute(op)){
+    ptrdiff_t extent, lb;
+    int seg_count = count, w_rank;
+    size_t dtype_size;
+
+    /* No support for non-commutative operations */
+    if(!ompi_op_is_commute(op)) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                    "han cannot handle reduce with this operation. It needs to fall back on another component\n"));
+                             "han cannot handle reduce with this operation. Fall back on another component\n"));
         goto prev_reduce_intra;
+    }
+
+    /* Create the subcommunicators */
+    if( OMPI_SUCCESS != mca_coll_han_comm_create(comm, han_module) ) {
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                             "han cannot handle reduce with this communicator. Drop HAN support in this communicator and fall back on another component\n"));
+        goto remove_collective_module;
     }
 
     /* Topo must be initialized to know rank distribution which then is used to
      * determine if han can be used */
     mca_coll_han_topo_init(comm, han_module, 2);
-    if (han_module->are_ppn_imbalanced){
+    if (han_module->are_ppn_imbalanced) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                    "han cannot handle reduce with this communicator. It needs to fall back on another component\n"));
-        goto prev_reduce_intra;
+                             "han cannot handle reduce with this communicator (imbalanced). Drop HAN support in this communicator and fall back on another component\n"));
+        goto remove_collective_module;
     }
 
-    /* Create the subcommunicators */
-    mca_coll_han_comm_create(comm, han_module);
+    ompi_datatype_get_extent(dtype, &lb, &extent);
+    w_rank = ompi_comm_rank(comm);
+    ompi_datatype_type_size(dtype, &dtype_size);
+
     ompi_communicator_t *low_comm;
     ompi_communicator_t *up_comm;
 
@@ -155,10 +160,19 @@ mca_coll_han_reduce_intra(const void *sbuf,
 
     return OMPI_SUCCESS;
 
-prev_reduce_intra:
+ prev_reduce_intra:
     return han_module->previous_reduce(sbuf, rbuf, count, dtype, op, root,
                                        comm,
                                        han_module->previous_reduce_module);
+
+ remove_collective_module:
+    /* Put back the fallback collective support and call it once. All
+     * future calls will then be automatically redirected.
+     */
+    comm->c_coll->coll_reduce = han_module->fallback.reduce.reduce;
+    comm->c_coll->coll_reduce_module = han_module->fallback.reduce.module;
+    return comm->c_coll->coll_reduce(sbuf, rbuf, count, dtype, op, root,
+                                     comm, comm->c_coll->coll_reduce_module);
 }
 
 /* t0 task: issue and wait for the low level reduce of segment 0 */
@@ -221,13 +235,13 @@ int mca_coll_han_reduce_t1_task(void *task_args) {
  * a fallback is made on the next component that provides a reduce in priority order */
 int
 mca_coll_han_reduce_intra_simple(const void *sbuf,
-                                     void* rbuf,
-                                     int count,
-                                     struct ompi_datatype_t *dtype,
-                                     ompi_op_t *op,
-                                     int root,
-                                     struct ompi_communicator_t *comm,
-                                     mca_coll_base_module_t *module)
+                                 void* rbuf,
+                                 int count,
+                                 struct ompi_datatype_t *dtype,
+                                 ompi_op_t *op,
+                                 int root,
+                                 struct ompi_communicator_t *comm,
+                                 mca_coll_base_module_t *module)
 {
     int w_rank; /* information about the global communicator */
     int root_low_rank, root_up_rank; /* root ranks for both sub-communicators */
@@ -238,23 +252,29 @@ mca_coll_han_reduce_intra_simple(const void *sbuf,
 
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
 
-    /* Do not initialize topology if the operation cannot commute */
+    /* No support for non-commutative operations */
     if(!ompi_op_is_commute(op)){
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                    "han cannot handle reduce with this operation. It needs to fall back on another component\n"));
-        goto prev_reduce_intra_simple;
+                             "han cannot handle reduce with this operation. Fall back on another component\n"));
+        goto prev_reduce_intra;
+    }
+
+    /* Create the subcommunicators */
+    if( OMPI_SUCCESS != mca_coll_han_comm_create(comm, han_module) ) {
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                             "han cannot handle reduce with this communicator. Drop HAN support in this communicator and fall back on another component\n"));
+        goto remove_collective_module;
     }
 
     /* Topo must be initialized to know rank distribution which then is used to
      * determine if han can be used */
     mca_coll_han_topo_init(comm, han_module, 2);
-    if (han_module->are_ppn_imbalanced){
+    if (han_module->are_ppn_imbalanced) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                    "han cannot handle reduce with this communicator. It needs to fall back on another component\n"));
-        goto prev_reduce_intra_simple;
+                             "han cannot handle reduce with this communicator (imbalanced). Drop HAN support in this communicator and fall back on another component\n"));
+        goto remove_collective_module;
     }
 
-    mca_coll_han_comm_create(comm, han_module);
     ompi_communicator_t *low_comm =
          han_module->cached_low_comms[mca_coll_han_component.han_reduce_low_module];
     ompi_communicator_t *up_comm =
@@ -293,7 +313,7 @@ mca_coll_han_reduce_intra_simple(const void *sbuf,
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                              "HAN/REDUCE: low comm reduce failed. "
                              "Falling back to another component\n"));
-        goto prev_reduce_intra_simple;
+        goto prev_reduce_intra;
     }
 
     /* Up_comm reduce */
@@ -319,10 +339,18 @@ mca_coll_han_reduce_intra_simple(const void *sbuf,
     }
     return OMPI_SUCCESS;
 
-prev_reduce_intra_simple:
+ prev_reduce_intra:
     return han_module->previous_reduce(sbuf, rbuf, count, dtype, op, root,
-                                       comm,
-                                       han_module->previous_reduce_module);
+                                       comm, han_module->previous_reduce_module);
+
+ remove_collective_module:
+    /* Put back the fallback collective support and call it once. All
+     * future calls will then be automatically redirected.
+     */
+    comm->c_coll->coll_reduce = han_module->fallback.reduce.reduce;
+    comm->c_coll->coll_reduce_module = han_module->fallback.reduce.module;
+    return comm->c_coll->coll_reduce(sbuf, rbuf, count, dtype, op, root,
+                                     comm, comm->c_coll->coll_reduce_module);
 }
 
 
@@ -345,9 +373,8 @@ mca_coll_han_reduce_reproducible_decision(struct ompi_communicator_t *comm,
     int i;
     for (i=0; i<fallbacks_len; i++) {
         int fallback = fallbacks[i];
-        mca_coll_base_module_t *fallback_module = han_module->modules_storage
-            .modules[fallback]
-            .module_handler;
+        mca_coll_base_module_t *fallback_module
+            = han_module->modules_storage.modules[fallback].module_handler;
         if (fallback_module != NULL && fallback_module->coll_reduce != NULL) {
             if (0 == w_rank) {
                 opal_output_verbose(30, mca_coll_han_component.han_output,

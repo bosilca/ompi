@@ -117,10 +117,6 @@ mca_coll_han_init_dynamic_rules(void)
         coll_rules[i].nb_topologic_levels = 0;
         mca_coll_han_component.dynamic_rules.nb_collectives = i+1;
 
-        if( NULL != coll_name ) {
-            free(coll_name);
-            coll_name = NULL;
-        }
         /* Get the collective identifier */
         if( getnext_string(fptr, &coll_name) < 0 ) {
             opal_output_verbose(5, mca_coll_han_component.han_output,
@@ -361,24 +357,21 @@ mca_coll_han_init_dynamic_rules(void)
                 }
             }
         }
-    }
-    if( NULL != coll_name ) {
-        free(coll_name);
-        coll_name = NULL;
+        if( NULL != coll_name ) {
+            free(coll_name);
+            coll_name = NULL;
+        }
     }
 
-    if( getnext_long(fptr, &nb_coll) ) {
+    if( getnext_long(fptr, &nb_coll) > 0 ) {
         opal_output_verbose(5, mca_coll_han_component.han_output,
-                            "coll:han:mca_coll_han_init_dynamic_rules "
-                            "Warning on file %s at line %d: "
-                            "rule reading is over but reader does not seem "
-                            "to have reached the end of the file\n",
+                            "coll:han:mca_coll_han_init_dynamic_rules. Warning on file %s at line %d: "
+                            "rule reading is over but reader does not seem to have reached the end of the file\n",
                             fname, fileline);
     }
 
     opal_output_verbose(5, mca_coll_han_component.han_output,
-                        "coll:han:mca_coll_han_init_dynamic_rules "
-                        "read %d rules from %s\n",
+                        "coll:han:mca_coll_han_init_dynamic_rules read %d rules from %s\n",
                         nb_entries, fname);
 
     if(mca_coll_han_component.dump_dynamic_rules) {

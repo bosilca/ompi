@@ -245,13 +245,11 @@ mca_coll_han_topo_are_ppn_imbalanced(int *topo,
                                      int num_topo_level)
 {
     int size = ompi_comm_size(comm);
-    int i;
 
     if (size < 2) {
         return false;
     }
-    int ppn;
-    int last_host = topo[0];
+    int i, ppn, last_host = topo[0];
 
     /* Find the ppn for the first node */
     for (i = 1; i < size; i++) {
@@ -304,44 +302,37 @@ mca_coll_han_topo_init(struct ompi_communicator_t *comm,
                        mca_coll_han_module_t *han_module,
                        int num_topo_level)
 {
-    int size, *topo = han_module->cached_topo;
-
-    size = ompi_comm_size(comm);
-
-    if (!(topo && (han_module->cached_comm == comm))) {
-        if (han_module->cached_topo) {
-            free(han_module->cached_topo);
-            han_module->cached_topo = NULL;
-        }
-
-        topo = (int *)malloc(sizeof(int) * size * num_topo_level);
-
-        /* get topo infomation */
-        mca_coll_han_topo_get(topo, comm, num_topo_level);
-
-        /*
-         * All the ranks now have the topo information
-         */
-
-        /* check if the processes are mapped by core */
-        han_module->is_mapbycore = mca_coll_han_topo_is_mapbycore(topo, comm, num_topo_level);
-
-        /*
-         * If not, sort the topo such that each group of ids is sorted by rank
-         * i.e. ids for rank i are contiguous to ids for rank i+1.
-         * This will be needed for the operations that are order sensitive
-         * (like gather)
-         */
-        if (!han_module->is_mapbycore) {
-            mca_coll_han_topo_sort(topo, 0, size-1, 0, num_topo_level);
-        }
-        han_module->are_ppn_imbalanced = mca_coll_han_topo_are_ppn_imbalanced(topo, comm , num_topo_level);
-        han_module->cached_topo = topo;
-        han_module->cached_comm = comm;
-#if OPAL_ENABLE_DEBUG
-        mca_coll_han_topo_print(topo, comm, num_topo_level);
-#endif  /* OPAL_ENABLE_DEBUG */
+    if ( NULL != han_module->cached_topo ) {
+        return han_module->cached_topo;
     }
+
+    int size = ompi_comm_size(comm);
+    int *topo = (int *)malloc(sizeof(int) * size * num_topo_level);
+
+    /* get topo information */
+    mca_coll_han_topo_get(topo, comm, num_topo_level);
+
+    /*
+     * All the ranks now have the topo information
+     */
+
+    /* check if the processes are mapped by core */
+    han_module->is_mapbycore = mca_coll_han_topo_is_mapbycore(topo, comm, num_topo_level);
+
+    /*
+     * If not, sort the topo such that each group of ids is sorted by rank
+     * i.e. ids for rank i are contiguous to ids for rank i+1.
+     * This will be needed for the operations that are order sensitive
+     * (like gather)
+     */
+    if (!han_module->is_mapbycore) {
+        mca_coll_han_topo_sort(topo, 0, size-1, 0, num_topo_level);
+    }
+    han_module->are_ppn_imbalanced = mca_coll_han_topo_are_ppn_imbalanced(topo, comm, num_topo_level);
+    han_module->cached_topo = topo;
+#if OPAL_ENABLE_DEBUG
+    mca_coll_han_topo_print(topo, comm, num_topo_level);
+#endif  /* OPAL_ENABLE_DEBUG */
 
     return topo;
 }

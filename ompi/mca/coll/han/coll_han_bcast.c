@@ -63,27 +63,41 @@ mca_coll_han_bcast_intra(void *buff,
                          struct ompi_communicator_t *comm, mca_coll_base_module_t * module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
-    int seg_count = count, w_rank = ompi_comm_rank(comm);
+    int err, seg_count = count, w_rank = ompi_comm_rank(comm);
+    ompi_communicator_t *low_comm, *up_comm;
     ptrdiff_t extent, lb;
     size_t dtype_size;
 
+    /* Create the subcommunicators */
+    err = mca_coll_han_comm_create(comm, han_module);
+    if( OMPI_SUCCESS != err ) {  /* Let's hope the error is consistently returned across the entire communicator */
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                             "han cannot handle bcast with this communicator. Fall back on another component\n"));
+        /* Put back the fallback collective support and call it once. All
+         * future calls will then be automatically redirected.
+         */
+        comm->c_coll->coll_bcast = han_module->fallback.bcast.bcast;
+        comm->c_coll->coll_bcast_module = han_module->fallback.bcast.module;
+        return comm->c_coll->coll_bcast(buff, count, dtype, root,
+                                        comm, comm->c_coll->coll_bcast_module);
+    }
     /* Topo must be initialized to know rank distribution which then is used to
      * determine if han can be used */
     mca_coll_han_topo_init(comm, han_module, 2);
-
-    if (han_module->are_ppn_imbalanced){
+    if (han_module->are_ppn_imbalanced) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                             "han cannot handle bcast with this communicator. It need to fall back on another component\n"));
-        return han_module->previous_bcast(buff, count, dtype, root,
-                                          comm, han_module->previous_bcast_module);
+                             "han cannot handle bcast with this communicator (imbalance). Fall back on another component\n"));
+        /* Put back the fallback collective support and call it once. All
+         * future calls will then be automatically redirected.
+         */
+        comm->c_coll->coll_bcast = han_module->fallback.bcast.bcast;
+        comm->c_coll->coll_bcast_module = han_module->fallback.bcast.module;
+        return comm->c_coll->coll_bcast(buff, count, dtype, root,
+                                        comm, comm->c_coll->coll_bcast_module);
     }
 
     ompi_datatype_get_extent(dtype, &lb, &extent);
     ompi_datatype_type_size(dtype, &dtype_size);
-
-    /* Create the subcommunicators */
-    mca_coll_han_comm_create(comm, han_module);
-    ompi_communicator_t *low_comm, *up_comm;
 
     /* use MCA parameters for now */
     low_comm = han_module->cached_low_comms[mca_coll_han_component.han_bcast_low_module];
@@ -206,29 +220,44 @@ mca_coll_han_bcast_intra_simple(void *buff,
 {
     /* create the subcommunicators */
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
-    mca_coll_han_comm_create_new(comm, han_module);
-    ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
-    ompi_communicator_t *up_comm = han_module->sub_comm[INTER_NODE];
-    int w_rank = ompi_comm_rank(comm);
+    ompi_communicator_t *low_comm, *up_comm;
+    int err, w_rank = ompi_comm_rank(comm);
+
+    /* Create the subcommunicators */
+    err = mca_coll_han_comm_create_new(comm, han_module);
+    if( OMPI_SUCCESS != err ) {  /* Let's hope the error is consistently returned across the entire communicator */
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                             "han cannot handle bcast with this communicator. Fall back on another component\n"));
+        /* Put back the fallback collective support and call it once. All
+         * future calls will then be automatically redirected.
+         */
+        comm->c_coll->coll_bcast = han_module->fallback.bcast.bcast;
+        comm->c_coll->coll_bcast_module = han_module->fallback.bcast.module;
+        return comm->c_coll->coll_bcast(buff, count, dtype, root,
+                                        comm, comm->c_coll->coll_bcast_module);
+    }
+    /* Topo must be initialized to know rank distribution which then is used to
+     * determine if han can be used */
+    mca_coll_han_topo_init(comm, han_module, 2);
+    if (han_module->are_ppn_imbalanced) {
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                             "han cannot handle bcast with this communicator (imbalance). Fall back on another component\n"));
+        /* Put back the fallback collective support and call it once. All
+         * future calls will then be automatically redirected.
+         */
+        comm->c_coll->coll_bcast = han_module->fallback.bcast.bcast;
+        comm->c_coll->coll_bcast_module = han_module->fallback.bcast.module;
+        return comm->c_coll->coll_bcast(buff, count, dtype, root,
+                                        comm, comm->c_coll->coll_bcast_module);
+    }
+
+    low_comm = han_module->sub_comm[INTRA_NODE];
+    up_comm = han_module->sub_comm[INTER_NODE];
 
     int *vranks = han_module->cached_vranks;
     int low_rank = ompi_comm_rank(low_comm);
     int low_size = ompi_comm_size(low_comm);
     int root_low_rank, root_up_rank;
-
-    /* Topo must be initialized to know rank distribution which then is used to
-     * determine if han can be used */
-    mca_coll_han_topo_init(comm, han_module, 2);
-
-    if (han_module->are_ppn_imbalanced){
-        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                             "han cannot handle bcast with this communicator. It need to fall back on another component\n"));
-        return han_module->previous_bcast(buff, count, dtype, root,
-                                          comm, han_module->previous_bcast_module);
-    } else {
-        OPAL_OUTPUT_VERBOSE((10, mca_coll_han_component.han_output,
-                             "[OMPI][han] in mca_coll_han_bcast_intra_simple\n"));
-    }
 
     mca_coll_han_get_ranks(vranks, root, low_size, &root_low_rank, &root_up_rank);
     OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,

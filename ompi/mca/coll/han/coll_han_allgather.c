@@ -67,7 +67,17 @@ mca_coll_han_allgather_intra(const void *sbuf, int scount,
 {
     /* Create the subcommunicators */
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
-    mca_coll_han_comm_create_new(comm, han_module);
+    if( OMPI_SUCCESS != mca_coll_han_comm_create_new(comm, han_module) ) {
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                             "han cannot handle allgather within this communicator. Fall back on another component\n"));
+        /* Put back the fallback collective support and call it once. All
+         * future calls will then be automatically redirected.
+         */
+        comm->c_coll->coll_allgather = han_module->fallback.allgather.allgather;
+        comm->c_coll->coll_allgather_module = han_module->fallback.allgather.module;
+        return comm->c_coll->coll_allgather(sbuf, scount, sdtype, rbuf, rcount, rdtype,
+                                            comm, comm->c_coll->coll_allgather_module);
+    }
     ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
     ompi_communicator_t *up_comm = han_module->sub_comm[INTER_NODE];
     int low_rank = ompi_comm_rank(low_comm);
@@ -75,11 +85,10 @@ mca_coll_han_allgather_intra(const void *sbuf, int scount,
 
     /* Init topo */
     int *topo = mca_coll_han_topo_init(comm, han_module, 2);
-
     /* unbalanced case needs algo adaptation */
-    if (han_module->are_ppn_imbalanced){
+    if (han_module->are_ppn_imbalanced) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                             "han cannot handle allgather with this communicator. It need to fall back on another component\n"));
+                             "han cannot handle allgather with this communicator (imbalance). Fall back on another component\n"));
         return han_module->previous_allgather(sbuf, scount, sdtype, rbuf,
                                               rcount, rdtype,
                                               comm, han_module->previous_allgather_module);
@@ -118,7 +127,7 @@ int mca_coll_han_allgather_lg_task(void *task_args)
     mca_coll_han_allgather_t *t = (mca_coll_han_allgather_t *) task_args;
     char *tmp_buf = NULL, *tmp_rbuf = NULL;
     char *tmp_send = NULL;
-    
+
     OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output, "[%d] HAN Allgather:  lg\n",
                          t->w_rank));
 
@@ -159,7 +168,7 @@ int mca_coll_han_allgather_lg_task(void *task_args)
                                          t->rdtype, t->root_low_rank, t->low_comm,
                                          t->low_comm->c_coll->coll_gather_module);
     }
-    
+
     t->sbuf = tmp_rbuf;
     t->sbuf_inter_free = tmp_buf;
 
@@ -280,22 +289,36 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, int scount,
 
     /* create the subcommunicators */
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
-    mca_coll_han_comm_create_new(comm, han_module);
-    ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
-    ompi_communicator_t *up_comm = han_module->sub_comm[INTER_NODE];
 
+    if( OMPI_SUCCESS != mca_coll_han_comm_create_new(comm, han_module) ) {
+        OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
+                             "han cannot handle allgather within this communicator. Fall back on another component\n"));
+        /* Put back the fallback collective support and call it once. All
+         * future calls will then be automatically redirected.
+         */
+        comm->c_coll->coll_allgather = han_module->fallback.allgather.allgather;
+        comm->c_coll->coll_allgather_module = han_module->fallback.allgather.module;
+        return comm->c_coll->coll_allgather(sbuf, scount, sdtype, rbuf, rcount, rdtype,
+                                            comm, comm->c_coll->coll_allgather_module);
+    }
     /* discovery topology */
     int *topo = mca_coll_han_topo_init(comm, han_module, 2);
 
     /* unbalanced case needs algo adaptation */
-    if (han_module->are_ppn_imbalanced){
+    if (han_module->are_ppn_imbalanced) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
-                             "han cannot handle allgather with this communicator. It need to fall back on another component\n"));
-        return han_module->previous_allgather(sbuf, scount, sdtype, rbuf,
-                                              rcount, rdtype,
-                                              comm, han_module->previous_allgather_module);
+                             "han cannot handle allgather within this communicator (imbalance). Fall back on another component\n"));
+        /* Put back the fallback collective support and call it once. All
+         * future calls will then be automatically redirected.
+         */
+        comm->c_coll->coll_allgather = han_module->fallback.gather.allgather;
+        comm->c_coll->coll_allgather_module = han_module->fallback.allgather.module;
+        return comm->c_coll->coll_allgather(sbuf, scount, sdtype, rbuf, rcount, rdtype,
+                                            comm, comm->c_coll->coll_allgather_module);
     }
 
+    ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
+    ompi_communicator_t *up_comm = han_module->sub_comm[INTER_NODE];
     int w_rank = ompi_comm_rank(comm);
     /* setup up/low coordinates */
     int low_rank = ompi_comm_rank(low_comm);

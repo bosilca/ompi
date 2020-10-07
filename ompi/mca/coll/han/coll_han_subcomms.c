@@ -45,8 +45,8 @@
  * Called each time a collective is called.
  * comm: input communicator of the collective
  */
-void mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
-                                  mca_coll_han_module_t *han_module)
+int mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
+                                 mca_coll_han_module_t *han_module)
 {
     int low_rank, low_size, up_rank, w_rank, w_size;
     ompi_communicator_t **low_comm = &(han_module->sub_comm[INTRA_NODE]);
@@ -59,7 +59,7 @@ void mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
     if (NULL != han_module->sub_comm[INTRA_NODE]
         && NULL != han_module->sub_comm[INTER_NODE]
         && NULL != han_module->cached_vranks) {
-        return;
+        return OMPI_SUCCESS;
     }
 
     /*
@@ -79,6 +79,24 @@ void mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
     HAN_SUBCOM_SAVE_COLLECTIVE(fallbacks, comm, han_module, reduce);
     HAN_SUBCOM_SAVE_COLLECTIVE(fallbacks, comm, han_module, gather);
     HAN_SUBCOM_SAVE_COLLECTIVE(fallbacks, comm, han_module, scatter);
+
+    /**
+     * HAN is not yet optimized for a single process per node case, we should
+     * avoid selecting it for collective communication support in such cases.
+     * However, in order to decide if this is tru, we need to know how many
+     * local processes are on each node, a condition that cannot be verified
+     * outside the MPI support (with PRRTE the info will be eventually available,
+     * but we don't want to delay anything until then). We can achieve the same
+     * goal by using a reduction over the maximum number of peers per node among
+     * all participants.
+     */
+    int local_procs = ompi_group_count_local_peers(comm->c_local_group);
+    comm->c_coll->coll_allreduce(MPI_IN_PLACE, &local_procs, 1, MPI_INT,
+                                 MPI_MAX, comm,
+                                 comm->c_coll->coll_allreduce_module);
+    if( local_procs == 1 ) {
+        return OMPI_ERR_NOT_SUPPORTED;
+    }
 
     OBJ_CONSTRUCT(&comm_info, opal_info_t);
 
@@ -147,6 +165,7 @@ void mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
     HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, scatter);
 
     OBJ_DESTRUCT(&comm_info);
+    return OMPI_SUCCESS;
 }
 
 /*
@@ -154,8 +173,8 @@ void mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
  * Called each time a collective is called.
  * comm: input communicator of the collective
  */
-void mca_coll_han_comm_create(struct ompi_communicator_t *comm,
-                              mca_coll_han_module_t *han_module)
+int mca_coll_han_comm_create(struct ompi_communicator_t *comm,
+                             mca_coll_han_module_t *han_module)
 {
     int low_rank, low_size, up_rank, w_rank, w_size;
     mca_coll_han_collectives_fallback_t fallbacks;
@@ -165,11 +184,10 @@ void mca_coll_han_comm_create(struct ompi_communicator_t *comm,
     opal_info_t comm_info;
 
     /* use cached communicators if possible */
-    if (han_module->cached_comm == comm &&
-        han_module->cached_low_comms != NULL &&
+    if (han_module->cached_low_comms != NULL &&
         han_module->cached_up_comms != NULL &&
         han_module->cached_vranks != NULL) {
-        return;
+        return OMPI_SUCCESS;
     }
 
     /*
@@ -190,6 +208,24 @@ void mca_coll_han_comm_create(struct ompi_communicator_t *comm,
     HAN_SUBCOM_SAVE_COLLECTIVE(fallbacks, comm, han_module, gather);
     HAN_SUBCOM_SAVE_COLLECTIVE(fallbacks, comm, han_module, scatter);
 
+    /**
+     * HAN is not yet optimized for a single process per node case, we should
+     * avoid selecting it for collective communication support in such cases.
+     * However, in order to decide if this is tru, we need to know how many
+     * local processes are on each node, a condition that cannot be verified
+     * outside the MPI support (with PRRTE the info will be eventually available,
+     * but we don't want to delay anything until then). We can achieve the same
+     * goal by using a reduction over the maximum number of peers per node among
+     * all participants.
+     */
+    int local_procs = ompi_group_count_local_peers(comm->c_local_group);
+    comm->c_coll->coll_allreduce(MPI_IN_PLACE, &local_procs, 1, MPI_INT,
+                                 MPI_MAX, comm,
+                                 comm->c_coll->coll_allreduce_module);
+    if( local_procs == 1 ) {
+        return OMPI_ERR_NOT_SUPPORTED;
+    }
+
     /* create communicators if there is no cached communicator */
     w_rank = ompi_comm_rank(comm);
     w_size = ompi_comm_size(comm);
@@ -199,8 +235,6 @@ void mca_coll_han_comm_create(struct ompi_communicator_t *comm,
                                                      sizeof(struct ompi_communicator_t *));
 
     OBJ_CONSTRUCT(&comm_info, opal_info_t);
-
-    opal_info_set(&comm_info, "ompi_comm_coll_preference", "sm");
 
     /*
      * Upgrade sm module priority to set up low_comms[0] with sm module
@@ -261,7 +295,6 @@ void mca_coll_han_comm_create(struct ompi_communicator_t *comm,
     /*
      * Set the cached info
      */
-    han_module->cached_comm = comm;
     han_module->cached_low_comms = low_comms;
     han_module->cached_up_comms = up_comms;
     han_module->cached_vranks = vranks;
@@ -276,6 +309,7 @@ void mca_coll_han_comm_create(struct ompi_communicator_t *comm,
     HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, scatter);
 
     OBJ_DESTRUCT(&comm_info);
+    return OMPI_SUCCESS;
 }
 
 

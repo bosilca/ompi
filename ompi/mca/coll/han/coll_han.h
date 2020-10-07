@@ -255,7 +255,6 @@ typedef struct mca_coll_han_module_t {
     /* Whether this module has been lazily initialized or not yet */
     bool enabled;
 
-    struct ompi_communicator_t *cached_comm;
     struct ompi_communicator_t **cached_low_comms;
     struct ompi_communicator_t **cached_up_comms;
     int *cached_vranks;
@@ -331,8 +330,8 @@ mca_coll_base_module_t *mca_coll_han_comm_query(struct ompi_communicator_t *comm
 int han_request_free(ompi_request_t ** request);
 
 /* Subcommunicator creation */
-void mca_coll_han_comm_create(struct ompi_communicator_t *comm, mca_coll_han_module_t * han_module);
-void mca_coll_han_comm_create_new(struct ompi_communicator_t *comm, mca_coll_han_module_t *han_module);
+int mca_coll_han_comm_create(struct ompi_communicator_t *comm, mca_coll_han_module_t * han_module);
+int mca_coll_han_comm_create_new(struct ompi_communicator_t *comm, mca_coll_han_module_t *han_module);
 /* Gather topology information */
 int *mca_coll_han_topo_init(struct ompi_communicator_t *comm, mca_coll_han_module_t * han_module,
                             int num_topo_level);
