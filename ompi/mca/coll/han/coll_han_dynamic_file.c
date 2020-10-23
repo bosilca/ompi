@@ -139,7 +139,11 @@ mca_coll_han_init_dynamic_rules(void)
                 goto file_reading_error;
             }
             free(coll_name);
-            coll_name = mca_coll_base_colltype_to_str(coll_id);
+            coll_name = NULL;
+            const char *tmp_name = mca_coll_base_colltype_to_str(coll_id);
+            if (NULL != tmp_name) {
+                coll_name = strdup(tmp_name);
+            }
         }
 
         if(!mca_coll_han_is_coll_dynamic_implemented(coll_id)) {
