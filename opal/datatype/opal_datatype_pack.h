@@ -116,16 +116,61 @@ static inline void pack_predefined_data(opal_convertor_t *CONVERTOR, const dt_el
         /* else unrecognized _elem->common.type, use the memcpy path */
     }
 
-    if (_elem->blocklen == 1) {
-        for (; cando_count > 0; cando_count--) {
-            OPAL_DATATYPE_SAFEGUARD_POINTER(_memory, blocklen_bytes, (CONVERTOR)->pBaseBuf,
-                                            (CONVERTOR)->pDesc, (CONVERTOR)->count);
-            DO_DEBUG(opal_output(0, "pack memcpy( %p, %p, %lu ) => space %lu [blen = 1]\n",
-                                 (void *) _packed, (void *) _memory, (unsigned long) blocklen_bytes,
-                                 (unsigned long) (*(SPACE) - (_packed - *(packed)))););
-            MEMCPY_CSUM(_packed, _memory, blocklen_bytes, (CONVERTOR));
-            _packed += blocklen_bytes;
-            _memory += _elem->extent;
+    /* buffers aligned and we manipulate, on each copy, less data than a defined threshold */
+    if( (0 == ((_memory ^ _packed) & (blocklen_bytes - 1))) && (_elem->blocklen <= opal_datatype_pack_threshold) ) {
+        if( 1 == _elem->blocklen ) { /* Do as many full blocklen as possible */
+            for(; cando_count > 0; cando_count--) {
+                OPAL_DATATYPE_SAFEGUARD_POINTER( _memory, blocklen_bytes, (CONVERTOR)->pBaseBuf,
+                                                 (CONVERTOR)->pDesc, (CONVERTOR)->count );
+                DO_DEBUG( opal_output( 0, "pack memcpy( %p, %p, %lu ) => space %lu [blen = 1]\n",
+                                       (void*)_packed, (void*)_memory, (unsigned long)blocklen_bytes, (unsigned long)(*(SPACE) - (_packed - *(packed))) ); );
+                MEMCPY_CSUM( _packed, _memory, blocklen_bytes, (CONVERTOR) );
+                _packed     += blocklen_bytes;
+                _memory     += _elem->extent;
+            }
+            goto update_and_return;
+        }
+
+        if( (1 < _elem->count) && (_elem->blocklen <= cando_count) ) {
+            blocklen_bytes *= _elem->blocklen;
+
+            do { /* Do as many full blocklen as possible */
+                OPAL_DATATYPE_SAFEGUARD_POINTER( _memory, blocklen_bytes, (CONVERTOR)->pBaseBuf,
+                                                 (CONVERTOR)->pDesc, (CONVERTOR)->count );
+                DO_DEBUG( opal_output( 0, "pack 2. memcpy( %p, %p, %lu ) => space %lu\n",
+                                       (void*)_packed, (void*)_memory, (unsigned long)blocklen_bytes, (unsigned long)(*(SPACE) - (_packed - *(packed))) ); );
+                MEMCPY_CSUM( _packed, _memory, blocklen_bytes, (CONVERTOR) );
+                _packed     += blocklen_bytes;
+                _memory     += _elem->extent;
+                cando_count -= _elem->blocklen;
+            } while (_elem->blocklen <= cando_count);
+        }
+
+        /**
+         * As an epilog do anything left from the last blocklen.
+         */
+        if( 0 != cando_count ) {
+            assert( (cando_count < _elem->blocklen) ||
+                    ((1 == _elem->count) && (cando_count <= _elem->blocklen)) );
+            do_now_bytes = cando_count * opal_datatype_basicDatatypes[_elem->common.type]->size;
+            OPAL_DATATYPE_SAFEGUARD_POINTER( _memory, do_now_bytes, (CONVERTOR)->pBaseBuf,
+                                             (CONVERTOR)->pDesc, (CONVERTOR)->count );
+            DO_DEBUG( opal_output( 0, "pack 3. memcpy( %p, %p, %lu ) => space %lu [epilog]\n",
+                                   (void*)_packed, (void*)_memory, (unsigned long)do_now_bytes, (unsigned long)(*(SPACE) - (_packed - *(packed))) ); );
+            MEMCPY_CSUM( _packed, _memory, do_now_bytes, (CONVERTOR) );
+            _memory   += do_now_bytes;
+            _packed   += do_now_bytes;
+        }
+    }
+    if( 1 == _elem->blocklen ) { /* Do as many full blocklen as possible */
+        for(; cando_count > 0; cando_count--) {
+            OPAL_DATATYPE_SAFEGUARD_POINTER( _memory, blocklen_bytes, (CONVERTOR)->pBaseBuf,
+                                             (CONVERTOR)->pDesc, (CONVERTOR)->count );
+            DO_DEBUG( opal_output( 0, "pack memcpy( %p, %p, %lu ) => space %lu [blen = 1]\n",
+                                   (void*)_packed, (void*)_memory, (unsigned long)blocklen_bytes, (unsigned long)(*(SPACE) - (_packed - *(packed))) ); );
+            MEMCPY_CSUM( _packed, _memory, blocklen_bytes, (CONVERTOR) );
+            _packed     += blocklen_bytes;
+            _memory     += _elem->extent;
         }
         goto update_and_return;
     }

@@ -627,8 +627,10 @@ int32_t opal_convertor_prepare_for_send(opal_convertor_t *convertor,
 
 #if defined(CHECKSUM)
     if (convertor->flags & CONVERTOR_WITH_CHECKSUM) {
-        if (CONVERTOR_SEND_CONVERSION
-            == (convertor->flags & (CONVERTOR_SEND_CONVERSION | CONVERTOR_HOMOGENEOUS))) {
+        if( 1 == datatype->desc.used ) {
+            convertor->fAdvance = opal_pack_single_checksum;
+        } else if (CONVERTOR_SEND_CONVERSION ==
+                   (convertor->flags & (CONVERTOR_SEND_CONVERSION | CONVERTOR_HOMOGENEOUS))) {
             convertor->fAdvance = opal_pack_general_checksum;
         } else {
             if (datatype->flags & OPAL_DATATYPE_FLAG_CONTIGUOUS) {
@@ -644,8 +646,10 @@ int32_t opal_convertor_prepare_for_send(opal_convertor_t *convertor,
         }
     } else {
 #endif /* defined(CHECKSUM) */
-        if (CONVERTOR_SEND_CONVERSION
-            == (convertor->flags & (CONVERTOR_SEND_CONVERSION | CONVERTOR_HOMOGENEOUS))) {
+        if( 1 == datatype->desc.used ) {
+            convertor->fAdvance = opal_pack_single;
+        } else if (CONVERTOR_SEND_CONVERSION ==
+                   (convertor->flags & (CONVERTOR_SEND_CONVERSION | CONVERTOR_HOMOGENEOUS))) {
             convertor->fAdvance = opal_pack_general;
         } else {
             if (datatype->flags & OPAL_DATATYPE_FLAG_CONTIGUOUS) {
