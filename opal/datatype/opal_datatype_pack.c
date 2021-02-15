@@ -246,7 +246,7 @@ opal_pack_single_function( opal_convertor_t* pConvertor,
     size_t iov_len_local;
     uint32_t iov_count;
 
-    DO_DEBUG( opal_output( 0, "opal_convertor_generic_simple_pack( %p:%p, {%p, %lu}, %d )\n",
+    DO_DEBUG( opal_output( 0, "opal_convertor_generic_single_pack( %p:%p, {%p, %lu}, %d )\n",
                            (void*)pConvertor, (void*)pConvertor->pBaseBuf,
                            (void*)iov[0].iov_base, (unsigned long)iov[0].iov_len, *out_size ); );
 
@@ -576,10 +576,6 @@ opal_pack_general_function( opal_convertor_t* pConvertor,
 
                 pack_predefined_heterogeneous( pConvertor, pElem, &count_desc,
                                                &conv_ptr, &iov_ptr, &iov_len_local);
-#if 0
-                PACK_PREDEFINED_DATATYPE( pConvertor, pElem, count_desc,
-                                          conv_ptr, iov_ptr, iov_len_local );
-#endif
                 if( 0 == count_desc ) {  /* completed */
                     conv_ptr = pConvertor->pBaseBuf + pStack->disp;
                     pos_desc++;  /* advance to the next data */

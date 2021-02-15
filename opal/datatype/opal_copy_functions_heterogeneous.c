@@ -46,24 +46,20 @@
 
 static inline void
 opal_dt_swap_bytes(void *to_p, const void *from_p, const size_t size, size_t count)
+opal_dt_swap_bytes(void *to_p, const void *from_p, const size_t size,
+                   size_t count)
 {
-    size_t i;
-    size_t back_i = size - 1;
-    uint8_t *to = (uint8_t*) to_p;
-    uint8_t *from = (uint8_t*) from_p;
+    size_t i, back_i;
+    uint8_t *to = (uint8_t *) to_p;
+    uint8_t *from = (uint8_t *) from_p;
 
-    /* Do the first element */
-    for (i = 0 ; i < size ; i++, back_i--) {
-        to[back_i] = from[i];
-    }
-    /* Do all the others if any */
-    while(count > 1) {
+    while (count > 0) {
+        for (i = 0, back_i = size - 1; i < size; i++, back_i--) {
+            to[back_i] = from[i];
+        }
         to += size;
         from += size;
         count--;
-        for (i = 0, back_i = size - 1 ; i < size ; i++, back_i--) {
-            to[back_i] = from[i];
-        }
     }
 }
 

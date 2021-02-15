@@ -27,6 +27,8 @@
     CONVERTOR->cbmemcpy( (DST), (SRC), (BLENGTH), (CONVERTOR) )
 #endif
 
+#define opal_datatype_pack_threshold 16 // for compile, use different value later
+
 /**
  * This function deals only with partial elements. The COUNT points however to the whole leftover count,
  * but this function is only expected to operate on an amount less than blength, that would allow the rest
@@ -108,7 +110,7 @@ pack_predefined_data( opal_convertor_t* CONVERTOR,
     *(COUNT) -= cando_count;
 
     /* buffers aligned and we manipulate, on each copy, less data than a defined threshold */
-    if( (0 == ((_memory ^ _packed) & (blocklen_bytes - 1))) && (_elem->blocklen <= opal_datatype_pack_threshold) ) {
+    if( (0 == (((uintptr_t)_memory ^ (uintptr_t)_packed) & (blocklen_bytes - 1))) && (_elem->blocklen <= opal_datatype_pack_threshold) ) {
         if( 1 == _elem->blocklen ) { /* Do as many full blocklen as possible */
             for(; cando_count > 0; cando_count--) {
                 OPAL_DATATYPE_SAFEGUARD_POINTER( _memory, blocklen_bytes, (CONVERTOR)->pBaseBuf,
@@ -152,6 +154,7 @@ pack_predefined_data( opal_convertor_t* CONVERTOR,
             _memory   += do_now_bytes;
             _packed   += do_now_bytes;
         }
+        goto update_and_return;
     }
     if( 1 == _elem->blocklen ) { /* Do as many full blocklen as possible */
         for(; cando_count > 0; cando_count--) {
