@@ -383,7 +383,7 @@ int NBC_Progress(NBC_Handle *handle) {
       res = handle->super.super.req_status.MPI_ERROR;
       NBC_Error("NBC_Progress: an error %d was found during schedule %p at row-offset %li - aborting the schedule\n", res, handle->schedule, handle->row_offset);
       handle->nbc_complete = true;
-      if (!handle->super.super.req_persistent) {
+      if (!OMPI_REQ_IS_PERSISTENT(&handle->super.super)) {
         NBC_Free(handle);
       }
       return res;
@@ -403,7 +403,7 @@ int NBC_Progress(NBC_Handle *handle) {
       NBC_DEBUG(5, "NBC_Progress last round finished - we're done\n");
 
       handle->nbc_complete = true;
-      if (!handle->super.super.req_persistent) {
+      if (!OMPI_REQ_IS_PERSISTENT(&handle->super.super)) {
         NBC_Free(handle);
       }
 

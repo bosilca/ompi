@@ -442,7 +442,7 @@ do {                                                                            
     if( sendreq->req_send.req_base.req_free_called ) {                             \
         MCA_PML_CM_HVY_SEND_REQUEST_RETURN( sendreq );                             \
     } else {                                                                       \
-        if(sendreq->req_send.req_base.req_ompi.req_persistent) {                   \
+        if(OMPI_REQ_IS_PERSISTENT(&sendreq->req_send.req_base.req_ompi)) {         \
             /* rewind convertor */                                                 \
             size_t offset = 0;                                                     \
             opal_convertor_set_position(&sendreq->req_send.req_base.req_convertor, \

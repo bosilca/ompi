@@ -120,6 +120,13 @@ typedef union ompi_mpi_object_t {
     struct ompi_win_t *win;
 } ompi_mpi_object_t;
 
+#define OMPI_REQ_PERSISTENT             0x0001
+#define OMPI_REQ_NB_RELEASE_DATATYPES   0x0002
+#define OMPI_REQ_NB_RELEASE_DISPLS      0x0004
+#define OMPI_REQ_NB_RELEASE_COUNTS      0x0008
+
+#define OMPI_REQ_IS_PERSISTENT(REQ)  (OMPI_REQ_PERSISTENT & (REQ)->req_flags)
+
 /**
  * Main top-level request struct definition
  */
@@ -129,7 +136,7 @@ struct ompi_request_t {
     ompi_status_public_t req_status;            /**< Completion status */
     volatile void *req_complete;                /**< Flag indicating wether request has completed */
     volatile ompi_request_state_t req_state;    /**< enum indicate state of the request */
-    bool req_persistent;                        /**< flag indicating if the this is a persistent request */
+    int req_flags;                              /**< flag indicating properties of the request (persistency, release resources) */
     int req_f_to_c_index;                       /**< Index in Fortran <-> C translation array */
     ompi_request_start_fn_t req_start;          /**< Called by MPI_START and MPI_STARTALL */
     ompi_request_free_fn_t req_free;            /**< Called by free */
@@ -173,7 +180,7 @@ typedef struct ompi_predefined_request_t ompi_predefined_request_t;
         (request)->req_complete =                               \
             (persistent) ? REQUEST_COMPLETED : REQUEST_PENDING; \
         (request)->req_state = OMPI_REQUEST_INACTIVE;           \
-        (request)->req_persistent = (persistent);               \
+        (request)->req_flags = (persistent ? OMPI_REQ_PERSISTENT : 0); \
         (request)->req_complete_cb  = NULL;                     \
         (request)->req_complete_cb_data = NULL;                 \
     } while (0);

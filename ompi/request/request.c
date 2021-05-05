@@ -55,7 +55,7 @@ static void ompi_request_construct(ompi_request_t* req)
      * be no matching _FINI invocation */
     req->req_state        = OMPI_REQUEST_INVALID;
     req->req_complete     = REQUEST_COMPLETED;
-    req->req_persistent   = false;
+    req->req_flags        = 0;
     req->req_start        = NULL;
     req->req_free         = NULL;
     req->req_cancel       = NULL;
@@ -122,7 +122,7 @@ int ompi_request_init(void)
 
     ompi_request_null.request.req_complete = REQUEST_COMPLETED;
     ompi_request_null.request.req_state = OMPI_REQUEST_INACTIVE;
-    ompi_request_null.request.req_persistent = false;
+    ompi_request_null.request.req_flags = 0;
     ompi_request_null.request.req_f_to_c_index =
         opal_pointer_array_add(&ompi_request_f_to_c_table, &ompi_request_null);
     ompi_request_null.request.req_start = NULL; /* should not be called */
@@ -155,7 +155,7 @@ int ompi_request_init(void)
 
     ompi_request_empty.req_complete = REQUEST_COMPLETED;
     ompi_request_empty.req_state = OMPI_REQUEST_ACTIVE;
-    ompi_request_empty.req_persistent = false;
+    ompi_request_empty.req_flags = 0;
     ompi_request_empty.req_f_to_c_index =
         opal_pointer_array_add(&ompi_request_f_to_c_table, &ompi_request_empty);
     ompi_request_empty.req_start = NULL; /* should not be called */
@@ -203,7 +203,7 @@ int ompi_request_persistent_noop_create(ompi_request_t** request)
     req->req_status = ompi_request_empty.req_status;
     req->req_complete = REQUEST_COMPLETED;
     req->req_state = OMPI_REQUEST_INACTIVE;
-    req->req_persistent = true;
+    req->req_flags = OMPI_REQ_PERSISTENT;
     req->req_free = ompi_request_persistent_noop_free;
 
     *request = req;

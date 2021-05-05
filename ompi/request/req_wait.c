@@ -66,7 +66,7 @@ int ompi_request_default_wait(
         status->_ucount    = req->req_status._ucount;
         status->_cancelled = req->req_status._cancelled;
     }
-    if( req->req_persistent ) {
+    if( OMPI_REQ_IS_PERSISTENT(req) ) {
         if( req->req_state == OMPI_REQUEST_INACTIVE ) {
             if (MPI_STATUS_IGNORE != status) {
                 *status = ompi_status_empty;
@@ -213,7 +213,7 @@ recheck:
         status->MPI_ERROR = old_error;
     }
     rc = request->req_status.MPI_ERROR;
-    if( request->req_persistent ) {
+    if( OMPI_REQ_IS_PERSISTENT(request) ) {
         request->req_state = OMPI_REQUEST_INACTIVE;
     } else if (MPI_SUCCESS == rc) {
         /* Only free the request if there is no error on it */
@@ -358,7 +358,7 @@ recheck:
 
             statuses[i] = request->req_status;
 
-            if( request->req_persistent ) {
+            if( OMPI_REQ_IS_PERSISTENT(request) ) {
                 request->req_state = OMPI_REQUEST_INACTIVE;
                 continue;
             }
@@ -423,7 +423,7 @@ recheck:
 
             rc = request->req_status.MPI_ERROR;
 
-            if( request->req_persistent ) {
+            if( OMPI_REQ_IS_PERSISTENT(request) ) {
                 request->req_state = OMPI_REQUEST_INACTIVE;
             } else if (MPI_SUCCESS == rc) {
                 /* Only free the request if there is no error on it */
@@ -619,7 +619,7 @@ int ompi_request_default_wait_some(size_t count,
             rc = MPI_ERR_IN_STATUS;
         }
 
-        if( request->req_persistent ) {
+        if( OMPI_REQ_IS_PERSISTENT(request) ) {
             request->req_state = OMPI_REQUEST_INACTIVE;
         } else {
             /* Only free the request if there was no error */

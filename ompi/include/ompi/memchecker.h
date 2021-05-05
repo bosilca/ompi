@@ -308,9 +308,9 @@ static inline int memchecker_request(MPI_Request *request)
     opal_memchecker_base_isdefined (&(*request)->req_status._ucount, sizeof(size_t));
 #endif
 
-    opal_memchecker_base_isdefined ((void*)&(*request)->req_complete, sizeof(volatile _Bool));
+    opal_memchecker_base_isdefined ((void*)&(*request)->req_complete, sizeof(volatile void*));
     opal_memchecker_base_isdefined ((void*)&(*request)->req_state, sizeof(volatile ompi_request_state_t));
-    opal_memchecker_base_isdefined (&(*request)->req_persistent, sizeof(_Bool));
+    opal_memchecker_base_isdefined (&(*request)->req_flags, sizeof(int));
     opal_memchecker_base_isdefined (&(*request)->req_f_to_c_index, sizeof(int));
     opal_memchecker_base_isdefined (&(*request)->req_free, sizeof(ompi_request_free_fn_t));
     opal_memchecker_base_isdefined (&(*request)->req_cancel, sizeof(ompi_request_cancel_fn_t));

@@ -78,7 +78,7 @@ int MPI_Start(MPI_Request *request)
     case OMPI_REQUEST_PML:
     case OMPI_REQUEST_COLL:
     case OMPI_REQUEST_PART:
-        if ( MPI_PARAM_CHECK && !(*request)->req_persistent) {
+        if ( MPI_PARAM_CHECK && !OMPI_REQ_IS_PERSISTENT(*request)) {
             return OMPI_ERRHANDLER_NOHANDLE_INVOKE(MPI_ERR_REQUEST, FUNC_NAME);
         }
 

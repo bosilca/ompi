@@ -66,7 +66,7 @@ int MPI_Startall(int count, MPI_Request requests[])
         } else {
             for (i = 0; i < count; ++i) {
                 if (NULL == requests[i] ||
-                    ! requests[i]->req_persistent ||
+                    ! OMPI_REQ_IS_PERSISTENT(requests[i]) ||
                     (OMPI_REQUEST_PML  != requests[i]->req_type &&
                      OMPI_REQUEST_COLL != requests[i]->req_type &&
                      OMPI_REQUEST_NOOP != requests[i]->req_type)) {

@@ -369,8 +369,8 @@ mca_part_persist_precv_init(void *buf,
 
 
     /* Set ompi request initial values */
-    req->req_ompi.req_persistent = true;
-    req->req_part_complete = true;
+    req->req_ompi.req_flags |= OMPI_REQ_PERSISTENT;
+    req->req_part_complete   = true;
     req->req_ompi.req_complete = REQUEST_COMPLETED;
     req->req_ompi.req_state = OMPI_REQUEST_INACTIVE;
 
@@ -456,11 +456,11 @@ mca_part_persist_psend_init(const void* buf,
     }
 
     /* Initilaize completion variables */
-    sendreq->req_base.req_ompi.req_persistent = true;
+    sendreq->req_base.req_ompi.req_flags |= OMPI_REQ_PERSISTENT;
     req->req_part_complete = true;
     req->req_ompi.req_complete = REQUEST_COMPLETED;
     req->req_ompi.req_state = OMPI_REQUEST_INACTIVE;
- 
+
     /* add element to progress queue */
     new_progress_elem = OBJ_NEW(mca_part_persist_list_t);
     new_progress_elem->item = req;

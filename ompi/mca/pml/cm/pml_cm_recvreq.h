@@ -341,7 +341,7 @@ do {                                                                    \
         MCA_PML_CM_HVY_RECV_REQUEST_RETURN( recvreq );                  \
     } else {                                                            \
         /* initialize request status */                                 \
-        if(recvreq->req_base.req_ompi.req_persistent) {                 \
+        if(OMPI_REQ_IS_PERSISTENT(&recvreq->req_base.req_ompi)) {       \
             /* rewind convertor */                                      \
             size_t offset = 0;                                          \
             opal_convertor_set_position(&recvreq->req_base.req_convertor, &offset); \

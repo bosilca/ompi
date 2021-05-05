@@ -185,7 +185,7 @@ int ompi_coll_base_retain_op( ompi_request_t *req, ompi_op_t *op,
          *     the objects can only be released when the request is freed
          *     (e.g. MPI_Request_free() completes) and we use req_free callback
          */
-        if (req->req_persistent) {
+        if (OMPI_REQ_IS_PERSISTENT(req)) {
             request->cb.req_free = req->req_free;
             req->req_free = free_objs_callback;
         } else {
@@ -216,7 +216,7 @@ int ompi_coll_base_retain_datatypes( ompi_request_t *req, ompi_datatype_t *stype
         retain = true;
     }
     if (OPAL_UNLIKELY(retain)) {
-        if (req->req_persistent) {
+        if (OMPI_REQ_IS_PERSISTENT(req)) {
             request->cb.req_free = req->req_free;
             req->req_free = free_objs_callback;
         } else {
@@ -243,6 +243,9 @@ static void release_vecs_callback(ompi_coll_base_nbc_request_t *request) {
                 OMPI_DATATYPE_RELEASE_NO_NULLIFY(request->data.vecs.stypes[i]);
             }
         }
+        if( request->super.req_flags & OMPI_REQ_NB_RELEASE_DATA ) {
+            free((void*)request->data.vecs.stypes);
+        }
         request->data.vecs.stypes = NULL;
     }
     if (NULL != request->data.vecs.rtypes) {
@@ -250,6 +253,9 @@ static void release_vecs_callback(ompi_coll_base_nbc_request_t *request) {
             if (NULL != request->data.vecs.rtypes[i]) {
                 OMPI_DATATYPE_RELEASE_NO_NULLIFY(request->data.vecs.rtypes[i]);
             }
+        }
+        if( request->super.req_flags & OMPI_REQ_NB_RELEASE_DATA ) {
+            free((void*)request->data.vecs.rtypes);
         }
         request->data.vecs.rtypes = NULL;
     }
@@ -306,7 +312,7 @@ int ompi_coll_base_retain_datatypes_w( ompi_request_t *req,
     if (OPAL_UNLIKELY(retain)) {
         request->data.vecs.stypes = (ompi_datatype_t **) stypes;
         request->data.vecs.rtypes = (ompi_datatype_t **) rtypes;
-        if (req->req_persistent) {
+        if (OMPI_REQ_IS_PERSISTENT(req)) {
             request->cb.req_free = req->req_free;
             req->req_free = free_vecs_callback;
         } else {

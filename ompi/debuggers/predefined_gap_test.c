@@ -97,8 +97,8 @@ int main(int argc, char **argv) {
     GAP_CHECK("req_status", test_req, req_status, req_type, 1);
     GAP_CHECK("req_complete", test_req, req_complete, req_status, 1);
     GAP_CHECK("req_state", test_req, req_state, req_complete, 1);
-    GAP_CHECK("req_persistent", test_req, req_persistent, req_state, 1);
-    GAP_CHECK("req_f_to_c_index", test_req, req_f_to_c_index, req_persistent, 1);
+    GAP_CHECK("req_flags", test_req, req_flags, req_state, 1);
+    GAP_CHECK("req_f_to_c_index", test_req, req_f_to_c_index, req_flags, 1);
     GAP_CHECK("req_free", test_req, req_free, req_f_to_c_index, 1);
 
     /* Test Predefined op sizes */

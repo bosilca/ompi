@@ -65,7 +65,7 @@ int ompi_request_default_test(ompi_request_t ** rptr,
             *status = request->req_status;
             status->MPI_ERROR = old_error;
         }
-        if( request->req_persistent ) {
+        if( OMPI_REQ_IS_PERSISTENT(request) ) {
             request->req_state = OMPI_REQUEST_INACTIVE;
             return request->req_status.MPI_ERROR;
         }
@@ -149,7 +149,7 @@ int ompi_request_default_test_any(
                 status->MPI_ERROR = old_error;
             }
 
-            if( request->req_persistent ) {
+            if( OMPI_REQ_IS_PERSISTENT(request) ) {
                 request->req_state = OMPI_REQUEST_INACTIVE;
                 return OMPI_SUCCESS;
             }
@@ -253,7 +253,7 @@ int ompi_request_default_test_all(
                 ompi_grequest_invoke_query(request, &request->req_status);
             }
             statuses[i] = request->req_status;
-            if( request->req_persistent ) {
+            if( OMPI_REQ_IS_PERSISTENT(request) ) {
                 request->req_state = OMPI_REQUEST_INACTIVE;
                 continue;
             }
@@ -288,7 +288,7 @@ int ompi_request_default_test_all(
             if (OMPI_REQUEST_GEN == request->req_type) {
                 ompi_grequest_invoke_query(request, &request->req_status);
             }
-            if( request->req_persistent ) {
+            if( OMPI_REQ_IS_PERSISTENT(request) ) {
                 request->req_state = OMPI_REQUEST_INACTIVE;
                 continue;
             }
@@ -400,7 +400,7 @@ int ompi_request_default_test_some(
 #endif /* OPAL_ENABLE_FT_MPI */
         }
 
-        if( request->req_persistent ) {
+        if( OMPI_REQ_IS_PERSISTENT(request) ) {
             request->req_state = OMPI_REQUEST_INACTIVE;
         } else {
             /* Only free the request if there was no error */

@@ -456,11 +456,11 @@ ompi_coll_libnbc_progress(void)
                 else {
                     request->super.super.req_status.MPI_ERROR = res;
                 }
-                if(request->super.super.req_persistent) {
+                if( OMPI_REQ_IS_PERSISTENT(&request->super.super) ) {
                     /* reset for the next communication */
                     request->row_offset = 0;
                 }
-                if(!request->super.super.req_persistent || !REQUEST_COMPLETE(&request->super.super)) {
+                if(!OMPI_REQ_IS_PERSISTENT(&request->super.super) || !REQUEST_COMPLETE(&request->super.super)) {
             	    ompi_request_complete(&request->super.super, true);
                 }
                 completed++;
