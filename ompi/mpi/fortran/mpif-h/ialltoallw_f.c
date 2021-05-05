@@ -24,6 +24,7 @@
 #include "ompi/mpi/fortran/mpif-h/bindings.h"
 #include "ompi/mpi/fortran/base/constants.h"
 #include "ompi/communicator/communicator.h"
+#include "ompi/mca/coll/base/coll_base_util.h"
 
 #if OMPI_BUILD_MPI_PROFILING
 #if OPAL_HAVE_WEAK_SYMBOLS
@@ -107,22 +108,36 @@ void ompi_ialltoallw_f(char *sendbuf, MPI_Fint *sendcounts,
     recvbuf = (char *) OMPI_F2C_BOTTOM(recvbuf);
 
     c_ierr = PMPI_Ialltoallw(sendbuf,
-                            OMPI_ARRAY_NAME_CONVERT(sendcounts),
-                            OMPI_ARRAY_NAME_CONVERT(sdispls),
-                            c_sendtypes,
-                            recvbuf,
-                            OMPI_ARRAY_NAME_CONVERT(recvcounts),
-                            OMPI_ARRAY_NAME_CONVERT(rdispls),
-                            c_recvtypes, c_comm, &c_request);
+			     OMPI_ARRAY_NAME_CONVERT(sendcounts),
+			     OMPI_ARRAY_NAME_CONVERT(sdispls),
+			     c_sendtypes,
+			     recvbuf,
+			     OMPI_ARRAY_NAME_CONVERT(recvcounts),
+			     OMPI_ARRAY_NAME_CONVERT(rdispls),
+			     c_recvtypes, c_comm, &c_request);
     if (NULL != ierr) *ierr = OMPI_INT_2_FINT(c_ierr);
-    if (MPI_SUCCESS == c_ierr) *request = PMPI_Request_c2f(c_request);
-
-    OMPI_ARRAY_FINT_2_INT_CLEANUP(sendcounts);
-    OMPI_ARRAY_FINT_2_INT_CLEANUP(sdispls);
-    OMPI_ARRAY_FINT_2_INT_CLEANUP(recvcounts);
-    OMPI_ARRAY_FINT_2_INT_CLEANUP(rdispls);
-    if (NULL != c_sendtypes) {
-        free(c_sendtypes);
+    if ( REQUEST_COMPLETE(c_request)) {
+        if (NULL != c_sendtypes) {
+	    free(c_sendtypes);
+	}
+	free(c_recvtypes);
+	OMPI_ARRAY_FINT_2_INT_CLEANUP(sendcounts);
+        OMPI_ARRAY_FINT_2_INT_CLEANUP(sdispls);
+	OMPI_ARRAY_FINT_2_INT_CLEANUP(recvcounts);
+	OMPI_ARRAY_FINT_2_INT_CLEANUP(rdispls);
+    } else {
+      ompi_coll_base_nbc_request_t* nb_request = (ompi_coll_base_nbc_request_t*)c_request;
+        c_request->req_flags |= OMPI_REQ_NB_RELEASE_DATATYPES;
+	if (sendcounts == OMPI_ARRAY_NAME_CONVERT(sendcounts)) {
+	    c_request->req_flags |= OMPI_REQ_NB_RELEASE_COUNTS;
+	    nb_request->data.scounts = OMPI_ARRAY_NAME_CONVERT(sendcounts);
+	    nb_request->data.rcounts = OMPI_ARRAY_NAME_CONVERT(recvcounts);
+	}
+	if (sdispls == OMPI_ARRAY_NAME_CONVERT(sdispls)) {
+	    c_request->req_flags |= OMPI_REQ_NB_RELEASE_DISPLS;
+	    nb_request->data.sdispls = OMPI_ARRAY_NAME_CONVERT(sdispls);
+	    nb_request->data.rdispls = OMPI_ARRAY_NAME_CONVERT(rdispls);
+	}
     }
-    free(c_recvtypes);
+    if (MPI_SUCCESS == c_ierr) *request = PMPI_Request_c2f(c_request);
 }

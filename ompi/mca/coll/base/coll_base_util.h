@@ -45,22 +45,28 @@ struct ompi_coll_base_nbc_request_t {
         ompi_request_free_fn_t req_free;
     } cb;
     void *req_complete_cb_data;
-    union {
-        struct {
-            ompi_op_t *op;
-            ompi_datatype_t *datatype;
-        } op;
-        struct {
-            ompi_datatype_t *stype;
-            ompi_datatype_t *rtype;
-        } types;
-        struct {
-            opal_object_t *objs[2];
-        } objs;
-        struct {
-            ompi_datatype_t * const *stypes;
-            ompi_datatype_t * const *rtypes;
-        } vecs;
+    struct {
+        union {
+	    struct {
+	        ompi_op_t *op;
+	        ompi_datatype_t *datatype;
+	    } op;
+	    struct {
+	        ompi_datatype_t *stype;
+	        ompi_datatype_t *rtype;
+	    } types;
+	    struct {
+	        opal_object_t *objs[2];
+	    } objs;
+	    struct {
+                ompi_datatype_t * const *stypes;
+	        ompi_datatype_t * const *rtypes;
+	    } vecs;
+	} refcounted;
+      void* scounts;
+      void* sdispls;
+      void* rcounts;
+      void* rdispls;
     } data;
 };
 
