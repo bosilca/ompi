@@ -116,6 +116,12 @@ static int mca_pml_ob1_send_request_free(struct ompi_request_t** request)
                                 sendreq->req_send.req_base.req_datatype);
             );
 
+            /* release the parent request */
+            if (NULL != sendreq->req_parent) {
+                OBJ_RELEASE(sendreq->req_parent);
+                sendreq->req_parent = NULL;
+            }
+
             MCA_PML_OB1_SEND_REQUEST_RETURN( sendreq );
         }
         *request = MPI_REQUEST_NULL;

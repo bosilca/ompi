@@ -72,9 +72,10 @@ int mca_pml_ob1_start(size_t count, ompi_request_t** requests)
                     return rc;
                 }
 
-                /* reset the completion flag */
+                /* reset the completion flag and retain the parent flag */
                 pml_request->req_pml_complete = false;
                 sendreq->req_parent = pml_request;
+                OBJ_RETAIN(pml_request);
 
                 MCA_PML_OB1_SEND_REQUEST_START(sendreq, rc);
                 if(rc != OMPI_SUCCESS)

@@ -51,6 +51,7 @@ struct mca_pml_ob1_send_request_t {
     opal_atomic_int32_t  req_state;
     opal_atomic_int32_t  req_lock;
     bool     req_throttle_sends;
+    bool     req_parent_complete;
     opal_atomic_int32_t  req_pipeline_depth;
     opal_atomic_size_t   req_bytes_delivered;
     uint32_t req_rdma_cnt;
@@ -157,6 +158,7 @@ get_request_from_send_pending(mca_pml_ob1_send_pending_t *type)
                                        persistent,                      \
                                        0); /* convertor_flags */        \
         (sendreq)->req_parent = NULL;                                   \
+        (sendreq)->req_parent_complete = false;                         \
         (sendreq)->req_recv.pval = NULL;                                \
     }
 
@@ -208,17 +210,18 @@ do {                                                                            
          (sendreq)->req_send.req_base.req_tag;                                            \
     (sendreq)->req_send.req_base.req_ompi.req_status._ucount =                            \
          (sendreq)->req_send.req_bytes_packed;                                            \
-    if(NULL != (sendreq)->req_parent) {                                                   \
+    if (NULL != (sendreq)->req_parent) {                                                  \
         PERUSE_TRACE_COMM_EVENT( PERUSE_COMM_REQ_COMPLETE,                                \
-                                 &(sendreq->req_parent->req_base), PERUSE_SEND);          \
-                                                                                          \
-        ompi_request_complete( &(sendreq)->req_parent->req_ompi, (with_signal) );         \
-        ompi_request_complete( &((sendreq)->req_send.req_base.req_ompi), false );         \
-        (sendreq)->req_parent = NULL;  /* dissociate from parent */                       \
+                                 &((sendreq)->req_parent), PERUSE_SEND);                  \
     } else {                                                                              \
         PERUSE_TRACE_COMM_EVENT( PERUSE_COMM_REQ_COMPLETE,                                \
-                                 &(sendreq->req_send.req_base), PERUSE_SEND);             \
-                                                                                          \
+                                 &((sendreq)->req_send.req_base), PERUSE_SEND);           \
+    }                                                                                     \
+    if(NULL != (sendreq)->req_parent && !(sendreq)->req_parent_complete) {                \
+        ompi_request_complete( &(sendreq)->req_parent->req_ompi, (with_signal) );         \
+        ompi_request_complete( &(sendreq)->req_send.req_base.req_ompi, false );           \
+        (sendreq)->req_parent_complete = true;  /* don't complete the parent again */     \
+    } else {                                                                              \
         ompi_request_complete( &((sendreq)->req_send.req_base.req_ompi), (with_signal) ); \
     }                                                                                     \
 } while(0)
@@ -487,7 +490,7 @@ mca_pml_ob1_send_request_start_seq (mca_pml_ob1_send_request_t* sendreq, mca_bml
         bml_btl = mca_bml_base_btl_array_get_next(&endpoint->btl_eager);
         rc = mca_pml_ob1_send_request_start_btl(sendreq, bml_btl);
 #if OPAL_ENABLE_FT_MPI
-        /* this first condition to keep the optimized path with as 
+        /* this first condition to keep the optimized path with as
          * little tests as possible */
         if( OPAL_LIKELY(MPI_SUCCESS == rc) ) {
             return rc;
