@@ -93,10 +93,17 @@ ompi_coll_tuned_comm_query(struct ompi_communicator_t *comm, int *priority)
     /* By default stick with the fixed version of the tuned collectives. Later on,
      * when the module get enabled, set the correct version based on the availability
      * of the dynamic rules.
+     * For some collectives, we distinguish between inter- and intra- communicators
+     * to make decisions specific for shared memory communicators.
      */
-    tuned_module->super.coll_allgather  = ompi_coll_tuned_allgather_intra_dec_fixed;
+    if (ompi_group_have_remote_peers(comm->c_local_group)) {
+        tuned_module->super.coll_allgather  = ompi_coll_tuned_allgather_intra_dec_fixed;
+        tuned_module->super.coll_allreduce  = ompi_coll_tuned_allreduce_intra_dec_fixed;
+    } else {
+        tuned_module->super.coll_allgather  = ompi_coll_tuned_allgather_intra_sm_dec_fixed;
+        tuned_module->super.coll_allreduce  = ompi_coll_tuned_allreduce_intra_sm_dec_fixed;
+    }
     tuned_module->super.coll_allgatherv = ompi_coll_tuned_allgatherv_intra_dec_fixed;
-    tuned_module->super.coll_allreduce  = ompi_coll_tuned_allreduce_intra_dec_fixed;
     tuned_module->super.coll_alltoall   = ompi_coll_tuned_alltoall_intra_dec_fixed;
     tuned_module->super.coll_alltoallv  = ompi_coll_tuned_alltoallv_intra_dec_fixed;
     tuned_module->super.coll_alltoallw  = NULL;

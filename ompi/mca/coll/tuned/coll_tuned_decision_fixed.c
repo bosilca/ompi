@@ -217,6 +217,119 @@ ompi_coll_tuned_allreduce_intra_dec_fixed(const void *sbuf, void *rbuf, int coun
                                                     comm, module, alg, 0, 0);
 }
 
+
+/*
+ *  allreduce_intra for shared memory
+ *
+ *  Function:   - allreduce using other MPI collectives
+ *  Accepts:    - same as MPI_Allreduce()
+ *  Returns:    - MPI_SUCCESS or error code
+ */
+int
+ompi_coll_tuned_allreduce_intra_sm_dec_fixed(const void *sbuf, void *rbuf, int count,
+                                             struct ompi_datatype_t *dtype,
+                                             struct ompi_op_t *op,
+                                             struct ompi_communicator_t *comm,
+                                             mca_coll_base_module_t *module)
+{
+    size_t dsize, total_dsize;
+    int communicator_size, alg;
+    communicator_size = ompi_comm_size(comm);
+    OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_allreduce_intra_dec_fixed"));
+
+    ompi_datatype_type_size(dtype, &dsize);
+    total_dsize = dsize * (ptrdiff_t)count;
+
+    /** Algorithms:
+     *  {1, "basic_linear"},
+     *  {2, "nonoverlapping"},
+     *  {3, "recursive_doubling"},
+     *  {4, "ring"},
+     *  {5, "segmented_ring"},
+     *  {6, "rabenseifner"
+     *
+     * Currently, ring, segmented ring, and rabenseifner do not support
+     * non-commutative operations.
+     */
+    if( !ompi_op_is_commute(op) ) {
+        if (communicator_size < 4) {
+            alg = 1;
+        } else if (communicator_size < 8) {
+            if (total_dsize < 128) {
+                alg = 1;
+            } else if (total_dsize < 16384) {
+                alg = 3;
+            } else if (total_dsize < 262144) {
+                alg = 2;
+            } else {
+                alg = 1;
+            }
+        } else if (communicator_size < 16) {
+            if (total_dsize < 128) {
+                alg = 1;
+            } else if (total_dsize < 4096) {
+                alg = 3;
+            } else if (total_dsize < 262144) {
+                alg = 2;
+            } else {
+                alg = 1;
+            }
+        } else {
+            if (total_dsize < 4096) {
+                alg = 3;
+            } else {
+                alg = 2;
+            }
+        }
+    } else {
+        if (communicator_size < 4) {
+            if (total_dsize < 16384) {
+                alg = 1;
+            } else {
+                alg = 6;
+            }
+        } else if (communicator_size < 8) {
+            if (total_dsize < 2048) {
+                alg = 1;
+            } else {
+                alg = 6;
+            }
+        } else if (communicator_size < 16) {
+            if (total_dsize < 2048) {
+                alg = 3;
+            } else {
+                alg = 6;
+            }
+        } else if (communicator_size < 64) {
+            if (total_dsize < 4096) {
+                alg = 3;
+            } else {
+                alg = 6;
+            }
+        } else if (communicator_size < 128) {
+            if (total_dsize < 2048) {
+                alg = 3;
+            } else if (total_dsize < 262144) {
+                alg = 6;
+            } else {
+                alg = 4;
+            }
+        } else {
+            if (total_dsize < 2048) {
+                alg = 3;
+            } else if (total_dsize < 524288) {
+                alg = 6;
+            } else {
+                alg = 4;
+            }
+        }
+    }
+
+    return ompi_coll_tuned_allreduce_intra_do_this (sbuf, rbuf, count, dtype, op,
+                                                    comm, module, alg, 0, 0);
+}
+
+
 /*
  *	alltoall_intra_dec
  *
@@ -1226,6 +1339,72 @@ int ompi_coll_tuned_allgather_intra_dec_fixed(const void *sbuf, int scount,
                                                    rbuf, rcount, rdtype,
                                                    comm, module, alg, 0, 0);
 }
+
+
+int ompi_coll_tuned_allgather_intra_sm_dec_fixed(const void *sbuf, int scount,
+                                                 struct ompi_datatype_t *sdtype,
+                                                 void* rbuf, int rcount,
+                                                 struct ompi_datatype_t *rdtype,
+                                                 struct ompi_communicator_t *comm,
+                                                 mca_coll_base_module_t *module)
+{
+    int communicator_size, alg;
+    size_t dsize, total_dsize;
+    if (MPI_IN_PLACE != sbuf) {
+        ompi_datatype_type_size(sdtype, &dsize);
+    } else {
+        ompi_datatype_type_size(rdtype, &dsize);
+    }
+    total_dsize = dsize * (ptrdiff_t)scount;
+
+    communicator_size = ompi_comm_size(comm);
+    /** Algorithms:
+     *  {1, "linear"},
+     *  {2, "bruck"},
+     *  {3, "recursive_doubling"},
+     *  {4, "ring"},
+     *  {5, "neighbor"},
+     *  {6, "two_proc"}
+     */
+    if (communicator_size == 2) {
+        alg = 6;
+    } else if (communicator_size < 4) {
+        alg = 3;
+    } else if (communicator_size < 8) {
+        if (total_dsize < 2048) {
+            alg = 3;
+        } else if (total_dsize < 65536) {
+            alg = 5;
+        } else {
+            alg = 4;
+        }
+    } else if (communicator_size <= 64) {
+        if (total_dsize < 512) {
+            alg = 3;
+        } else if (total_dsize < 65536) {
+            alg = 5;
+        } else {
+            alg = 4;
+        }
+    } else {
+        if (total_dsize < 128) {
+            alg = 3;
+        } else if (total_dsize < 65536) {
+            alg = 5;
+        } else {
+            alg = 4;
+        }
+    }
+
+    OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_allgather_intra_dec_fixed"
+                 " rank %d com_size %d", ompi_comm_rank(comm), communicator_size));
+
+    return ompi_coll_tuned_allgather_intra_do_this(sbuf, scount, sdtype,
+                                                   rbuf, rcount, rdtype,
+                                                   comm, module, alg, 0, 0);
+}
+
+
 
 /*
  *	allgatherv_intra_dec
