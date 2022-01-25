@@ -927,6 +927,125 @@ int ompi_coll_tuned_reduce_intra_dec_fixed( const void *sendbuf, void *recvbuf,
 }
 
 /*
+ *	reduce_intra_dec
+ *
+ *	Function:	- selects reduce algorithm to use
+ *	Accepts:	- same arguments as MPI_reduce()
+ *	Returns:	- MPI_SUCCESS or error code (passed from the reduce implementation)
+ *
+ */
+int ompi_coll_tuned_reduce_intra_sm_dec_fixed( const void *sendbuf, void *recvbuf,
+                                               int count, struct ompi_datatype_t* datatype,
+                                               struct ompi_op_t* op, int root,
+                                               struct ompi_communicator_t* comm,
+                                               mca_coll_base_module_t *module)
+{
+    int communicator_size, alg;
+    size_t total_dsize, dsize;
+
+    communicator_size = ompi_comm_size(comm);
+
+    OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_reduce_intra_dec_fixed "
+                 "root %d rank %d com_size %d", root, ompi_comm_rank(comm), communicator_size));
+
+    ompi_datatype_type_size(datatype, &dsize);
+    total_dsize = dsize * (ptrdiff_t)count;   /* needed for decision */
+
+    /** Algorithms:
+     *  {1, "linear"},
+     *  {2, "chain"},
+     *  {3, "pipeline"},
+     *  {4, "binary"},
+     *  {5, "binomial"},
+     *  {6, "in-order_binary"},
+     *  {7, "rabenseifner"},
+     *
+     * Currently, only linear and in-order binary tree algorithms are
+     * capable of non commutative ops.
+     */
+    if( !ompi_op_is_commute(op) ) {
+        if (communicator_size < 4) {
+            alg = 1;
+        } else if (communicator_size < 16) {
+            if (total_dsize < 4096) {
+                alg = 1;
+            } else if (total_dsize < 262144) {
+                alg = 6;
+            } else {
+                alg = 1;
+            }
+        } else if (communicator_size < 32) {
+            if (total_dsize < 512) {
+                alg = 1;
+            } else {
+                alg = 6;
+            }
+        } else {
+            alg = 6;
+        }
+    } else {
+        if (communicator_size < 8) {
+            alg = 1;
+        } else if (communicator_size < 8) {
+            if (total_dsize < 8192) {
+                alg = 1;
+            } else if (total_dsize < 262144) {
+                alg = 7;
+            } else {
+                alg = 1;
+            }
+        } else if (communicator_size < 16) {
+            if (total_dsize < 4096) {
+                alg = 1;
+            } else if (total_dsize < 262144) {
+                alg = 7;
+            } else {
+                alg = 1;
+            }
+        } else if (communicator_size < 32) {
+            if (total_dsize < 256) {
+                alg = 1;
+            } else if (total_dsize < 4096) {
+                alg = 4;
+            } else if (total_dsize < 131072) {
+                alg = 7;
+            } else {
+                alg = 5;
+            }
+        } else if (communicator_size < 64) {
+            if (total_dsize < 8192) {
+                alg = 5;
+            } else if (total_dsize < 524288) {
+                alg = 7;
+            } else {
+                alg = 6;
+            }
+        } else if (communicator_size < 128) {
+            if (total_dsize < 16384) {
+                alg = 5;
+            } else if (total_dsize < 524288) {
+                alg = 7;
+            } else {
+                alg = 5;
+            }
+        } else {
+            if (total_dsize < 16384) {
+                alg = 5;
+            } else if (total_dsize < 524288) {
+                alg = 7;
+            } else {
+                alg = 6;
+            }
+        }
+    }
+
+    return  ompi_coll_tuned_reduce_intra_do_this (sendbuf, recvbuf, count, datatype,
+                                                  op, root, comm, module,
+                                                  alg, 0, 0, 0);
+}
+
+
+/*
  *	reduce_scatter_intra_dec
  *
  *	Function:	- selects reduce_scatter algorithm to use
