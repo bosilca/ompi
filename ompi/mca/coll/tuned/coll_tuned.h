@@ -100,7 +100,7 @@ ompi_coll_tuned_comm_query(struct ompi_communicator_t *comm, int *priority);
 
 /* All Gather */
 int ompi_coll_tuned_allgather_intra_dec_fixed(ALLGATHER_ARGS);
-int ompi_coll_tuned_allgather_intra_sm_dec_fixed(ALLGATHER_ARGS);
+int ompi_coll_tuned_allgather_intra_singlenode_dec_fixed(ALLGATHER_ARGS);
 int ompi_coll_tuned_allgather_intra_dec_dynamic(ALLGATHER_ARGS);
 int ompi_coll_tuned_allgather_intra_do_this(ALLGATHER_ARGS, int algorithm, int faninout, int segsize);
 int ompi_coll_tuned_allgather_intra_check_forced_init(coll_tuned_force_algorithm_mca_param_indices_t *mca_param_indices);
@@ -113,7 +113,7 @@ int ompi_coll_tuned_allgatherv_intra_check_forced_init(coll_tuned_force_algorith
 
 /* All Reduce */
 int ompi_coll_tuned_allreduce_intra_dec_fixed(ALLREDUCE_ARGS);
-int ompi_coll_tuned_allreduce_intra_sm_dec_fixed(ALLREDUCE_ARGS);
+int ompi_coll_tuned_allreduce_intra_singlenode_dec_fixed(ALLREDUCE_ARGS);
 int ompi_coll_tuned_allreduce_intra_dec_dynamic(ALLREDUCE_ARGS);
 int ompi_coll_tuned_allreduce_intra_do_this(ALLREDUCE_ARGS, int algorithm, int faninout, int segsize);
 int ompi_coll_tuned_allreduce_intra_check_forced_init (coll_tuned_force_algorithm_mca_param_indices_t *mca_param_indices);
@@ -150,7 +150,7 @@ int ompi_coll_tuned_gather_intra_check_forced_init (coll_tuned_force_algorithm_m
 
 /* Reduce */
 int ompi_coll_tuned_reduce_intra_dec_fixed(REDUCE_ARGS);
-int ompi_coll_tuned_reduce_intra_sm_dec_fixed(REDUCE_ARGS);
+int ompi_coll_tuned_reduce_intra_singlenode_dec_fixed(REDUCE_ARGS);
 int ompi_coll_tuned_reduce_intra_dec_dynamic(REDUCE_ARGS);
 int ompi_coll_tuned_reduce_intra_do_this(REDUCE_ARGS, int algorithm, int faninout, int segsize, int max_oustanding_reqs);
 int ompi_coll_tuned_reduce_intra_check_forced_init (coll_tuned_force_algorithm_mca_param_indices_t *mca_param_indices);

@@ -226,16 +226,16 @@ ompi_coll_tuned_allreduce_intra_dec_fixed(const void *sbuf, void *rbuf, int coun
  *  Returns:    - MPI_SUCCESS or error code
  */
 int
-ompi_coll_tuned_allreduce_intra_sm_dec_fixed(const void *sbuf, void *rbuf, int count,
-                                             struct ompi_datatype_t *dtype,
-                                             struct ompi_op_t *op,
-                                             struct ompi_communicator_t *comm,
-                                             mca_coll_base_module_t *module)
+ompi_coll_tuned_allreduce_intra_singlenode_dec_fixed(const void *sbuf, void *rbuf, int count,
+                                                     struct ompi_datatype_t *dtype,
+                                                     struct ompi_op_t *op,
+                                                     struct ompi_communicator_t *comm,
+                                                     mca_coll_base_module_t *module)
 {
     size_t dsize, total_dsize;
     int communicator_size, alg;
     communicator_size = ompi_comm_size(comm);
-    OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_allreduce_intra_dec_fixed"));
+    OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_allreduce_intra_singlenode_dec_fixed"));
 
     ompi_datatype_type_size(dtype, &dsize);
     total_dsize = dsize * (ptrdiff_t)count;
@@ -934,18 +934,18 @@ int ompi_coll_tuned_reduce_intra_dec_fixed( const void *sendbuf, void *recvbuf,
  *	Returns:	- MPI_SUCCESS or error code (passed from the reduce implementation)
  *
  */
-int ompi_coll_tuned_reduce_intra_sm_dec_fixed( const void *sendbuf, void *recvbuf,
-                                               int count, struct ompi_datatype_t* datatype,
-                                               struct ompi_op_t* op, int root,
-                                               struct ompi_communicator_t* comm,
-                                               mca_coll_base_module_t *module)
+int ompi_coll_tuned_reduce_intra_singlenode_dec_fixed( const void *sendbuf, void *recvbuf,
+                                                       int count, struct ompi_datatype_t* datatype,
+                                                       struct ompi_op_t* op, int root,
+                                                       struct ompi_communicator_t* comm,
+                                                       mca_coll_base_module_t *module)
 {
     int communicator_size, alg;
     size_t total_dsize, dsize;
 
     communicator_size = ompi_comm_size(comm);
 
-    OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_reduce_intra_dec_fixed "
+    OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_reduce_intra_singlenode_dec_fixed "
                  "root %d rank %d com_size %d", root, ompi_comm_rank(comm), communicator_size));
 
     ompi_datatype_type_size(datatype, &dsize);
@@ -1460,12 +1460,12 @@ int ompi_coll_tuned_allgather_intra_dec_fixed(const void *sbuf, int scount,
 }
 
 
-int ompi_coll_tuned_allgather_intra_sm_dec_fixed(const void *sbuf, int scount,
-                                                 struct ompi_datatype_t *sdtype,
-                                                 void* rbuf, int rcount,
-                                                 struct ompi_datatype_t *rdtype,
-                                                 struct ompi_communicator_t *comm,
-                                                 mca_coll_base_module_t *module)
+int ompi_coll_tuned_allgather_intra_singlenode_dec_fixed(const void *sbuf, int scount,
+                                                         struct ompi_datatype_t *sdtype,
+                                                         void* rbuf, int rcount,
+                                                         struct ompi_datatype_t *rdtype,
+                                                         struct ompi_communicator_t *comm,
+                                                         mca_coll_base_module_t *module)
 {
     int communicator_size, alg;
     size_t dsize, total_dsize;
@@ -1515,7 +1515,7 @@ int ompi_coll_tuned_allgather_intra_sm_dec_fixed(const void *sbuf, int scount,
         }
     }
 
-    OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_allgather_intra_dec_fixed"
+    OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_allgather_intra_singlenode_dec_fixed"
                  " rank %d com_size %d", ompi_comm_rank(comm), communicator_size));
 
     return ompi_coll_tuned_allgather_intra_do_this(sbuf, scount, sdtype,
