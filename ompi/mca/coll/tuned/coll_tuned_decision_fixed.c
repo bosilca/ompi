@@ -219,7 +219,7 @@ ompi_coll_tuned_allreduce_intra_dec_fixed(const void *sbuf, void *rbuf, int coun
 
 
 /*
- *  allreduce_intra for shared memory
+ *  allreduce_intra for single node communicators
  *
  *  Function:   - allreduce using other MPI collectives
  *  Accepts:    - same as MPI_Allreduce()
@@ -997,7 +997,7 @@ int ompi_coll_tuned_reduce_intra_dec_fixed( const void *sendbuf, void *recvbuf,
 }
 
 /*
- *	reduce_intra_dec
+ *	reduce_intra_dec for single node communicators
  *
  *	Function:	- selects reduce algorithm to use
  *	Accepts:	- same arguments as MPI_reduce()
@@ -1529,6 +1529,15 @@ int ompi_coll_tuned_allgather_intra_dec_fixed(const void *sbuf, int scount,
                                                    comm, module, alg, 0, 0);
 }
 
+
+/*
+ *	allgather_intra_dec for single-node communicators
+ *
+ *	Function:	- selects allgather algorithm to use
+ *	Accepts:	- same arguments as MPI_Allgather()
+ *	Returns:	- MPI_SUCCESS or error code, passed from corresponding
+ *                        internal allgather function.
+ */
 
 int ompi_coll_tuned_allgather_intra_singlenode_dec_fixed(const void *sbuf, int scount,
                                                          struct ompi_datatype_t *sdtype,
