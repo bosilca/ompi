@@ -764,6 +764,76 @@ int ompi_coll_tuned_bcast_intra_dec_fixed(void *buff, int count,
                                                 alg, 0, 0);
 }
 
+
+/*
+ *	bcast_intra_dec for single node communicators
+ *
+ *	Function:	- selects broadcast algorithm to use
+ *	Accepts:	- same arguments as MPI_Bcast()
+ *	Returns:	- MPI_SUCCESS or error code (passed from the bcast implementation)
+ */
+int ompi_coll_tuned_bcast_intra_singlenode_dec_fixed(void *buff, int count,
+                                                     struct ompi_datatype_t *datatype, int root,
+                                                     struct ompi_communicator_t *comm,
+                                                     mca_coll_base_module_t *module)
+{
+    size_t total_dsize, dsize;
+    int communicator_size, alg;
+	communicator_size = ompi_comm_size(comm);
+
+    ompi_datatype_type_size(datatype, &dsize);
+    total_dsize = dsize * (unsigned long)count;
+
+    OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_bcast_intra_singlenode_dec_fixed"
+                 " root %d rank %d com_size %d",
+                 root, ompi_comm_rank(comm), communicator_size));
+
+    /** Algorithms:
+     *  {1, "basic_linear"},
+     *  {2, "chain"},
+     *  {3, "pipeline"},
+     *  {4, "split_binary_tree"},
+     *  {5, "binary_tree"},
+     *  {6, "binomial"},
+     *  {7, "knomial"},
+     *  {8, "scatter_allgather"},
+     *  {9, "scatter_allgather_ring"},
+     */
+    if (communicator_size < 4) {
+        alg = 1;
+    } else if (communicator_size < 8) {
+        if (total_dsize < 256) {
+            alg = 1;
+        } else if (total_dsize < 16384) {
+            alg = 7;
+        } else {
+            alg = 1;
+        }
+    } else if (communicator_size < 16) {
+        if (total_dsize < 32768) {
+            alg = 7;
+        } else {
+            alg = 1;
+        }
+    } else if (communicator_size < 32) {
+        if (total_dsize < 16384) {
+            alg = 7;
+        } else {
+            alg = 1;
+        }
+    } else {
+        if (total_dsize < 131072) {
+            alg = 7;
+        } else {
+            alg = 1;
+        }
+    }
+
+    return ompi_coll_tuned_bcast_intra_do_this (buff, count, datatype, root,
+                                                comm, module,
+                                                alg, 0, 0);
+}
+
 /*
  *	reduce_intra_dec
  *
