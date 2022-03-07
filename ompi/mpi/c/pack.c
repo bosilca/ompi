@@ -85,15 +85,17 @@ int MPI_Pack(const void *inbuf, int incount, MPI_Datatype datatype,
      * So at the top level we morph the call if the count and datatype look
      * like a good vector.
      */
+    /*
     ompi_datatype_consolidate_t dtmod;
     rc = ompi_datatype_consolidate_create(incount, datatype, &dtmod,
         OMPI_DATATYPE_CONSOLIDATE_THRESHOLD);
     OMPI_ERRHANDLER_CHECK(rc, comm, rc, FUNC_NAME);
+    */
 
     OBJ_CONSTRUCT( &local_convertor, opal_convertor_t );
     /* the resulting convertor will be set to the position ZERO */
     opal_convertor_copy_and_prepare_for_send( ompi_mpi_local_convertor,
-                                              &(dtmod.dt->super), dtmod.count,
+                                              &(datatype->super), incount,
                                               (void *) inbuf, 0, &local_convertor );
 
     /* Check for truncation */
@@ -113,7 +115,7 @@ int MPI_Pack(const void *inbuf, int incount, MPI_Datatype datatype,
     *position += size;
     OBJ_DESTRUCT( &local_convertor );
 
-    rc = ompi_datatype_consolidate_free(&dtmod);
+    //rc = ompi_datatype_consolidate_free(&dtmod);
     OMPI_ERRHANDLER_CHECK(rc, comm, rc, FUNC_NAME);
 
     /* All done.  Note that the convertor returns 1 upon success, not
