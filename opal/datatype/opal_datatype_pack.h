@@ -94,15 +94,14 @@ static inline void pack_predefined_data(opal_convertor_t *CONVERTOR, const dt_el
 {
     const ddt_elem_desc_t *_elem = &((ELEM)->elem);
     size_t blocklen_bytes = opal_datatype_basicDatatypes[_elem->common.type]->size;
-    size_t cando_count = *(COUNT), do_now_bytes;
+    size_t cando_count = (*SPACE) / blocklen_bytes;
     unsigned char *_memory = (*memory) + _elem->disp;
     unsigned char *_packed = *packed;
 
-    assert(0 == (cando_count % _elem->blocklen)); /* no partials here */
-    assert(*(COUNT) <= ((size_t) _elem->count * _elem->blocklen));
+    cando_count = (cando_count > *(COUNT)) ? *(COUNT) : cando_count;
 
-    if ((blocklen_bytes * cando_count) > *(SPACE))
-        cando_count = (*SPACE) / blocklen_bytes;
+    assert(0 == (*(COUNT) % _elem->blocklen)); /* no partials here */
+    assert(*(COUNT) <= ((size_t) _elem->count * _elem->blocklen));
 
     /* premptively update the number of COUNT we will return. */
     *(COUNT) -= cando_count;
@@ -178,10 +177,10 @@ static inline void pack_predefined_data(opal_convertor_t *CONVERTOR, const dt_el
         goto update_and_return;
     }
 
-    if ((1 < _elem->count) && (_elem->blocklen <= cando_count)) {
+    if (1 < _elem->count) {
         blocklen_bytes *= _elem->blocklen;
 
-        do { /* Do as many full blocklen as possible */
+        while (_elem->blocklen <= cando_count) { /* Do as many full blocklen as possible */
             OPAL_DATATYPE_SAFEGUARD_POINTER(_memory, blocklen_bytes, (CONVERTOR)->pBaseBuf,
                                             (CONVERTOR)->pDesc, (CONVERTOR)->count);
             DO_DEBUG(opal_output(0, "pack 2. memcpy( %p, %p, %lu ) => space %lu\n",
@@ -191,7 +190,7 @@ static inline void pack_predefined_data(opal_convertor_t *CONVERTOR, const dt_el
             _packed += blocklen_bytes;
             _memory += _elem->extent;
             cando_count -= _elem->blocklen;
-        } while (_elem->blocklen <= cando_count);
+        }
     }
 
     /**
@@ -200,15 +199,15 @@ static inline void pack_predefined_data(opal_convertor_t *CONVERTOR, const dt_el
     if (0 != cando_count) {
         assert((cando_count < _elem->blocklen)
                || ((1 == _elem->count) && (cando_count <= _elem->blocklen)));
-        do_now_bytes = cando_count * opal_datatype_basicDatatypes[_elem->common.type]->size;
-        OPAL_DATATYPE_SAFEGUARD_POINTER(_memory, do_now_bytes, (CONVERTOR)->pBaseBuf,
+        blocklen_bytes = cando_count * opal_datatype_basicDatatypes[_elem->common.type]->size;
+        OPAL_DATATYPE_SAFEGUARD_POINTER(_memory, blocklen_bytes, (CONVERTOR)->pBaseBuf,
                                         (CONVERTOR)->pDesc, (CONVERTOR)->count);
         DO_DEBUG(opal_output(0, "pack 3. memcpy( %p, %p, %lu ) => space %lu [epilog]\n",
-                             (void *) _packed, (void *) _memory, (unsigned long) do_now_bytes,
+                             (void *) _packed, (void *) _memory, (unsigned long) blocklen_bytes,
                              (unsigned long) (*(SPACE) - (_packed - *(packed)))););
-        MEMCPY_CSUM(_packed, _memory, do_now_bytes, (CONVERTOR));
-        _memory += do_now_bytes;
-        _packed += do_now_bytes;
+        MEMCPY_CSUM(_packed, _memory, blocklen_bytes, (CONVERTOR));
+        _memory += blocklen_bytes;
+        _packed += blocklen_bytes;
     }
 
 update_and_return:
@@ -224,10 +223,10 @@ static inline void pack_contiguous_loop(opal_convertor_t *CONVERTOR, const dt_el
     const ddt_loop_desc_t *_loop = (ddt_loop_desc_t *) (ELEM);
     const ddt_endloop_desc_t *_end_loop = (ddt_endloop_desc_t *) ((ELEM) + _loop->items);
     unsigned char *_memory = (*memory) + _end_loop->first_elem_disp;
-    size_t _copy_loops = *(COUNT);
+    size_t _copy_loops = *(SPACE) / _end_loop->size;
 
-    if ((_copy_loops * _end_loop->size) > *(SPACE))
-        _copy_loops = (*(SPACE) / _end_loop->size);
+    _copy_loops = (_copy_loops > *(COUNT)) ? *(COUNT) : _copy_loops;
+
     for (size_t _i = 0; _i < _copy_loops; _i++) {
         OPAL_DATATYPE_SAFEGUARD_POINTER(_memory, _end_loop->size, (CONVERTOR)->pBaseBuf,
                                         (CONVERTOR)->pDesc, (CONVERTOR)->count);
