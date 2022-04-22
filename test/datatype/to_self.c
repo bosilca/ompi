@@ -24,6 +24,33 @@ extern void ompi_datatype_dump( MPI_Datatype ddt );
 #    define MPI_DDT_DUMP(ddt)
 #endif /* OPEN_MPI */
 
+static MPI_Datatype create_ddt( int num )
+{
+    MPI_Datatype ddt;
+    int blen[num];
+    int disp[num];
+    int left = 8;
+
+    for( int i = 0; i < num; i++ ){
+        disp[i] = 8 * i;
+    }
+
+    for( int i = num - 1; i >= 0; i-- ){
+        if( i != 0 ){
+            blen[i] = 1;
+            left--;
+        } else {
+            blen[i] = left;
+        }
+    }
+
+    MPI_Type_indexed( num, blen, disp, MPI_DOUBLE, &ddt );
+    MPI_Type_create_resized( ddt, 0, 64 * 8, &ddt );
+    MPI_Type_commit( &ddt );
+
+    return ddt;
+}
+
 static MPI_Datatype create_merged_contig_with_gaps(int count) /* count of the basic datatype */
 {
     int array_of_blocklengths[] = {1, 1, 1};
@@ -49,9 +76,9 @@ struct structure {
 };
 
 static MPI_Datatype create_struct_constant_gap_resized_ddt(
-    int number,      /* IGNORED: number of repetitions */
-    int contig_size, /* IGNORED: number of elements in a contiguous chunk */
-    int gap_size)    /* IGNORED: number of elements in a gap */
+        int number,      /* IGNORED: number of repetitions */
+        int contig_size, /* IGNORED: number of elements in a contiguous chunk */
+        int gap_size)    /* IGNORED: number of elements in a gap */
 {
     struct structure data[1];
     MPI_Datatype struct_type, temp_type;
@@ -497,7 +524,7 @@ int main(int argc, char *argv[])
     int rank, size;
     MPI_Datatype ddt;
 
-    run_tests |= DO_PACK | DO_UNPACK;
+    run_tests |= DO_PACK;// | DO_UNPACK;
 
     MPI_Init(&argc, &argv);
 
@@ -509,6 +536,7 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
+    /*
     if (run_tests & DO_CONTIG) {
         printf("\ncontiguous datatype\n\n");
         do_test_for_ddt(run_tests, MPI_INT, MPI_INT, MAX_LENGTH);
@@ -522,6 +550,18 @@ int main(int argc, char *argv[])
         MPI_Type_free(&ddt);
     }
 
+    */
+
+    if (run_tests & DO_OPTIMIZED_INDEXED_GAP) {
+        printf("\n7 1 double ddt\n\n");
+        ddt = create_ddt( atoi(argv[1]) );
+        MPI_DDT_DUMP(ddt);
+        do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+        MPI_Type_free(&ddt);
+    }
+
+
+#if 0
     if (run_tests & DO_OPTIMIZED_INDEXED_GAP) {
         printf("\noptimized indexed gap\n\n");
         ddt = create_indexed_gap_optimized_ddt();
@@ -562,6 +602,7 @@ int main(int argc, char *argv[])
         do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
         MPI_Type_free(&ddt);
     }
+    #endif
 
     MPI_Finalize();
     exit(0);
