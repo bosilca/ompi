@@ -8,7 +8,8 @@
 
 #include "coll_ucc_common.h"
 
-static inline ucc_status_t mca_coll_ucc_barrier_init(mca_coll_ucc_module_t *ucc_module,
+static inline ucc_status_t mca_coll_ucc_barrier_init(bool blocking,
+                                                     mca_coll_ucc_module_t *ucc_module,
                                                      ucc_coll_req_h *req,
                                                      mca_coll_ucc_req_t *coll_req)
 {
@@ -16,6 +17,10 @@ static inline ucc_status_t mca_coll_ucc_barrier_init(mca_coll_ucc_module_t *ucc_
         .mask      = 0,
         .coll_type = UCC_COLL_TYPE_BARRIER
     };
+    if (blocking) {
+        coll.mask  = UCC_COLL_ARGS_FIELD_FLAGS;
+        coll.flags = UCC_COLL_ARGS_HINT_OPTIMIZE_LATENCY;
+    }
     COLL_UCC_REQ_INIT(coll_req, req, coll, ucc_module);
     return UCC_OK;
 fallback:
@@ -29,7 +34,7 @@ int mca_coll_ucc_barrier(struct ompi_communicator_t *comm,
     ucc_coll_req_h         req;
 
     UCC_VERBOSE(3, "running ucc barrier");
-    COLL_UCC_CHECK(mca_coll_ucc_barrier_init(ucc_module, &req, NULL));
+    COLL_UCC_CHECK(mca_coll_ucc_barrier_init(true, ucc_module, &req, NULL));
     COLL_UCC_POST_AND_CHECK(req);
     COLL_UCC_CHECK(coll_ucc_req_wait(req));
     return OMPI_SUCCESS;
@@ -48,7 +53,7 @@ int mca_coll_ucc_ibarrier(struct ompi_communicator_t *comm,
 
     UCC_VERBOSE(3, "running ucc ibarrier");
     COLL_UCC_GET_REQ(coll_req);
-    COLL_UCC_CHECK(mca_coll_ucc_barrier_init(ucc_module, &req, coll_req));
+    COLL_UCC_CHECK(mca_coll_ucc_barrier_init(false, ucc_module, &req, coll_req));
     COLL_UCC_POST_AND_CHECK(req);
     *request = &coll_req->super;
     return OMPI_SUCCESS;

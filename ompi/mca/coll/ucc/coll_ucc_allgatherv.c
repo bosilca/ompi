@@ -13,6 +13,7 @@ static inline ucc_status_t mca_coll_ucc_allgatherv_init(const void *sbuf, int sc
                                                         struct ompi_datatype_t *sdtype,
                                                         void* rbuf, const int *rcounts, const int *rdisps,
                                                         struct ompi_datatype_t *rdtype,
+                                                        bool blocking,
                                                         mca_coll_ucc_module_t *ucc_module,
                                                         ucc_coll_req_h *req,
                                                         mca_coll_ucc_req_t *coll_req)
@@ -31,6 +32,7 @@ static inline ucc_status_t mca_coll_ucc_allgatherv_init(const void *sbuf, int sc
 
     ucc_coll_args_t coll = {
         .mask      = 0,
+        .flags     = 0,
         .coll_type = UCC_COLL_TYPE_ALLGATHERV,
         .src.info = {
             .buffer        = (void*)sbuf,
@@ -50,6 +52,10 @@ static inline ucc_status_t mca_coll_ucc_allgatherv_init(const void *sbuf, int sc
     if (MPI_IN_PLACE == sbuf) {
         coll.mask  = UCC_COLL_ARGS_FIELD_FLAGS;
         coll.flags = UCC_COLL_ARGS_FLAG_IN_PLACE;
+    }
+    if (blocking) {
+        coll.mask  |= UCC_COLL_ARGS_FIELD_FLAGS;
+        coll.flags |= UCC_COLL_ARGS_HINT_OPTIMIZE_LATENCY;
     }
     COLL_UCC_REQ_INIT(coll_req, req, coll, ucc_module);
     return UCC_OK;
@@ -71,7 +77,7 @@ int mca_coll_ucc_allgatherv(const void *sbuf, int scount,
 
     COLL_UCC_CHECK(mca_coll_ucc_allgatherv_init(sbuf, scount, sdtype,
                                                 rbuf, rcounts, rdisps, rdtype,
-                                                ucc_module, &req, NULL));
+                                                true, ucc_module, &req, NULL));
     COLL_UCC_POST_AND_CHECK(req);
     COLL_UCC_CHECK(coll_ucc_req_wait(req));
     return OMPI_SUCCESS;
@@ -98,7 +104,7 @@ int mca_coll_ucc_iallgatherv(const void *sbuf, int scount,
     COLL_UCC_GET_REQ(coll_req);
     COLL_UCC_CHECK(mca_coll_ucc_allgatherv_init(sbuf, scount, sdtype,
                                                 rbuf, rcounts, rdisps, rdtype,
-                                                ucc_module, &req, coll_req));
+                                                false, ucc_module, &req, coll_req));
     COLL_UCC_POST_AND_CHECK(req);
     *request = &coll_req->super;
     return OMPI_SUCCESS;

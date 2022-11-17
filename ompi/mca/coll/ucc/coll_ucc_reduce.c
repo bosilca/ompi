@@ -11,6 +11,7 @@
 static inline ucc_status_t mca_coll_ucc_reduce_init(const void *sbuf, void *rbuf, size_t count,
                                                     struct ompi_datatype_t *dtype,
                                                     struct ompi_op_t *op, int root,
+                                                    bool blocking,
                                                     mca_coll_ucc_module_t *ucc_module,
                                                     ucc_coll_req_h *req,
                                                     mca_coll_ucc_req_t *coll_req)
@@ -31,7 +32,8 @@ static inline ucc_status_t mca_coll_ucc_reduce_init(const void *sbuf, void *rbuf
         goto fallback;
     }
     ucc_coll_args_t coll = {
-        .mask = 0,
+        .mask  = 0,
+        .flags = 0,
         .coll_type = UCC_COLL_TYPE_REDUCE,
         .root = root,
         .src.info = {
@@ -52,6 +54,10 @@ static inline ucc_status_t mca_coll_ucc_reduce_init(const void *sbuf, void *rbuf
         coll.mask |= UCC_COLL_ARGS_FIELD_FLAGS;
         coll.flags = UCC_COLL_ARGS_FLAG_IN_PLACE;
     }
+    if (blocking) {
+        coll.mask  |= UCC_COLL_ARGS_FIELD_FLAGS;
+        coll.flags |= UCC_COLL_ARGS_HINT_OPTIMIZE_LATENCY;
+    }
     COLL_UCC_REQ_INIT(coll_req, req, coll, ucc_module);
     return UCC_OK;
 fallback:
@@ -69,7 +75,7 @@ int mca_coll_ucc_reduce(const void *sbuf, void* rbuf, size_t count,
 
     UCC_VERBOSE(3, "running ucc reduce");
     COLL_UCC_CHECK(mca_coll_ucc_reduce_init(sbuf, rbuf, count, dtype, op,
-                                            root, ucc_module, &req, NULL));
+                                            root, true, ucc_module, &req, NULL));
     COLL_UCC_POST_AND_CHECK(req);
     COLL_UCC_CHECK(coll_ucc_req_wait(req));
     return OMPI_SUCCESS;
@@ -93,7 +99,7 @@ int mca_coll_ucc_ireduce(const void *sbuf, void* rbuf, size_t count,
     UCC_VERBOSE(3, "running ucc ireduce");
     COLL_UCC_GET_REQ(coll_req);
     COLL_UCC_CHECK(mca_coll_ucc_reduce_init(sbuf, rbuf, count, dtype, op, root,
-                                            ucc_module, &req, coll_req));
+                                            false, ucc_module, &req, coll_req));
     COLL_UCC_POST_AND_CHECK(req);
     *request = &coll_req->super;
     return OMPI_SUCCESS;

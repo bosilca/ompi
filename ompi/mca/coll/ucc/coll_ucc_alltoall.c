@@ -11,6 +11,7 @@
 
 static inline ucc_status_t mca_coll_ucc_alltoall_init(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
                                                       void* rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
+                                                      bool blocking,
                                                       mca_coll_ucc_module_t *ucc_module,
                                                       ucc_coll_req_h *req,
                                                       mca_coll_ucc_req_t *coll_req)
@@ -34,6 +35,7 @@ static inline ucc_status_t mca_coll_ucc_alltoall_init(const void *sbuf, size_t s
 
     ucc_coll_args_t coll = {
         .mask      = 0,
+        .flags     = 0,
         .coll_type = UCC_COLL_TYPE_ALLTOALL,
         .src.info = {
             .buffer   = (void*)sbuf,
@@ -53,6 +55,10 @@ static inline ucc_status_t mca_coll_ucc_alltoall_init(const void *sbuf, size_t s
         coll.mask  = UCC_COLL_ARGS_FIELD_FLAGS;
         coll.flags = UCC_COLL_ARGS_FLAG_IN_PLACE;
     }
+    if (blocking) {
+        coll.mask  |= UCC_COLL_ARGS_FIELD_FLAGS;
+        coll.flags |= UCC_COLL_ARGS_HINT_OPTIMIZE_LATENCY;
+    }
     COLL_UCC_REQ_INIT(coll_req, req, coll, ucc_module);
     return UCC_OK;
 fallback:
@@ -70,6 +76,7 @@ int mca_coll_ucc_alltoall(const void *sbuf, size_t scount, struct ompi_datatype_
     UCC_VERBOSE(3, "running ucc alltoall");
     COLL_UCC_CHECK(mca_coll_ucc_alltoall_init(sbuf, scount, sdtype,
                                               rbuf, rcount, rdtype,
+                                              true,
                                               ucc_module, &req, NULL));
     COLL_UCC_POST_AND_CHECK(req);
     COLL_UCC_CHECK(coll_ucc_req_wait(req));
@@ -94,6 +101,7 @@ int mca_coll_ucc_ialltoall(const void *sbuf, size_t scount, struct ompi_datatype
     COLL_UCC_GET_REQ(coll_req);
     COLL_UCC_CHECK(mca_coll_ucc_alltoall_init(sbuf, scount, sdtype,
                                               rbuf, rcount, rdtype,
+                                              false,
                                               ucc_module, &req, coll_req));
     COLL_UCC_POST_AND_CHECK(req);
     *request = &coll_req->super;

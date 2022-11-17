@@ -11,6 +11,7 @@
 
 static inline ucc_status_t mca_coll_ucc_allgather_init(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
                                                        void* rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
+                                                       bool blocking,
                                                        mca_coll_ucc_module_t *ucc_module,
                                                        ucc_coll_req_h *req,
                                                        mca_coll_ucc_req_t *coll_req)
@@ -34,6 +35,7 @@ static inline ucc_status_t mca_coll_ucc_allgather_init(const void *sbuf, size_t 
 
     ucc_coll_args_t coll = {
         .mask      = 0,
+        .flags     = 0,
         .coll_type = UCC_COLL_TYPE_ALLGATHER,
         .src.info = {
             .buffer   = (void*)sbuf,
@@ -53,6 +55,10 @@ static inline ucc_status_t mca_coll_ucc_allgather_init(const void *sbuf, size_t 
         coll.mask  = UCC_COLL_ARGS_FIELD_FLAGS;
         coll.flags = UCC_COLL_ARGS_FLAG_IN_PLACE;
     }
+    if (blocking) {
+        coll.mask  |= UCC_COLL_ARGS_FIELD_FLAGS;
+        coll.flags |= UCC_COLL_ARGS_HINT_OPTIMIZE_LATENCY;
+    }
     COLL_UCC_REQ_INIT(coll_req, req, coll, ucc_module);
     return UCC_OK;
 fallback:
@@ -70,7 +76,7 @@ int mca_coll_ucc_allgather(const void *sbuf, size_t scount, struct ompi_datatype
     UCC_VERBOSE(3, "running ucc allgather");
     COLL_UCC_CHECK(mca_coll_ucc_allgather_init(sbuf, scount, sdtype,
                                                rbuf, rcount, rdtype,
-                                               ucc_module, &req, NULL));
+                                               true, ucc_module, &req, NULL));
     COLL_UCC_POST_AND_CHECK(req);
     COLL_UCC_CHECK(coll_ucc_req_wait(req));
     return OMPI_SUCCESS;
@@ -94,7 +100,7 @@ int mca_coll_ucc_iallgather(const void *sbuf, size_t scount, struct ompi_datatyp
     COLL_UCC_GET_REQ(coll_req);
     COLL_UCC_CHECK(mca_coll_ucc_allgather_init(sbuf, scount, sdtype,
                                                rbuf, rcount, rdtype,
-                                               ucc_module, &req, coll_req));
+                                               false, ucc_module, &req, coll_req));
     COLL_UCC_POST_AND_CHECK(req);
     *request = &coll_req->super;
     return OMPI_SUCCESS;
