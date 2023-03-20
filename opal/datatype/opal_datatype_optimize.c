@@ -377,7 +377,8 @@ opal_generate_iovec( opal_datatype_t *pData )
 
 
     gcc_jit_context *ctxt;
-    gcc_jit_type *char_type, *void_type, *char_ptr_type, *void_ptr_type, *sizet_type;
+    gcc_jit_type *char_type, *void_type, *char_ptr_type, *void_ptr_type, *sizet_type,
+                 *char_ptr_type_const;
 
     ctxt = gcc_jit_context_acquire();
     char_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_CHAR );
@@ -386,10 +387,11 @@ opal_generate_iovec( opal_datatype_t *pData )
 
     char_ptr_type = gcc_jit_type_get_pointer( char_type );
     void_ptr_type = gcc_jit_type_get_pointer( void_type );
+    char_ptr_type_const = gcc_jit_type_get_const( char_ptr_type );
 
     gcc_jit_param *param[2] = {
-        gcc_jit_context_new_param( ctxt, NULL, char_ptr_type, "dst" ),
-        gcc_jit_context_new_param( ctxt, NULL, char_ptr_type, "src" )
+        gcc_jit_context_new_param( ctxt, NULL, char_ptr_type_const, "dst" ),
+        gcc_jit_context_new_param( ctxt, NULL, char_ptr_type_const, "src" )
     };
 
     gcc_jit_function *func;

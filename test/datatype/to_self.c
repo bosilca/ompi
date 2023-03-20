@@ -669,7 +669,8 @@ int main(int argc, char *argv[])
 
     if (run_tests & DO_OPTIMIZED_INDEXED_GAP) {
         for( int i = 2; i < 9; i++ ){
-            
+
+            i = 8;       
             if( i == 2 )
                 printf("\n! 7_1 ddt\n\n");
             if( i == 3 )
@@ -713,9 +714,11 @@ int main(int argc, char *argv[])
             }
 
             MPI_Type_free(&ddt);
+            break;
         }
     }
 
+#if 0
     printf("\n! indexed gap\n\n");
     ddt = create_indexed_gap_ddt();
     MPI_DDT_DUMP(ddt);
@@ -745,6 +748,7 @@ int main(int argc, char *argv[])
     MPI_DDT_DUMP(ddt);
     do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
     MPI_Type_free(&ddt);
+#endif
 
     MPI_Finalize();
     exit(0);

@@ -113,7 +113,7 @@ struct dt_type_desc_t {
 };
 typedef struct dt_type_desc_t dt_type_desc_t;
 
-typedef void (*pack_type)(char *d, char *s);
+typedef void (*pack_type)(const char *d, const char *s);
 /*
  * The datatype description.
  */
