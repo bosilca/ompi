@@ -51,6 +51,32 @@ static MPI_Datatype create_ddt( int num )
     return ddt;
 }
 
+static MPI_Datatype create_len_ddt( int num, int len )
+{
+    MPI_Datatype ddt;
+    int blen[num];
+    int disp[num];
+    int left = len * 8;
+
+    for( int i = 0; i < num; i++ ){
+        disp[i] = len * 8 * i;
+    }
+
+    for( int i = num - 1; i >= 0; i-- ){
+        if( i != 0 ){
+            blen[i] = len;
+            left-=len;
+        } else {
+            blen[i] = left;
+        }
+    }
+
+    MPI_Type_indexed( num, blen, disp, MPI_DOUBLE, &ddt );
+    MPI_Type_commit( &ddt );
+
+    return ddt;
+}
+
 static MPI_Datatype create_merged_contig_with_gaps(int count) /* count of the basic datatype */
 {
     int array_of_blocklengths[] = {1, 1, 1};
@@ -242,8 +268,8 @@ static MPI_Datatype create_indexed_gap_optimized_ddt(void)
 #define MAX_LENGTH (1024 * 1024)
 
 static int cycles = 100;
-static int trials = 20;
-static int warmups = 2;
+static int trials = 10;
+static int warmups = 0;
 
 static void print_result(int length, int trials, double *timers)
 {
@@ -318,7 +344,9 @@ static int pack(int cycles, MPI_Datatype sdt, int scount, void *sbuf, void *pack
         }
         timers[t] = (MPI_Wtime() - timers[t]) / cycles;
     }
+
     print_result(outsize, trials, timers);
+
     return 0;
 }
 
@@ -467,9 +495,13 @@ static int do_test_for_ddt(int doop, MPI_Datatype sddt, MPI_Datatype rddt, int l
 {
     MPI_Aint lb, extent;
     char *sbuf, *rbuf;
-    int i;
+    int i, ddt_size;
 
     MPI_Type_get_extent(sddt, &lb, &extent);
+    MPI_Type_size( sddt, &ddt_size );
+
+    length = 25600000 / ddt_size * extent;
+
     sbuf = (char *) malloc(length);
     rbuf = (char *) malloc(length);
     if (doop & DO_PACK) {
@@ -518,6 +550,105 @@ static int do_test_for_ddt(int doop, MPI_Datatype sddt, MPI_Datatype rddt, int l
     return 0;
 }
 
+static int do_pipeline_pack( const void *inbuf, int incount, MPI_Datatype datatype,
+        void *outbuf, int outsize, int pipe_size )
+{
+    int position, myself, c, t, i, ddt_size;
+    double timers[trials];
+    size_t extent, lb;
+
+    int pc, check;
+    int j = 0, current_pos = 0, keep_pos = 0,
+        keep, do_count;
+
+    MPI_Type_get_extent( datatype, &lb, &extent );
+    MPI_Type_size( datatype, &ddt_size );
+
+    MPI_Comm_rank( MPI_COMM_WORLD, &myself );
+
+    for( t = 0; t < trials; t++ ) {
+        timers[t] = MPI_Wtime();
+
+        for( c = 0; c < cycles; c++ ) {
+            do_count = incount;
+            keep = 0;
+            for( int k = 0 ; k < incount / pipe_size; k++ ){
+                current_pos = 0;
+                MPI_Pack( inbuf + k * pipe_size * extent,
+                        pipe_size,
+                        datatype,
+                        outbuf + k * pipe_size * ddt_size,
+                        pipe_size * ddt_size,
+                        &current_pos,
+                        MPI_COMM_SELF );
+                keep += pipe_size;
+                do_count -= pipe_size;
+            }
+
+            if( do_count != 0 ){
+                current_pos = 0;
+                MPI_Pack( inbuf + keep * pipe_size * extent,
+                        do_count,
+                        datatype,
+                        outbuf + keep * pipe_size * ddt_size,
+                        do_count * ddt_size,
+                        &current_pos,
+                        MPI_COMM_SELF );
+            }
+
+        }
+        timers[t] = (MPI_Wtime() - timers[t]) / cycles;
+    }
+
+    print_result(outsize, trials, timers);
+
+    return 0;
+}
+
+static int pack_pipeline( int cycles,
+        MPI_Datatype sdt, int scount, void* sbuf,
+        void* packed_buf, int pipe_size )
+{
+    int position, myself, c, t, outsize;
+    double timers[trials];
+
+    MPI_Type_size( sdt, &outsize );
+    outsize *= scount;
+
+    do_pipeline_pack(sbuf, scount, sdt, packed_buf, outsize, pipe_size );
+
+    return 0;
+}
+
+static int do_pipeline_test_for_ddt( int doop, MPI_Datatype sddt, MPI_Datatype rddt, size_t length, int num )
+{
+    MPI_Aint lb, extent;
+    char *sbuf, *rbuf;
+    int i;
+    int max_length;
+
+    MPI_Type_get_extent( sddt, &lb, &extent );
+    MPI_Type_size( sddt, &max_length );
+
+    length = 16800000. / max_length * extent;
+
+    sbuf = (char*)malloc( length );
+    rbuf = (char*)malloc( length );
+
+    printf("\n# Pack (max length %zu) Pipeline %d ddt per segment\n",
+            length,
+            num );
+
+    for( i = num; i < (length / extent); i*=2 ){
+        pack_pipeline( cycles, sddt, i, sbuf, rbuf, num );
+    }
+
+
+    free( sbuf );
+    free( rbuf );
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     int run_tests = 0xffff; /* do all datatype tests by default */
@@ -536,73 +667,84 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
-    /*
-    if (run_tests & DO_CONTIG) {
-        printf("\ncontiguous datatype\n\n");
-        do_test_for_ddt(run_tests, MPI_INT, MPI_INT, MAX_LENGTH);
-    }
-
-    if (run_tests & DO_INDEXED_GAP) {
-        printf("\nindexed gap\n\n");
-        ddt = create_indexed_gap_ddt();
-        MPI_DDT_DUMP(ddt);
-        do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
-        MPI_Type_free(&ddt);
-    }
-
-    */
-
     if (run_tests & DO_OPTIMIZED_INDEXED_GAP) {
-        printf("\n7 1 double ddt\n\n");
-        ddt = create_ddt( atoi(argv[1]) );
-        MPI_DDT_DUMP(ddt);
-        do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
-        MPI_Type_free(&ddt);
-    }
+        for( int i = 2; i < 9; i++ ){
+            
+            if( i == 2 )
+                printf("\n! 7_1 ddt\n\n");
+            if( i == 3 )
+                printf("\n! 6_1_1 ddt\n\n");
+            if( i == 4 )
+                printf("\n! 5_1_1_1 ddt\n\n");
+            if( i == 5 )
+                printf("\n! 4_1_1_1_1 ddt\n\n");
+            if( i == 6 )
+                printf("\n! 3_1_1_1_1_1 ddt\n\n");
+            if( i == 7 )
+                printf("\n! 2_1_1_1_1_1_1 ddt\n\n");
+            if( i == 8 )
+                printf("\n! 1_1_1_1_1_1_1_1 ddt\n\n");
+            
+
+            ddt = create_ddt( i );
+            MPI_DDT_DUMP(ddt);
+            do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+
+            size_t true_lb, true_extent,
+                   lb, extent;
+            MPI_Type_get_true_extent( ddt, &true_lb, &true_extent );
+            MPI_Type_get_extent( ddt, &lb, &extent );
+
+            size_t true_distance = (true_extent - true_lb) / 64 * 64 + 3 * 64,
+                   distance = (extent - lb) / 64 * 64 + 3 * 64;
+
+            if( true_distance <= distance ){
+                //printf("\n# pack calculated pipeline size (data size) %d\n", true_distance);
+//                do_pipeline_test_for_ddt( run_tests, ddt, ddt, MAX_LENGTH, 32000 / true_distance );
+            } else {
+                //printf("\n# pack calculated pipeline size (data size) %d\n", distance);
+//                do_pipeline_test_for_ddt( run_tests, ddt, ddt, MAX_LENGTH, 32000 / distance );
+            }
 
 
-#if 0
-    if (run_tests & DO_OPTIMIZED_INDEXED_GAP) {
-        printf("\noptimized indexed gap\n\n");
-        ddt = create_indexed_gap_optimized_ddt();
-        MPI_DDT_DUMP(ddt);
-        do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
-        MPI_Type_free(&ddt);
+            for( int j = 8; j < 4097; j *= 2 ){
+                //printf("\n# pack pipeline size (data size) %d\n\n", j * extent);
+//                do_pipeline_test_for_ddt( run_tests, ddt, ddt, MAX_LENGTH, j );
+            }
+
+            MPI_Type_free(&ddt);
+        }
     }
 
-    if (run_tests & DO_CONSTANT_GAP) {
-        printf("\nconstant indexed gap\n\n");
-        ddt = create_indexed_constant_gap_ddt(80, 100, 1);
-        MPI_DDT_DUMP(ddt);
-        do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
-        MPI_Type_free(&ddt);
-    }
+    printf("\n! indexed gap\n\n");
+    ddt = create_indexed_gap_ddt();
+    MPI_DDT_DUMP(ddt);
+    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+    MPI_Type_free(&ddt);
 
-    if (run_tests & DO_CONSTANT_GAP) {
-        printf("\noptimized constant indexed gap\n\n");
-        ddt = create_optimized_indexed_constant_gap_ddt(80, 100, 1);
-        MPI_DDT_DUMP(ddt);
-        do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
-        MPI_Type_free(&ddt);
-    }
+    printf("\n! optimized indexed gap\n\n");
+    ddt = create_indexed_gap_optimized_ddt();
+    MPI_DDT_DUMP(ddt);
+    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+    MPI_Type_free(&ddt);
 
-    if (run_tests & DO_STRUCT_CONSTANT_GAP_RESIZED) {
-        printf("\nstruct constant gap resized\n\n");
-        ddt = create_struct_constant_gap_resized_ddt(0 /* unused */, 0 /* unused */,
-                                                     0 /* unused */);
-        MPI_DDT_DUMP(ddt);
-        do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
-        MPI_Type_free(&ddt);
-    }
+    printf("\n! constant indexed gap\n\n");
+    ddt = create_indexed_constant_gap_ddt(80, 100, 1);
+    MPI_DDT_DUMP(ddt);
+    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+    MPI_Type_free(&ddt);
 
-    if (run_tests & DO_STRUCT_MERGED_WITH_GAP_RESIZED) {
-        printf("\nstruct constant gap resized\n\n");
-        ddt = create_merged_contig_with_gaps(1);
-        MPI_DDT_DUMP(ddt);
-        do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
-        MPI_Type_free(&ddt);
-    }
-    #endif
+    printf("\n! optimized constant indexed gap\n\n");
+    ddt = create_optimized_indexed_constant_gap_ddt(80, 100, 1);
+    MPI_DDT_DUMP(ddt);
+    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+    MPI_Type_free(&ddt);
+
+    printf("\n! struct constant gap resized\n\n");
+    ddt = create_merged_contig_with_gaps(1);
+    MPI_DDT_DUMP(ddt);
+    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+    MPI_Type_free(&ddt);
 
     MPI_Finalize();
     exit(0);

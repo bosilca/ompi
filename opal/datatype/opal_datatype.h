@@ -41,6 +41,10 @@
 
 #include <stddef.h>
 
+#include <stdint.h>
+#include <stdlib.h>
+#include <libgccjit.h>
+
 #include "opal/class/opal_object.h"
 
 BEGIN_C_DECLS
@@ -109,6 +113,7 @@ struct dt_type_desc_t {
 };
 typedef struct dt_type_desc_t dt_type_desc_t;
 
+typedef void (*pack_type)(char *d, char *s);
 /*
  * The datatype description.
  */
@@ -136,6 +141,8 @@ struct opal_datatype_t {
 
     struct iovec       *iov; 
     uint32_t           iovcnt;
+
+    pack_type jit_pack;
 
     size_t *ptypes; /**< array of basic predefined types that facilitate the computing
                          of the remote size in heterogeneous environments. The length of the

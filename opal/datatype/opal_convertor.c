@@ -28,7 +28,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "opal/prefetch.h"
 #include "opal/util/arch.h"
@@ -444,6 +443,9 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
     *max_data -= count * pData->size;
 
     while( count-- ){
+        pData->jit_pack( *dst, *src );
+
+#if 0
         for( i = 0; i < pData->iovcnt; i++ ) {
             memcpy( *dst,
                     *src + (ptrdiff_t)(iov[i].iov_base),
@@ -451,7 +453,9 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
 
             *dst += iov[i].iov_len;
         }
-
+#endif    
+	
+        *dst += pData->size;
         *src += pData->ub - pData->lb;
     }
 

@@ -375,6 +375,96 @@ opal_generate_iovec( opal_datatype_t *pData )
     pData->iov = realloc( pData->iov, sizeof(struct iovec) * leftover_iovec );
     pData->iovcnt = leftover_iovec;
 
+
+    gcc_jit_context *ctxt;
+    gcc_jit_type *char_type, *void_type, *char_ptr_type, *void_ptr_type, *sizet_type;
+
+    ctxt = gcc_jit_context_acquire();
+    char_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_CHAR );
+    void_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_VOID );
+    sizet_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_SIZE_T );
+
+    char_ptr_type = gcc_jit_type_get_pointer( char_type );
+    void_ptr_type = gcc_jit_type_get_pointer( void_type );
+
+    gcc_jit_param *param[2] = {
+        gcc_jit_context_new_param( ctxt, NULL, char_ptr_type, "dst" ),
+        gcc_jit_context_new_param( ctxt, NULL, char_ptr_type, "src" )
+    };
+
+    gcc_jit_function *func;
+    func = gcc_jit_context_new_function( ctxt, NULL,
+		    GCC_JIT_FUNCTION_EXPORTED,
+		    void_type,
+		    "pack_function",
+		    2, param,
+		    0 );
+
+    gcc_jit_block *block = gcc_jit_function_new_block( func, "initial" );
+
+    size_t total_disp = 0;
+    ptrdiff_t diff = 0;
+
+    gcc_jit_lvalue *dst_val = gcc_jit_function_new_local( func, NULL, char_ptr_type, "dst_val" ),
+                   *src_val = gcc_jit_function_new_local( func, NULL, char_ptr_type, "src_val" );
+    gcc_jit_block_add_assignment( block, NULL, dst_val, gcc_jit_param_as_rvalue( param[0] ) );
+    gcc_jit_block_add_assignment( block, NULL, src_val, gcc_jit_param_as_rvalue( param[1] ) );
+
+    for( int i = 0; i < pData->iovcnt; i++ ){
+
+        if( i == 0 ){
+            total_disp = 0;
+        } else {
+            total_disp += pData->iov[i-1].iov_len;
+        }
+
+	gcc_jit_lvalue *dst_input,
+		       *src_input;
+        
+        dst_input = gcc_jit_lvalue_get_address(
+                        gcc_jit_context_new_array_access( ctxt, NULL,
+                            gcc_jit_lvalue_as_rvalue( dst_val ),
+                            gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, total_disp ) ),
+                        NULL );
+
+        
+        src_input = gcc_jit_lvalue_get_address(
+                        gcc_jit_context_new_array_access( ctxt, NULL,
+                            gcc_jit_lvalue_as_rvalue( src_val ),
+                            gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pData->iov[i].iov_base ) ),
+                        NULL );
+
+        gcc_jit_rvalue *args[3] = {
+            gcc_jit_context_new_cast( ctxt, NULL,
+                                      gcc_jit_lvalue_as_rvalue( dst_input ),
+                                      void_ptr_type ),
+            gcc_jit_context_new_cast( ctxt, NULL,
+                                      gcc_jit_lvalue_as_rvalue( src_input ),
+                                      void_ptr_type ),
+            gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pData->iov[i].iov_len )
+        };
+
+        gcc_jit_function *builtin_memcpy = gcc_jit_context_get_builtin_function( ctxt, "__builtin_memcpy" );
+
+        gcc_jit_rvalue *memcpy_call = gcc_jit_context_new_call(
+            ctxt, NULL,
+            builtin_memcpy,
+            3,
+            args );
+        gcc_jit_block_add_eval( block, NULL, memcpy_call );
+    }
+
+    gcc_jit_block_end_with_void_return( block, NULL );
+
+    
+    gcc_jit_result *result = NULL;
+
+    result = gcc_jit_context_compile( ctxt );
+    gcc_jit_context_release( ctxt );
+
+    void *pack_func = gcc_jit_result_get_code( result, "pack_function" );
+    pData->jit_pack = (pack_type)pack_func;
+
     return 1;
 }
 
