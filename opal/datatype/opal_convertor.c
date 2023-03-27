@@ -29,6 +29,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <stdio.h>
+
 #include "opal/prefetch.h"
 #include "opal/util/arch.h"
 #include "opal/util/output.h"
@@ -384,6 +386,16 @@ opal_iovec_pack_remain( opal_convertor_t *convertor,
                         size_t *max_data )
 {
 
+    opal_datatype_t *pData = convertor->pDesc;
+    int ret = opal_datatype_create_jit_pack_partial( convertor, dst, src, max_data );
+
+    if( pData->jit_partial_pack != NULL )
+        pData->jit_partial_pack( *dst, *src );
+    
+    pData->jit_partial_pack = NULL;
+    return ret;
+
+#if 0
     if( *max_data == 0 || convertor->pStack[0].count == 0 )
         return 0;
 
@@ -421,7 +433,7 @@ opal_iovec_pack_remain( opal_convertor_t *convertor,
     convertor->pStack[0].count--;
 
     return 1;
-
+#endif
 }
 
 int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,

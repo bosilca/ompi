@@ -689,7 +689,7 @@ int main(int argc, char *argv[])
 
             ddt = create_ddt( i );
             MPI_DDT_DUMP(ddt);
-//            do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+            do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
 
             size_t true_lb, true_extent,
                    lb, extent;
@@ -714,7 +714,6 @@ int main(int argc, char *argv[])
             }
 
             MPI_Type_free(&ddt);
-            break;
         }
     }
 

@@ -91,7 +91,7 @@ struct opal_convertor_t {
     uint32_t flags;      /**< the properties of this convertor */
     size_t local_size;   /**< overall length data on local machine, compared to bConverted */
     size_t remote_size;  /**< overall length data on remote machine, compared to bConverted */
-    const opal_datatype_t *pDesc;   /**< the datatype description associated with the convertor */
+    opal_datatype_t *pDesc;   /**< the datatype description associated with the convertor */
     const dt_type_desc_t *use_desc; /**< the version used by the convertor (normal or optimized) */
     opal_datatype_count_t count;    /**< the total number of full datatype elements */
 
@@ -137,6 +137,9 @@ OPAL_DECLSPEC int32_t opal_iovec_unpack_remain( opal_convertor_t *convertor,
                 char **dst, char **src, size_t *max_data );
 OPAL_DECLSPEC int32_t opal_iovec_unpack_loop( opal_convertor_t *convertor,
                 char **dst, char **src, size_t count, size_t *max_data );
+
+OPAL_DECLSPEC int32_t opal_datatype_create_jit_pack_partial( opal_convertor_t *pConvertor,
+                                                             char **dst, char **src, size_t *max_data );
 /*
  *
  */
