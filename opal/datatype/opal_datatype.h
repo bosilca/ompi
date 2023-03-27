@@ -143,6 +143,7 @@ struct opal_datatype_t {
     uint32_t           iovcnt;
 
     pack_type jit_pack;
+    pack_type jit_pack_loop;
 
     size_t *ptypes; /**< array of basic predefined types that facilitate the computing
                          of the remote size in heterogeneous environments. The length of the
@@ -209,6 +210,12 @@ OPAL_DECLSPEC int32_t opal_datatype_create_desc(opal_datatype_t *datatype, int32
 OPAL_DECLSPEC int32_t opal_datatype_commit(opal_datatype_t *pData);
 OPAL_DECLSPEC int32_t opal_datatype_destroy(opal_datatype_t **);
 OPAL_DECLSPEC int32_t opal_datatype_is_monotonic(opal_datatype_t *type);
+
+OPAL_DECLSPEC void opal_datatype_create_jit_pack( opal_datatype_t *pData );
+OPAL_DECLSPEC void opal_datatype_create_jit_pack_loop( opal_datatype_t *pData );
+OPAL_DECLSPEC void opal_datatype_jit_elem( gcc_jit_context *ctxt, gcc_jit_function *func,
+                                           dt_elem_desc_t *pElem,
+                                           gcc_jit_lvalue *dst_input, gcc_jit_lvalue *src_input );
 
 static inline int32_t opal_datatype_is_committed(const opal_datatype_t *type)
 {

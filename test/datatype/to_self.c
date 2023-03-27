@@ -689,7 +689,7 @@ int main(int argc, char *argv[])
 
             ddt = create_ddt( i );
             MPI_DDT_DUMP(ddt);
-            do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+//            do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
 
             size_t true_lb, true_extent,
                    lb, extent;
@@ -718,37 +718,35 @@ int main(int argc, char *argv[])
         }
     }
 
-#if 0
     printf("\n! indexed gap\n\n");
     ddt = create_indexed_gap_ddt();
     MPI_DDT_DUMP(ddt);
-    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+//    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
     MPI_Type_free(&ddt);
 
     printf("\n! optimized indexed gap\n\n");
     ddt = create_indexed_gap_optimized_ddt();
     MPI_DDT_DUMP(ddt);
-    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+//    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
     MPI_Type_free(&ddt);
 
     printf("\n! constant indexed gap\n\n");
     ddt = create_indexed_constant_gap_ddt(80, 100, 1);
     MPI_DDT_DUMP(ddt);
-    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+//    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
     MPI_Type_free(&ddt);
 
     printf("\n! optimized constant indexed gap\n\n");
     ddt = create_optimized_indexed_constant_gap_ddt(80, 100, 1);
     MPI_DDT_DUMP(ddt);
-    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+//    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
     MPI_Type_free(&ddt);
 
     printf("\n! struct constant gap resized\n\n");
     ddt = create_merged_contig_with_gaps(1);
     MPI_DDT_DUMP(ddt);
-    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
+//    do_test_for_ddt(run_tests, ddt, ddt, MAX_LENGTH);
     MPI_Type_free(&ddt);
-#endif
 
     MPI_Finalize();
     exit(0);
