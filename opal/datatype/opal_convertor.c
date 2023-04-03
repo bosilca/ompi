@@ -347,20 +347,30 @@ opal_iovec_pack( opal_convertor_t *convertor,
         if( iov_track >= *max_data ){
 
             do{
+                printf("dst %p src %p\n",
+                       dst, src );
                 if( convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && track != 0 && ( track / pData->size > 0 ) )
                     opal_iovec_pack_loop( convertor, &dst, &src, track / pData->size, &track );
 
-            } while( opal_iovec_pack_remain( convertor, &dst, &src, &track ) );
+            //} while( opal_iovec_pack_remain( convertor, &dst, &src, &track ) );
+            } while( pData->jit_partial_pack( &dst, &src, &(convertor->pStack[0].count),
+                                              &(convertor->pStack[1].index), &(convertor->pStack[0].disp),
+                                              &(convertor->pStack[1].disp), max_data ) );
 
         } else {
 
             *max_data = iov_track;
             do{
+                printf("dst %p src %p\n",
+                       dst, src );
 
                 if( convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && iov_track != 0 && ( iov_track / pData->size > 0 ) )
                     opal_iovec_pack_loop( convertor, &dst, &src, iov_track / pData->size, &iov_track );
 
-            } while( opal_iovec_pack_remain( convertor, &dst, &src, &iov_track ) );
+            //} while( opal_iovec_pack_remain( convertor, &dst, &src, &iov_track ) );
+            } while( pData->jit_partial_pack( &dst, &src, &(convertor->pStack[0].count),
+                                              &(convertor->pStack[1].index), &(convertor->pStack[0].disp),
+                                              &(convertor->pStack[1].disp), &iov_track ) );
             track = iov_track;
 
         }
@@ -385,17 +395,6 @@ opal_iovec_pack_remain( opal_convertor_t *convertor,
                         char **src,
                         size_t *max_data )
 {
-
-    opal_datatype_t *pData = convertor->pDesc;
-    int ret = opal_datatype_create_jit_pack_partial( convertor, dst, src, max_data );
-
-    if( pData->jit_partial_pack != NULL )
-        pData->jit_partial_pack( *dst, *src );
-    
-    pData->jit_partial_pack = NULL;
-    return ret;
-
-#if 0
     if( *max_data == 0 || convertor->pStack[0].count == 0 )
         return 0;
 
@@ -433,7 +432,6 @@ opal_iovec_pack_remain( opal_convertor_t *convertor,
     convertor->pStack[0].count--;
 
     return 1;
-#endif
 }
 
 int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
@@ -454,7 +452,9 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
     convertor->pStack[0].count -= count;
     *max_data -= count * pData->size;
 
-    while( count-- ){
+    while( count ){
+        printf("loop count %d dst %p src %p\n",
+                count, *dst, *src );
         pData->jit_pack( *dst, *src );
 
 #if 0
@@ -465,10 +465,11 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
 
             *dst += iov[i].iov_len;
         }
-#endif    
+#endif
 	
         *dst += pData->size;
         *src += pData->ub - pData->lb;
+        count--;
     }
 
     return 1;

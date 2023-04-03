@@ -138,8 +138,6 @@ OPAL_DECLSPEC int32_t opal_iovec_unpack_remain( opal_convertor_t *convertor,
 OPAL_DECLSPEC int32_t opal_iovec_unpack_loop( opal_convertor_t *convertor,
                 char **dst, char **src, size_t count, size_t *max_data );
 
-OPAL_DECLSPEC int32_t opal_datatype_create_jit_pack_partial( opal_convertor_t *pConvertor,
-                                                             char **dst, char **src, size_t *max_data );
 /*
  *
  */

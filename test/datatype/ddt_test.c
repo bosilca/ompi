@@ -221,9 +221,9 @@ static int local_copy_with_convertor_2datatypes(ompi_datatype_t *send_type, int 
     while ((done1 & done2) != 1) {
         /* They are supposed to finish in exactly the same time. */
         if (done1 | done2) {
-            printf("WRONG !!! the send is %s but the receive is %s in "
-                   "local_copy_with_convertor_2datatypes\n",
-                   (done1 ? "finish" : "not finish"), (done2 ? "finish" : "not finish"));
+            //printf("WRONG !!! the send is %s but the receive is %s in "
+              //     "local_copy_with_convertor_2datatypes\n",
+                //   (done1 ? "finish" : "not finish"), (done2 ? "finish" : "not finish"));
         }
 
         max_data = chunk;
@@ -308,8 +308,8 @@ static int local_copy_with_convertor(ompi_datatype_t *pdt, int count, int chunk)
     while ((done1 & done2) != 1) {
         /* They are supposed to finish in exactly the same time. */
         if (done1 | done2) {
-            printf("WRONG !!! the send is %s but the receive is %s in local_copy_with_convertor\n",
-                   (done1 ? "finish" : "not finish"), (done2 ? "finish" : "not finish"));
+            //printf("WRONG !!! the send is %s but the receive is %s in local_copy_with_convertor\n",
+              //     (done1 ? "finish" : "not finish"), (done2 ? "finish" : "not finish"));
         }
 
         max_data = chunk;
@@ -405,7 +405,7 @@ int main(int argc, char *argv[])
     printf("\n\n#\n * TEST MATRIX BORDERS\n #\n\n");
     pdt = test_matrix_borders(length, 100);
     if (outputFlags & DUMP_DATA_AFTER_COMMIT) {
-        ompi_datatype_dump(pdt);
+        //ompi_datatype_dump(pdt);
     }
     OBJ_RELEASE(pdt);
     assert(pdt == NULL);
@@ -434,15 +434,15 @@ int main(int argc, char *argv[])
 
     printf(">>--------------------------------------------<<\n");
     if (outputFlags & DUMP_DATA_AFTER_COMMIT) {
-        ompi_datatype_dump(pdt1);
+        //ompi_datatype_dump(pdt1);
     }
     printf(">>--------------------------------------------<<\n");
     if (outputFlags & DUMP_DATA_AFTER_COMMIT) {
-        ompi_datatype_dump(pdt2);
+        //ompi_datatype_dump(pdt2);
     }
     printf(">>--------------------------------------------<<\n");
     if (outputFlags & DUMP_DATA_AFTER_COMMIT) {
-        ompi_datatype_dump(pdt3);
+        //ompi_datatype_dump(pdt3);
     }
 
     OBJ_RELEASE(pdt1);
@@ -511,7 +511,7 @@ int main(int argc, char *argv[])
     printf(">>--------------------------------------------<<\n");
     printf("Vector data-type (450 times 10 double stride 11)\n");
     pdt = create_vector_type(MPI_DOUBLE, 450, 10, 11);
-    ompi_datatype_dump(pdt);
+    //ompi_datatype_dump(pdt);
     if (outputFlags & CHECK_PACK_UNPACK) {
         local_copy_ddt_count(pdt, 1);
         local_copy_with_convertor(pdt, 1, 12);
@@ -552,7 +552,7 @@ int main(int argc, char *argv[])
     printf(">>--------------------------------------------<<\n");
     pdt = test_create_blacs_type();
     if (outputFlags & CHECK_PACK_UNPACK) {
-        ompi_datatype_dump(pdt);
+        //ompi_datatype_dump(pdt);
         local_copy_ddt_count(pdt, 2);
         local_copy_ddt_count(pdt, 4500);
         local_copy_with_convertor(pdt, 4500, 956);
