@@ -441,7 +441,7 @@ void opal_datatype_create_jit_pack( opal_datatype_t *pData )
         src_input = gcc_jit_lvalue_get_address(
                         gcc_jit_context_new_array_access( ctxt, NULL,
                             gcc_jit_lvalue_as_rvalue( src_val ),
-                            gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pData->iov[i].iov_base ) ),
+                            gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, (ptrdiff_t)(pData->iov[i].iov_base) ) ),
                         NULL );
 
         gcc_jit_rvalue *args[3] = {
@@ -527,6 +527,7 @@ static char* itoa(int value, char* result, int base) {
 	return result;
 }
 
+#if 0
 void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
 {
     gcc_jit_context *ctxt;
@@ -662,7 +663,6 @@ void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
         gcc_jit_block_end_with_conditional( index_yes, NULL, comparison_expr, do_remain, do_full );
 
         /* do remain */
-
         gcc_jit_lvalue *src_remain = gcc_jit_function_new_local( func, NULL, char_ptr_type, "src_remain_input" );
 
         gcc_jit_block_add_assignment( do_remain, NULL, src_remain, 
@@ -685,9 +685,9 @@ void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
             gcc_jit_lvalue_as_rvalue( maxdata )
         };
 
-//        gcc_jit_block_add_eval( do_remain, NULL, 
-  //          gcc_jit_context_new_call( ctxt, NULL,
-    //            builtin_memcpy, 3, args_remain ) );
+        gcc_jit_block_add_eval( do_remain, NULL, 
+            gcc_jit_context_new_call( ctxt, NULL,
+                builtin_memcpy, 3, args_remain ) );
 
         /* dst += track */
         gcc_jit_block_add_assignment( do_remain, NULL, dst_val,
@@ -725,13 +725,12 @@ void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
             full_len, full_with_disp );
 
         /* full length */
-
         gcc_jit_lvalue *src_full_len = gcc_jit_function_new_local( func, NULL, char_ptr_type, "src_full_len_input" );
 
         gcc_jit_block_add_assignment( full_len, NULL, src_full_len,
             gcc_jit_lvalue_get_address(
                 gcc_jit_context_new_array_access( ctxt, NULL,
-                    gcc_jit_lvalue_as_rvalue( src_full_len ),
+                    gcc_jit_lvalue_as_rvalue( src_val ),
                     gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, (ptrdiff_t)(pData->iov[i].iov_base) ) ),
                 NULL ) );
 
@@ -747,16 +746,16 @@ void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
                 gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pData->iov[i].iov_len ) )
         };
 
-//        gcc_jit_block_add_eval( full_len, NULL,
-  //          gcc_jit_context_new_call( ctxt, NULL,
-    //            builtin_memcpy, 3, args_full_len ) );
+        gcc_jit_block_add_eval( full_len, NULL,
+            gcc_jit_context_new_call( ctxt, NULL,
+                builtin_memcpy, 3, args_full_len ) );
 
-//        gcc_jit_block_add_assignment( full_len, NULL, dst_val,
-  //                                    gcc_jit_lvalue_get_address(
-    //                                      gcc_jit_context_new_array_access( ctxt, NULL,
-      //                                        gcc_jit_lvalue_as_rvalue( dst_val ),
-        //                                      gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pData->iov[i].iov_len ) ),
-          //                                NULL ) );        
+        gcc_jit_block_add_assignment( full_len, NULL, dst_val,
+                                      gcc_jit_lvalue_get_address(
+                                          gcc_jit_context_new_array_access( ctxt, NULL,
+                                              gcc_jit_lvalue_as_rvalue( dst_val ),
+                                              gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pData->iov[i].iov_len ) ),
+                                          NULL ) );        
         gcc_jit_block_add_assignment_op( full_len, NULL, maxdata, GCC_JIT_BINARY_OP_MINUS, 
                                          remain_len_expr );
         gcc_jit_block_add_assignment( full_len, NULL, disp, 
@@ -776,7 +775,7 @@ void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
         gcc_jit_block_add_assignment( full_with_disp, NULL, src_partial,
             gcc_jit_lvalue_get_address(
                 gcc_jit_context_new_array_access( ctxt, NULL,
-                    gcc_jit_lvalue_as_rvalue( src_partial ),
+                    gcc_jit_lvalue_as_rvalue( src_val ),
                     gcc_jit_context_new_binary_op( ctxt, NULL, 
                         GCC_JIT_BINARY_OP_PLUS,
                         sizet_type,
@@ -796,17 +795,15 @@ void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
             remain_len_expr
         };
 
-//        gcc_jit_block_add_eval( full_with_disp, NULL,
-  //          gcc_jit_context_new_call( ctxt, NULL,
-    //            builtin_memcpy, 3, args_partial ) );
-
-
-//        gcc_jit_block_add_assignment( full_with_disp, NULL, dst_val,
-  //                                    gcc_jit_lvalue_get_address(
-    //                                      gcc_jit_context_new_array_access( ctxt, NULL,
-      //                                        gcc_jit_lvalue_as_rvalue( dst_val ),
-        //                                      remain_len_expr ),
-          //                                NULL ) );
+        gcc_jit_block_add_eval( full_with_disp, NULL,
+            gcc_jit_context_new_call( ctxt, NULL,
+                builtin_memcpy, 3, args_partial ) );
+        gcc_jit_block_add_assignment( full_with_disp, NULL, dst_val,
+                                      gcc_jit_lvalue_get_address(
+                                          gcc_jit_context_new_array_access( ctxt, NULL,
+                                              gcc_jit_lvalue_as_rvalue( dst_val ),
+                                              remain_len_expr ),
+                                          NULL ) );
         gcc_jit_block_add_assignment_op( full_with_disp, NULL, maxdata, GCC_JIT_BINARY_OP_MINUS, 
                                          remain_len_expr );
         gcc_jit_block_add_assignment( full_with_disp, NULL, disp, 
@@ -822,8 +819,8 @@ void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
     }
 
     /* convertor->pStack[0].disp += pData->ub - pData->lb; */
-    gcc_jit_block_add_assignment_op( end_block, NULL, totdisp, GCC_JIT_BINARY_OP_PLUS,
-        gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pData->ub - pData->lb ) );
+//    gcc_jit_block_add_assignment_op( end_block, NULL, totdisp, GCC_JIT_BINARY_OP_PLUS,
+  //      gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pData->ub - pData->lb ) );
     /* convertor->pStack[1].index = 0; */
     gcc_jit_block_add_assignment( end_block, NULL, index, 
         gcc_jit_context_zero( ctxt, int_type ) );
@@ -842,4 +839,231 @@ void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
  
     return;
     
+}
+#endif
+
+void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
+{
+    gcc_jit_context *ctxt;
+    gcc_jit_type *char_type, *void_type, *char_ptr_type, *void_ptr_type,
+                 *char_ptr_ptr_type,
+                 *int_type, *int_ptr_type,
+                 *sizet_type, *sizet_ptr_type,
+                 *bool_type;
+
+    ctxt = gcc_jit_context_acquire();
+    char_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_CHAR );
+    void_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_VOID );
+    sizet_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_SIZE_T );
+    int_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_INT );
+    bool_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_BOOL );
+
+    char_ptr_type = gcc_jit_type_get_pointer( char_type );
+    char_ptr_ptr_type = gcc_jit_type_get_pointer( char_ptr_type );
+    void_ptr_type = gcc_jit_type_get_pointer( void_type );
+    int_ptr_type = gcc_jit_type_get_pointer( int_type );
+    sizet_ptr_type = gcc_jit_type_get_pointer( sizet_type );
+
+    gcc_jit_param *param[7] = {
+        gcc_jit_context_new_param( ctxt, NULL, char_ptr_ptr_type, "dst" ),
+        gcc_jit_context_new_param( ctxt, NULL, char_ptr_type, "src" ),
+        gcc_jit_context_new_param( ctxt, NULL, sizet_ptr_type, "count" ),
+        gcc_jit_context_new_param( ctxt, NULL, int_ptr_type, "index" ),
+        gcc_jit_context_new_param( ctxt, NULL, sizet_ptr_type, "totdisp" ),
+        gcc_jit_context_new_param( ctxt, NULL, sizet_ptr_type, "disp" ),
+        gcc_jit_context_new_param( ctxt, NULL, sizet_ptr_type, "max_data" )
+    };
+
+    gcc_jit_function *func;
+    func = gcc_jit_context_new_function( ctxt, NULL,
+		    GCC_JIT_FUNCTION_EXPORTED,
+		    int_type,
+		    "pack_partial_function",
+		    7, param,
+		    0 );
+
+    gcc_jit_block *block = gcc_jit_function_new_block( func, "partial_initial" ),
+                  *end_block = gcc_jit_function_new_block( func, "termination_block" );
+
+    gcc_jit_lvalue *dst_input = gcc_jit_function_new_local( func, NULL, char_ptr_ptr_type, "dst_input" ),
+                   *src_input = gcc_jit_function_new_local( func, NULL, char_ptr_type, "src_input" ),
+                   *count_val = gcc_jit_function_new_local( func, NULL, sizet_ptr_type, "count_val" ),
+                   *index_val = gcc_jit_function_new_local( func, NULL, int_ptr_type, "index_val" ),
+                   *totdisp_val = gcc_jit_function_new_local( func, NULL, sizet_ptr_type, "totdisp_val" ),
+                   *disp_val = gcc_jit_function_new_local( func, NULL, sizet_ptr_type, "disp_val" ),
+                   *maxdata_val = gcc_jit_function_new_local( func, NULL, sizet_ptr_type, "maxdata_val" ),
+                   *track = gcc_jit_function_new_local( func, NULL, sizet_type, "track_val" );
+
+    gcc_jit_block_add_assignment( block, NULL, dst_input, gcc_jit_param_as_rvalue( param[0] ) );
+    gcc_jit_block_add_assignment( block, NULL, src_input, gcc_jit_param_as_rvalue( param[1] ) );
+    gcc_jit_block_add_assignment( block, NULL, count_val, gcc_jit_param_as_rvalue( param[2] ) );
+    gcc_jit_block_add_assignment( block, NULL, index_val, gcc_jit_param_as_rvalue( param[3] ) );
+    gcc_jit_block_add_assignment( block, NULL, totdisp_val, gcc_jit_param_as_rvalue( param[4] ) );
+    gcc_jit_block_add_assignment( block, NULL, disp_val, gcc_jit_param_as_rvalue( param[5] ) );
+    gcc_jit_block_add_assignment( block, NULL, maxdata_val, gcc_jit_param_as_rvalue( param[6] ) );
+
+    gcc_jit_block_add_assignment( block, NULL, track, gcc_jit_context_zero( ctxt, sizet_type ) );
+
+    gcc_jit_lvalue *dst_val = gcc_jit_context_new_array_access( ctxt, NULL, dst_input,
+                                  gcc_jit_context_new_rvalue_from_int( ctxt, int_type, 0 ) ),
+                   *count = gcc_jit_context_new_array_access( ctxt, NULL, count_val,
+                                gcc_jit_context_new_rvalue_from_int( ctxt, int_type, 0 ) ),
+                   *index = gcc_jit_context_new_array_access( ctxt, NULL, index_val,
+                                gcc_jit_context_new_rvalue_from_int( ctxt, int_type, 0 ) ),
+                   *totdisp = gcc_jit_context_new_array_access( ctxt, NULL, totdisp_val,
+                                  gcc_jit_context_new_rvalue_from_int( ctxt, int_type, 0 ) ),
+                   *disp = gcc_jit_context_new_array_access( ctxt, NULL, disp_val,
+                               gcc_jit_context_new_rvalue_from_int( ctxt, int_type, 0 ) ),
+                   *maxdata = gcc_jit_context_new_array_access( ctxt, NULL, maxdata_val,
+                                  gcc_jit_context_new_rvalue_from_int( ctxt, int_type, 0 ) );
+
+    //if( *max_data == 0 || convertor->pStack[0].count == 0 )
+    //    return 0;
+    gcc_jit_rvalue *check_maxdata = gcc_jit_context_new_comparison( ctxt, NULL, GCC_JIT_COMPARISON_EQ,
+                                        maxdata, gcc_jit_context_zero( ctxt, sizet_type ) ),
+                   *check_count = gcc_jit_context_new_comparison( ctxt, NULL, GCC_JIT_COMPARISON_EQ,
+                                      count, gcc_jit_context_zero( ctxt, sizet_type ) );
+
+    gcc_jit_rvalue *check_or = gcc_jit_context_new_binary_op( ctxt, NULL, GCC_JIT_BINARY_OP_LOGICAL_OR,
+                                   bool_type, check_maxdata, check_count );
+    
+    int blockn = 0;
+    char block_yes[10], block_no[10];
+    gcc_jit_block *check_true = gcc_jit_function_new_block( func, itoa( blockn++, block_yes, 10 ) ),
+                  *check_false = gcc_jit_function_new_block( func, itoa( blockn++, block_no, 10 ) );
+    gcc_jit_block_end_with_conditional( block, NULL, check_or, check_true, check_false );
+
+    // return 0 in check no
+    gcc_jit_block_end_with_return( check_true, NULL, gcc_jit_context_zero( ctxt, int_type ) );
+
+    // const opal_datatype_t *pData = convertor->pDesc;
+    // struct iovec *iov = pData->iov;
+    // size_t track = *max_data;
+    // uint32_t i;
+    // *src = convertor->pBaseBuf + convertor->pStack[0].disp;
+    gcc_jit_lvalue *src_val = gcc_jit_context_new_array_access( ctxt, NULL, gcc_jit_lvalue_as_rvalue( src_input ),
+                                                                totdisp );
+    // for( i = convertor->pStack[1].index; i < pData->iovcnt; i++ ) {
+    gcc_jit_block *elem_block[ pData->iovcnt ];
+    for( int i = 0; i < pData->iovcnt; i++ ){
+        char block_name[10];
+        elem_block[i] = gcc_jit_function_new_block( func, itoa( blockn++, block_name, 10 ) );
+    }
+
+    gcc_jit_block_end_with_jump( check_false, NULL, elem_block[0] );
+    for( int i = 0; i < pData->iovcnt; i++ ){
+        /* first check if index is correct */
+        gcc_jit_rvalue *index_check = gcc_jit_context_new_comparison( ctxt, NULL,
+                                          GCC_JIT_COMPARISON_EQ,
+                                          gcc_jit_lvalue_as_rvalue( index ), 
+                                          gcc_jit_context_new_rvalue_from_int( ctxt, int_type, i ) );
+        //gcc_jit_block_add_eval( elem_block[i], NULL, index_check );
+        /* stay at current block or goto next block */
+        gcc_jit_block *right_index, *wrong_index;
+        char block_name1[10], block_name2[10];
+        right_index = gcc_jit_function_new_block( func, itoa( blockn++, block_name1, 10 ) );
+        wrong_index = gcc_jit_function_new_block( func, itoa( blockn++, block_name2, 10 ) );
+        
+        gcc_jit_block_end_with_conditional( elem_block[i], NULL, index_check,
+                                            right_index, wrong_index );
+
+        if( i != pData->iovcnt - 1 )
+            gcc_jit_block_end_with_jump( wrong_index, NULL, elem_block[ i+1 ] );
+        else 
+            gcc_jit_block_end_with_jump( wrong_index, NULL, end_block );
+
+        //gcc_jit_block_end_with_jump( elem_block[i], NULL, right_index );
+
+        // if( track < (iov[i].iov_len - convertor->pStack[1].disp) || track == 0 ) {
+        /* get iov[i].iov_len - disp into a variable, len_diff */
+        gcc_jit_lvalue *len_diff = gcc_jit_function_new_local( func, NULL, sizet_type, "length diff" );
+        gcc_jit_block_add_assignment( right_index, NULL, len_diff, 
+                                      gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type,
+                                                                            pData->iov[i].iov_len ) );
+        gcc_jit_block_add_assignment_op( right_index, NULL, len_diff, GCC_JIT_BINARY_OP_MINUS, disp );
+        gcc_jit_block_add_assignment_op( right_index, NULL, index, GCC_JIT_BINARY_OP_PLUS,
+                                         gcc_jit_context_one( ctxt, int_type ) );
+    
+        /* check expr track < (iov[i].iov_len - convertor->pStack[1].disp */
+        gcc_jit_rvalue *len_diff_expr = gcc_jit_context_new_comparison( ctxt, NULL,
+                                            GCC_JIT_COMPARISON_LT,
+                                            maxdata, len_diff );
+
+        gcc_jit_block *partial_copy, *full_copy;
+        char block_name3[10], block_name4[10];
+        partial_copy = gcc_jit_function_new_block( func, itoa( blockn++, block_name3, 10 ) );
+        full_copy = gcc_jit_function_new_block( func, itoa( blockn++, block_name4, 10 ) );
+
+        gcc_jit_block_end_with_conditional( right_index, NULL, len_diff_expr,
+                                            partial_copy, full_copy );
+
+        /* partial copy */
+        //        memcpy( *dst,
+        //                *src + (ptrdiff_t)(iov[i].iov_base) + convertor->pStack[1].disp,
+        //                 track);
+        //
+        //       *dst += track;
+        gcc_jit_block_add_assignment( partial_copy, NULL, dst_val,
+            gcc_jit_lvalue_get_address( 
+                gcc_jit_context_new_array_access( ctxt, NULL, 
+                    gcc_jit_lvalue_as_rvalue( dst_val ), 
+                    gcc_jit_lvalue_as_rvalue( maxdata ) ), NULL ) );
+        //       convertor->pStack[1].disp += track;
+        gcc_jit_block_add_assignment_op( partial_copy, NULL, disp, GCC_JIT_BINARY_OP_PLUS, maxdata );
+        //       convertor->pStack[1].index = i;
+        gcc_jit_block_add_assignment( partial_copy, NULL, index, gcc_jit_context_new_rvalue_from_int( ctxt, int_type, i ) );
+        //       *max_data = 0;
+        gcc_jit_block_add_assignment( partial_copy, NULL, maxdata, gcc_jit_context_zero( ctxt, sizet_type ) );
+        //       return 0;
+        gcc_jit_block_end_with_return( partial_copy, NULL, gcc_jit_context_zero( ctxt, int_type ) );
+
+
+        /* full copy */
+        //    memcpy( *dst,
+        //            *src + (ptrdiff_t)(iov[i].iov_base) + convertor->pStack[1].disp,
+        //            iov[i].iov_len - convertor->pStack[1].disp );
+        // 
+        //    *dst += iov[i].iov_len - convertor->pStack[1].disp;
+        gcc_jit_block_add_assignment( full_copy, NULL, dst_val,
+            gcc_jit_lvalue_get_address( 
+                gcc_jit_context_new_array_access( ctxt, NULL,
+                    gcc_jit_lvalue_as_rvalue( dst_val ),
+                    gcc_jit_lvalue_as_rvalue( len_diff) ), NULL ) );
+        //    track -= iov[i].iov_len - convertor->pStack[1].disp;
+        gcc_jit_block_add_assignment_op( full_copy, NULL, maxdata, GCC_JIT_BINARY_OP_MINUS,
+            gcc_jit_lvalue_as_rvalue( len_diff ) );
+        //    *max_data -= iov[i].iov_len - convertor->pStack[1].disp;
+        //    convertor->pStack[1].disp = 0;
+        gcc_jit_block_add_assignment( full_copy, NULL, disp, gcc_jit_context_zero( ctxt, sizet_type ) );
+        //    index++
+        gcc_jit_block_add_assignment_op( full_copy, NULL, index, GCC_JIT_BINARY_OP_PLUS,
+            gcc_jit_context_one( ctxt, int_type ) );
+
+        /* jumping to next block or to end block */
+        if( i != pData->iovcnt - 1 )
+            gcc_jit_block_end_with_jump( full_copy, NULL, elem_block[ i+1 ] );
+        else 
+            gcc_jit_block_end_with_jump( full_copy, NULL, end_block );
+    }
+
+    // convertor->pStack[0].disp += pData->ub - pData->lb;
+    gcc_jit_block_add_assignment_op( end_block, NULL, totdisp, GCC_JIT_BINARY_OP_PLUS,
+        gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pData->ub - pData->lb ) );
+    // convertor->pStack[1].index = 0;
+    gcc_jit_block_add_assignment( end_block, NULL, index, gcc_jit_context_zero( ctxt, int_type ) );
+    // convertor->pStack[0].count--;
+    gcc_jit_block_add_assignment_op( end_block, NULL, count, GCC_JIT_BINARY_OP_MINUS,
+                                     gcc_jit_context_one( ctxt, sizet_type ) );
+    // return 1
+    gcc_jit_block_end_with_return( end_block, NULL, gcc_jit_context_one( ctxt, int_type ) );
+    
+    gcc_jit_result *result = NULL;
+    result = gcc_jit_context_compile( ctxt );
+    gcc_jit_context_release( ctxt );
+
+    void *pack_func = gcc_jit_result_get_code( result, "pack_partial_function" );
+    pData->jit_partial_pack = (pack_partial_type)pack_func;
+ 
+    return;
+
 }

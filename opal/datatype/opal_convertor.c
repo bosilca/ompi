@@ -336,7 +336,7 @@ opal_iovec_pack( opal_convertor_t *convertor,
 {
     const opal_datatype_t *pData = convertor->pDesc;
     struct iovec *iov = pData->iov;
-    char *dst, *src;
+    char *dst, *src = convertor->pBaseBuf + convertor->pStack[0].disp;
     size_t track = *max_data, iov_track;
     uint32_t i, iov_count = 0;
 
@@ -347,30 +347,40 @@ opal_iovec_pack( opal_convertor_t *convertor,
         if( iov_track >= *max_data ){
 
             do{
-                printf("dst %p src %p\n",
-                       dst, src );
+                //printf("before count %zu totdisp %zu index %d disp %zu maxdata %zu pData->size %zu\n",
+                  //     convertor->pStack[0].count, convertor->pStack[0].disp, convertor->pStack[1].index,
+                    //   convertor->pStack[1].disp, *max_data, pData->size );
                 if( convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && track != 0 && ( track / pData->size > 0 ) )
                     opal_iovec_pack_loop( convertor, &dst, &src, track / pData->size, &track );
-
-            //} while( opal_iovec_pack_remain( convertor, &dst, &src, &track ) );
-            } while( pData->jit_partial_pack( &dst, &src, &(convertor->pStack[0].count),
+                //printf("after count %zu totdisp %zu index %d disp %zu maxdata %zu\n\n",
+                  //     convertor->pStack[0].count, convertor->pStack[0].disp, convertor->pStack[1].index,
+                    //   convertor->pStack[1].disp, *max_data );
+            } while( pData->jit_partial_pack( &dst, convertor->pBaseBuf, &(convertor->pStack[0].count),
                                               &(convertor->pStack[1].index), &(convertor->pStack[0].disp),
                                               &(convertor->pStack[1].disp), max_data ) );
+            //} while( opal_iovec_pack_remain( convertor, &dst, &src, &track ) );
 
         } else {
 
             *max_data = iov_track;
             do{
-                printf("dst %p src %p\n",
-                       dst, src );
+
+                //printf("before count %zu totdisp %zu index %d disp %zu maxdata %zu pData->size %zu\n",
+                  //     convertor->pStack[0].count, convertor->pStack[0].disp, convertor->pStack[1].index,
+                    //   convertor->pStack[1].disp, *max_data, pData->size );
 
                 if( convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && iov_track != 0 && ( iov_track / pData->size > 0 ) )
                     opal_iovec_pack_loop( convertor, &dst, &src, iov_track / pData->size, &iov_track );
 
-            //} while( opal_iovec_pack_remain( convertor, &dst, &src, &iov_track ) );
-            } while( pData->jit_partial_pack( &dst, &src, &(convertor->pStack[0].count),
+                //printf("after count %zu totdisp %zu index %d disp %zu maxdata %zu\n\n",
+                  //     convertor->pStack[0].count, convertor->pStack[0].disp, convertor->pStack[1].index,
+                    //   convertor->pStack[1].disp, *max_data );
+
+
+            } while( pData->jit_partial_pack( &dst, convertor->pBaseBuf, &(convertor->pStack[0].count),
                                               &(convertor->pStack[1].index), &(convertor->pStack[0].disp),
                                               &(convertor->pStack[1].disp), &iov_track ) );
+    //        } while( opal_iovec_pack_remain( convertor, &dst, &src, &iov_track ) );
             track = iov_track;
 
         }
@@ -448,13 +458,12 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
     if( convertor->pStack[0].count < count )
         count = convertor->pStack[0].count;
 
+    printf("do count %zu\n", count);
     convertor->pStack[0].disp += count * ( pData->ub - pData->lb );
     convertor->pStack[0].count -= count;
     *max_data -= count * pData->size;
 
-    while( count ){
-        printf("loop count %d dst %p src %p\n",
-                count, *dst, *src );
+    while( count-- ){
         pData->jit_pack( *dst, *src );
 
 #if 0
@@ -467,9 +476,8 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
         }
 #endif
 	
-        *dst += pData->size;
+//        *dst += pData->size;
         *src += pData->ub - pData->lb;
-        count--;
     }
 
     return 1;
