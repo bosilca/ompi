@@ -335,11 +335,10 @@ opal_iovec_pack( opal_convertor_t *convertor,
                  size_t *max_data )
 {
     const opal_datatype_t *pData = convertor->pDesc;
-    struct iovec *iov = pData->iov;
     char *dst, *src = convertor->pBaseBuf + convertor->pStack[0].disp;
     size_t track = *max_data, iov_track;
-    uint32_t i, iov_count = 0;
-
+    uint32_t i;
+    
     for( i = 0; i < *out_size; i++ ){
         dst = out_iov[i].iov_base;
         iov_track = out_iov[i].iov_len;
@@ -347,47 +346,26 @@ opal_iovec_pack( opal_convertor_t *convertor,
         if( iov_track >= *max_data ){
 
             do{
-                //printf("before count %zu totdisp %zu index %d disp %zu maxdata %zu pData->size %zu\n",
-                  //     convertor->pStack[0].count, convertor->pStack[0].disp, convertor->pStack[1].index,
-                    //   convertor->pStack[1].disp, *max_data, pData->size );
                 if( convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && track != 0 && ( track / pData->size > 0 ) )
                     opal_iovec_pack_loop( convertor, &dst, &src, track / pData->size, &track );
-                //printf("after count %zu totdisp %zu index %d disp %zu maxdata %zu\n\n",
-                  //     convertor->pStack[0].count, convertor->pStack[0].disp, convertor->pStack[1].index,
-                    //   convertor->pStack[1].disp, *max_data );
             } while( pData->jit_partial_pack( &dst, convertor->pBaseBuf, &(convertor->pStack[0].count),
                                               &(convertor->pStack[1].index), &(convertor->pStack[0].disp),
-                                              &(convertor->pStack[1].disp), max_data ) );
-            //} while( opal_iovec_pack_remain( convertor, &dst, &src, &track ) );
-
+                                              &(convertor->pStack[1].disp), &track ) );
         } else {
 
             *max_data = iov_track;
             do{
-
-                //printf("before count %zu totdisp %zu index %d disp %zu maxdata %zu pData->size %zu\n",
-                  //     convertor->pStack[0].count, convertor->pStack[0].disp, convertor->pStack[1].index,
-                    //   convertor->pStack[1].disp, *max_data, pData->size );
-
                 if( convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && iov_track != 0 && ( iov_track / pData->size > 0 ) )
                     opal_iovec_pack_loop( convertor, &dst, &src, iov_track / pData->size, &iov_track );
-
-                //printf("after count %zu totdisp %zu index %d disp %zu maxdata %zu\n\n",
-                  //     convertor->pStack[0].count, convertor->pStack[0].disp, convertor->pStack[1].index,
-                    //   convertor->pStack[1].disp, *max_data );
-
-
             } while( pData->jit_partial_pack( &dst, convertor->pBaseBuf, &(convertor->pStack[0].count),
                                               &(convertor->pStack[1].index), &(convertor->pStack[0].disp),
                                               &(convertor->pStack[1].disp), &iov_track ) );
-    //        } while( opal_iovec_pack_remain( convertor, &dst, &src, &iov_track ) );
             track = iov_track;
 
         }
 
     }
 
-complete_pack:
     *max_data -= track;
     convertor->bConverted += *max_data;
 
@@ -451,14 +429,11 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
                               size_t *max_data )
 {
     const opal_datatype_t *pData = convertor->pDesc;
-    struct iovec *iov = pData->iov;
-    uint32_t i;
     *src = convertor->pBaseBuf + convertor->pStack[0].disp;
 
     if( convertor->pStack[0].count < count )
         count = convertor->pStack[0].count;
 
-    printf("do count %zu\n", count);
     convertor->pStack[0].disp += count * ( pData->ub - pData->lb );
     convertor->pStack[0].count -= count;
     *max_data -= count * pData->size;
@@ -466,17 +441,7 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
     while( count-- ){
         pData->jit_pack( *dst, *src );
 
-#if 0
-        for( i = 0; i < pData->iovcnt; i++ ) {
-            memcpy( *dst,
-                    *src + (ptrdiff_t)(iov[i].iov_base),
-                    iov[i].iov_len );
-
-            *dst += iov[i].iov_len;
-        }
-#endif
-	
-//        *dst += pData->size;
+        *dst += pData->size;
         *src += pData->ub - pData->lb;
     }
 
@@ -491,10 +456,9 @@ opal_iovec_unpack( opal_convertor_t *convertor,
         size_t *max_data )
 {
     const opal_datatype_t *pData = convertor->pDesc;
-    struct iovec *iov = pData->iov;
     char *dst, *src;
     size_t track = *max_data, iov_track;
-    uint32_t i, iov_count = 0;
+    uint32_t i;
 
     for( i = 0; i < *out_size; i++ ){
         src = out_iov[i].iov_base;
@@ -522,7 +486,6 @@ opal_iovec_unpack( opal_convertor_t *convertor,
 
     }
 
-complete_unpack:
     *max_data -= track;
     convertor->bConverted += *max_data;
 
