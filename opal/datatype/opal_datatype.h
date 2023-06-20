@@ -116,6 +116,8 @@ typedef struct dt_type_desc_t dt_type_desc_t;
 typedef void (*pack_type)(const char *d, const char *s);
 typedef int (*pack_partial_type)(char **dst, char *src, size_t *count, int *index, size_t *totdisp,
                                  size_t *disp, size_t *max_data );
+typedef int (*pack_opt_partial_type)(char **dst, char *src, size_t *count, int *index, size_t *totdisp,
+                                 size_t *disp, size_t *datasize, size_t *max_data );
 /*
  * The datatype description.
  */
@@ -147,6 +149,12 @@ struct opal_datatype_t {
     
     pack_type          jit_pack;
     pack_partial_type  jit_partial_pack;
+
+    gcc_jit_result     *pack_opt_result;
+    pack_type          jit_opt_pack;
+
+    gcc_jit_result     *pack_opt_partial_result;
+    pack_opt_partial_type  jit_opt_partial_pack;
 
     size_t *ptypes; /**< array of basic predefined types that facilitate the computing
                          of the remote size in heterogeneous environments. The length of the
@@ -216,9 +224,21 @@ OPAL_DECLSPEC int32_t opal_datatype_is_monotonic(opal_datatype_t *type);
 
 OPAL_DECLSPEC void opal_datatype_create_jit_pack( opal_datatype_t *pData );
 OPAL_DECLSPEC void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData );
+
+OPAL_DECLSPEC void opal_datatype_create_jit_opt_pack( opal_datatype_t *pData );
+OPAL_DECLSPEC void opal_datatype_create_jit_opt_partial_pack( opal_datatype_t *pData );
+
 OPAL_DECLSPEC void opal_datatype_jit_elem( gcc_jit_context *ctxt, gcc_jit_function *func,
-                                           dt_elem_desc_t *pElem,
-                                           gcc_jit_lvalue *dst_input, gcc_jit_lvalue *src_input );
+		gcc_jit_block *start_block, gcc_jit_block *end_block,
+		int *blockn, gcc_jit_lvalue *count,
+		dt_elem_desc_t *pElem, gcc_jit_lvalue *dst_input, gcc_jit_lvalue *src_input,
+                gcc_jit_lvalue *src_loop );
+OPAL_DECLSPEC void opal_datatype_jit_partial_elem( gcc_jit_context *ctxt, gcc_jit_function *func,
+		gcc_jit_block *start_block, gcc_jit_block *end_block,
+		int *blockn, gcc_jit_lvalue *do_count, gcc_jit_lvalue *count,
+		dt_elem_desc_t *pElem, gcc_jit_lvalue *dst_input, gcc_jit_lvalue *src_input,
+                gcc_jit_lvalue *src_loop );
+
 
 static inline int32_t opal_datatype_is_committed(const opal_datatype_t *type)
 {
