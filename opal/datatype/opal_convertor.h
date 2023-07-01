@@ -131,6 +131,8 @@ OPAL_DECLSPEC int32_t opal_iovec_pack_remain( opal_convertor_t *convertor,
 OPAL_DECLSPEC int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
         char **dst, char **src, size_t count, size_t *max_data );
 
+OPAL_DECLSPEC void opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_data );
+
 OPAL_DECLSPEC int32_t opal_iovec_unpack( opal_convertor_t *outside_convertor, struct iovec *out_iov,
         uint32_t *out_size, size_t *max_data );
 OPAL_DECLSPEC int32_t opal_iovec_unpack_remain( opal_convertor_t *convertor,

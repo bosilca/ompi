@@ -23,9 +23,14 @@
 #include "opal/datatype/opal_datatype.h"
 #include "opal/datatype/opal_datatype_internal.h"
 
+#include <libgccjit.h>
+
 int32_t opal_datatype_destroy(opal_datatype_t **dt)
 {
     opal_datatype_t *pData = *dt;
+
+    gcc_jit_result_release( pData->pack_opt_result );
+    gcc_jit_result_release( pData->pack_opt_partial_result );
 
     free( pData->iov );
 

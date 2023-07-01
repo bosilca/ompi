@@ -334,189 +334,52 @@ opal_iovec_pack( opal_convertor_t *convertor,
                  uint32_t *out_size,
                  size_t *max_data )
 {
+//    printf("starting with max_data %zu iov_len %zu\n",
+//			*max_data, out_iov->iov_len);
     const opal_datatype_t *pData = convertor->pDesc;
     char *dst, *src = convertor->pBaseBuf + convertor->pStack[0].disp;
-    size_t track = *max_data, iov_track, do_bytes = 0, keep;
+    size_t track = *max_data, iov_track;
     uint32_t i;
-    dt_elem_desc_t *pElem;
 
+//    printf("track %zu count %d total_count %zu disp %zu index %d bConverted %zu\n",
+//		    track,
+//		    convertor->pStack[1].count,
+//		    convertor->pStack[0].count,
+//		    convertor->pStack[1].disp,
+//		    convertor->pStack[1].index,
+//		    convertor->bConverted );
+//    opal_generic_simple_pack( convertor, out_iov, out_size, &track );
+    //printf("disp %zu totdisp %zu count %d\n", 
+//		    convertor->pStack[1].disp,
+//		    convertor->pStack[0].disp,
+//	            convertor->pStack[0].count );
 
     for( i = 0; i < *out_size; i++ ){
         dst = out_iov[i].iov_base;
         iov_track = out_iov[i].iov_len;
 
-	printf("dst %p\n", dst);
-
         if( iov_track >= *max_data ){
-
-		// prolog
-		if( convertor->pStack[1].disp != 0 ){
-			pElem = &(pData->opt_desc.desc[convertor->pStack[1].index]);
-			do_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
-			do_bytes *= pElem->elem.count * pElem->elem.blocklen - convertor->pStack[1].disp;
-			if( track < do_bytes - convertor->pStack[1].disp ){
-		                keep = track;
-				opal_generic_simple_pack( convertor, out_iov, out_size, &track );
-				//dst += keep;
-			} else {
-				size_t doing_bytes = do_bytes - convertor->pStack[1].disp;
-				track -= doing_bytes;
-
-				keep = doing_bytes;
-				opal_generic_simple_pack( convertor, out_iov, out_size, &doing_bytes );
-			        //dst += keep;
-			}
-		}
-
-		if( convertor->pStack[1].disp != 0 || convertor->pStack[1].index != 0 ){
-			pElem = &(pData->opt_desc.desc[convertor->pStack[1].index]);
-			do_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
-			do_bytes *= pElem->elem.count * pElem->elem.blocklen - convertor->pStack[1].disp;
-
-			if( do_bytes > track && convertor->pStack[1].disp !=0 ){
-				struct iovec iov;
-				iov.iov_base = dst;
-				iov.iov_len = track;
-
-				keep = track;
-				printf("dst %p\n", dst);
-
-				printf("index at %d disp1 %zu data_size %zu elem count %d blen %d size %zu track %zu\n",
-						convertor->pStack[1].index,
-						convertor->pStack[1].index,
-						pData->size,
-						pElem->elem.count,
-						pElem->elem.blocklen,
-						opal_datatype_basicDatatypes[pElem->elem.common.type]->size,
-						track );
-				opal_generic_simple_pack( convertor, &iov, out_size, &track );
-				printf("iov_base %p\n",
-						iov.iov_base );
-//			        dst += keep;
-			} else if( do_bytes <= track && convertor->pStack[1].disp != 0 ) {
-				struct iovec iov;
-                                iov.iov_base = dst;
-                                iov.iov_len = do_bytes;
-				
-				keep = do_bytes;
-				track -= do_bytes;
-				opal_generic_simple_pack( convertor, &iov, out_size, &do_bytes );
-//				dst += keep;
-			}
-
-			if( convertor->pStack[2].disp < track && convertor->pStack[2].disp != pData->size )
-				pData->jit_opt_partial_pack( &dst, src, &(convertor->pStack[0].count),
-						&(convertor->pStack[1].index),
-						&(convertor->pStack[0].disp),
-						&(convertor->pStack[1].disp),
-						&(convertor->pStack[2].disp),
-						&track );
-		}
-
-		// loop
-		if( track > pData->size && convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && convertor->pStack[0].count != 0 )
-			opal_iovec_pack_loop( convertor, &dst, &src, track / pData->size, &track );
-
-		// epilog
-		pElem = &(pData->opt_desc.desc[convertor->pStack[1].index]);
-		do_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
-		if( track >= do_bytes * pElem->elem.count * pElem->elem.blocklen ){
-			pData->jit_opt_partial_pack( &dst, src, &(convertor->pStack[0].count),
-					&(convertor->pStack[1].index),
-					&(convertor->pStack[0].disp),
-					&(convertor->pStack[1].disp),
-					&(convertor->pStack[2].disp),
-					&track );
-		}
-
-		if( track >= do_bytes ){
-		        struct iovec iov;
-			iov.iov_base = dst;
-			iov.iov_len = track;
-			opal_generic_simple_pack( convertor, &iov, out_size, &track );
-		}
+		opal_calling_pack_routine( dst, convertor, &track );
 
 	} else {
-
-		// prolog
-		if( convertor->pStack[1].disp != 0 ){
-                        pElem = &(pData->opt_desc.desc[convertor->pStack[1].index]);
-                        do_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
-                        do_bytes *= pElem->elem.count * pElem->elem.blocklen - convertor->pStack[1].disp;
-                        if( iov_track < do_bytes - convertor->pStack[1].disp ){
-                                struct iovec iov;
-				iov.iov_base = dst;
-				iov.iov_len = iov_track;
-				
-				keep = iov_track;
-				opal_generic_simple_pack( convertor, &iov, out_size, &iov_track );
-				//dst += keep;
-                        } else {
-                                size_t doing_bytes = do_bytes - convertor->pStack[1].disp;
-                                iov_track -= doing_bytes;
-
-				struct iovec iov;
-				iov.iov_base = dst;
-				iov.iov_len = doing_bytes;
-                                opal_generic_simple_pack( convertor, &iov, out_size, &doing_bytes );
-                        }
-                }
-
-		if( convertor->pStack[1].disp != 0 || convertor->pStack[1].index != 0 ){
-			pElem = &(pData->opt_desc.desc[convertor->pStack[1].index]);
-			do_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
-			do_bytes *= pElem->elem.count * pElem->elem.blocklen - convertor->pStack[1].disp;
-
-			if( do_bytes <= track ){
-				keep = track;
-				opal_generic_simple_pack( convertor, out_iov, out_size, &iov_track );
-				//dst += keep;
-			} else {
-				keep = do_bytes;
-				iov_track -= do_bytes;
-				opal_generic_simple_pack( convertor, out_iov, out_size, &do_bytes );
-				//dst += keep;
-			}
-
-			if( convertor->pStack[2].disp < track && convertor->pStack[2].disp != pData->size )
-				pData->jit_opt_partial_pack( &dst, src, &(convertor->pStack[0].count),
-						&(convertor->pStack[1].index),
-						&(convertor->pStack[0].disp),
-						&(convertor->pStack[1].disp),
-						&(convertor->pStack[2].disp),
-						&iov_track );
-		}
-
-		// loop
-		if( track > pData->size && convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && convertor->pStack[0].count != 0 )
-			opal_iovec_pack_loop( convertor, &dst, &src, track / pData->size, &iov_track );
-
-		// epilog
-		pElem = &(pData->opt_desc.desc[convertor->pStack[1].index]);
-		do_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
-		if( iov_track >= do_bytes * pElem->elem.count * pElem->elem.blocklen ){
-			pData->jit_opt_partial_pack( &dst, src, &(convertor->pStack[0].count),
-					&(convertor->pStack[1].index),
-					&(convertor->pStack[0].disp),
-					&(convertor->pStack[1].disp),
-					&(convertor->pStack[2].disp),
-					&iov_track );
-		}
-
-		if( iov_track >= do_bytes ){
-		        struct iovec iov;
-			iov.iov_base = dst;
-			iov.iov_len = track;
-			opal_generic_simple_pack( convertor, &iov, out_size, &iov_track );
-		}
+		opal_calling_pack_routine( dst, convertor, &iov_track );
 		track = iov_track;
-
         }
-
     }
-
-    *max_data -= track;
+//    *max_data -= track;
+    *max_data = track;
+    out_iov->iov_len = track;
     convertor->bConverted += *max_data;
+
+//    printf("track %zu count %d total_count %zu disp %zu index %d bConverted %zu\n",
+//		    track,
+//		    convertor->pStack[1].count,
+//		    convertor->pStack[0].count,
+//		    convertor->pStack[1].disp,
+//		    convertor->pStack[1].index,
+//		    convertor->bConverted );
+    
+  //  printf("bConverted %zu track %zu\n\n", convertor->bConverted, track);
 
     if( convertor->bConverted < convertor->local_size ){
         return 0;
@@ -524,6 +387,151 @@ opal_iovec_pack( opal_convertor_t *convertor,
 
     convertor->flags |= CONVERTOR_COMPLETED;
     return 1;
+}
+
+void
+opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_data )
+{
+	const opal_datatype_t *pData = convertor->pDesc;
+	char *src = convertor->pBaseBuf + convertor->pStack[0].disp;
+	dt_elem_desc_t *pElem;
+	size_t track = *max_data, total_size = 0, elem_size, disp;
+
+	pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
+	size_t do_now_bytes;
+
+	do {
+		do_now_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
+		do_now_bytes *= pElem->elem.count * pElem->elem.blocklen;
+		elem_size = do_now_bytes;
+
+		disp = convertor->pStack[1].disp % pData->size;
+//		printf("routine %zu disp %zu index %d\n", *max_data, convertor->pStack[1].disp, convertor->pStack[1].index);
+		//if( convertor->pStack[1].disp != 0 ){
+		if( disp != 0 ){
+//			printf("prolog %zu\n", *max_data);
+			uint32_t out_size = 1;
+
+			//if( do_now_bytes - convertor->pStack[1].disp >= *max_data ){
+			if( do_now_bytes - disp >= *max_data ){
+				track = *max_data;
+				struct iovec iov = { 
+					.iov_base = dst,
+					.iov_len = track
+				};
+
+				opal_generic_simple_pack( convertor, &iov, &out_size, &track );
+				dst += track;
+				*max_data -= track;
+				total_size += track;
+
+			} else {
+				struct iovec iov = {
+					.iov_base = dst,
+					//.iov_len = do_now_bytes - convertor->pStack[1].disp
+					.iov_len = do_now_bytes - disp
+				};
+
+				do_now_bytes -= convertor->pStack[1].disp;
+				do_now_bytes -= disp;
+				opal_generic_simple_pack( convertor, &iov, &out_size, &do_now_bytes );
+				dst += do_now_bytes;
+				*max_data -= do_now_bytes;
+				total_size += do_now_bytes;
+			}
+
+		}
+
+
+		disp = convertor->pStack[1].disp % pData->size;
+		//if( convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && ( *max_data / pData->size > 0 ) ){
+		if( disp == 0 && convertor->pStack[1].index == 0 && ( *max_data / pData->size > 0 ) ){
+			printf("loop\n");
+			track = *max_data;
+			opal_iovec_pack_loop( convertor, &dst, &src, *max_data / pData->size, &track );
+			*max_data -= track;
+			total_size += track;
+		}
+
+		pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
+		do_now_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
+		do_now_bytes *= pElem->elem.count * pElem->elem.blocklen;
+
+		disp = convertor->pStack[1].disp % pData->size;
+		//if( convertor->pStack[1].disp == 0 && *max_data > do_now_bytes ){
+		if( disp == 0 && *max_data > do_now_bytes ){
+
+			printf("jit do_now_bytes %zu bConverted %zu total_bytes %zu\n", 
+					do_now_bytes,
+					convertor->bConverted,
+					total_size );
+			track = *max_data;
+
+			src = convertor->pBaseBuf + convertor->pStack[0].disp;
+			int ret = pData->jit_opt_partial_pack( &dst, 
+					src, 
+					&(convertor->pStack[0].count),
+					&(convertor->pStack[1].count),
+					&(convertor->pStack[1].index),
+					&(convertor->pStack[0].disp),
+					&(convertor->pStack[1].disp),
+					&(convertor->pStack[2].disp),
+					&track );
+			*max_data -= ret;
+			total_size += ret;
+//			printf("jit done track %zu index %d\n",
+//					*max_data, convertor->pStack[1].index);
+		}
+
+		pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
+		do_now_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
+		elem_size = do_now_bytes * pElem->elem.count * pElem->elem.blocklen;
+
+		if( *max_data >= do_now_bytes ){
+//			printf("epilog max_data %zu\n", *max_data);
+			uint32_t out_size = 1;
+
+
+			disp = convertor->pStack[1].disp % pData->size;
+			//if( do_now_bytes - convertor->pStack[1].disp >= *max_data ){
+			if( do_now_bytes - disp >= *max_data ){
+				track = *max_data;
+				struct iovec iov = {
+					.iov_base = dst,
+					.iov_len = track
+				};
+
+				opal_generic_simple_pack( convertor, &iov, &out_size, &track );
+				dst += track;
+				*max_data -= track;
+				total_size += track;
+
+			} else {
+		//		printf("stuck here!!!!!\n");
+				struct iovec iov = {
+					.iov_base = dst,
+				//	.iov_len = do_now_bytes - convertor->pStack[1].disp
+					.iov_len = do_now_bytes - disp
+				};
+
+				//do_now_bytes -= convertor->pStack[1].disp;
+				do_now_bytes -= disp;
+				opal_generic_simple_pack( convertor, &iov, &out_size, &do_now_bytes );
+				dst += do_now_bytes;
+				*max_data -= do_now_bytes;
+				total_size += do_now_bytes;
+
+			}
+		}
+		
+//		printf("routine %zu disp %zu index %d\n", *max_data, convertor->pStack[1].disp, convertor->pStack[1].index);
+		pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
+		do_now_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
+
+	} while ( *max_data > do_now_bytes );
+
+	*max_data = total_size;
+
 }
 
 int32_t 
@@ -583,13 +591,15 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
     if( convertor->pStack[0].count < count )
         count = convertor->pStack[0].count;
 
+    convertor->pStack[1].disp += count * ( pData->true_ub - pData->true_lb );
     convertor->pStack[0].disp += count * ( pData->ub - pData->lb );
     convertor->pStack[0].count -= count;
-    *max_data -= count * pData->size;
+    *max_data = count * pData->size;
 
     while( count-- ){
         //pData->jit_pack( *dst, *src );
 
+//	    printf("dst %p src %p\n", *dst, *src);
 	pData->jit_opt_pack( *dst, *src );
         *dst += pData->size;
         *src += pData->ub - pData->lb;

@@ -25,6 +25,8 @@
 
 #include <stddef.h>
 
+#include <stdio.h>
+
 #include "opal/datatype/opal_convertor_internal.h"
 #include "opal/datatype/opal_datatype_internal.h"
 
@@ -373,7 +375,7 @@ int32_t opal_generic_simple_pack_function(opal_convertor_t *pConvertor, struct i
         total_packed += iov[iov_count].iov_len;
     }
     *max_data = total_packed;
-    pConvertor->bConverted += total_packed; /* update the already converted bytes */
+//    pConvertor->bConverted += total_packed; 
     *out_size = iov_count;
     if (pConvertor->bConverted == pConvertor->remote_size) {
         pConvertor->flags |= CONVERTOR_COMPLETED;

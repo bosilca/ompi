@@ -116,7 +116,8 @@ typedef struct dt_type_desc_t dt_type_desc_t;
 typedef void (*pack_type)(const char *d, const char *s);
 typedef int (*pack_partial_type)(char **dst, char *src, size_t *count, int *index, size_t *totdisp,
                                  size_t *disp, size_t *max_data );
-typedef int (*pack_opt_partial_type)(char **dst, char *src, size_t *count, int *index, size_t *totdisp,
+typedef size_t (*pack_opt_partial_type)(char **dst, char *src, size_t *count, 
+		                 int *elem_count, int *index, size_t *totdisp,
                                  size_t *disp, size_t *datasize, size_t *max_data );
 /*
  * The datatype description.
