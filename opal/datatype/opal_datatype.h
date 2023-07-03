@@ -147,6 +147,7 @@ struct opal_datatype_t {
     struct iovec       *iov; 
     uint32_t           iovcnt;
 
+    uint32_t           do_jit;
     
     pack_type          jit_pack;
     pack_partial_type  jit_partial_pack;

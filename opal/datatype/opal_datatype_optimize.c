@@ -344,13 +344,29 @@ int32_t opal_datatype_commit(opal_datatype_t *pData)
         pLast->size = pData->size;
     }
 
-    if( pData->iov == NULL ){
+    //if( pData->iov == NULL ){
         //opal_generate_iovec( pData );
         //opal_datatype_create_jit_pack( pData );
         //opal_datatype_create_jit_partial_pack( pData );
-	opal_datatype_create_jit_opt_pack( pData );
-	opal_datatype_create_jit_opt_partial_pack( pData );
-    }
+
+	pData->do_jit = 1;
+
+	uint32_t do_or_dont = 1;
+	dt_elem_desc_t *pElem;
+	for( int i = 0; i < pData->opt_desc.used; i++ ){
+		pElem = &(pData->opt_desc.desc[i]);
+		if (OPAL_DATATYPE_LOOP == pElem->elem.common.type) {
+			pData->do_jit = 0;
+			break;
+		}
+
+	}
+
+	if( do_or_dont == 1 ){
+		opal_datatype_create_jit_opt_pack( pData );
+		opal_datatype_create_jit_opt_partial_pack( pData );
+	}
+    //}
 
     return OPAL_SUCCESS;
 }
