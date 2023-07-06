@@ -292,6 +292,7 @@ int32_t opal_generic_simple_pack_function(opal_convertor_t *pConvertor, struct i
                 /* we have a partial (less than blocklen) basic datatype */
                 int rc = PACK_PARTIAL_BLOCKLEN(pConvertor, pElem, count_desc, conv_ptr, iov_ptr,
                                                iov_len_local);
+		
                 if (0 == rc) { /* not done */
                     goto complete_loop;
                 }
@@ -305,7 +306,7 @@ int32_t opal_generic_simple_pack_function(opal_convertor_t *pConvertor, struct i
 
         while (1) {
             while (pElem->elem.common.flags & OPAL_DATATYPE_FLAG_DATA) {
-                /* we have a basic datatype (working on full blocks) */
+		/* we have a basic datatype (working on full blocks) */
                 PACK_PREDEFINED_DATATYPE(pConvertor, pElem, count_desc, conv_ptr, iov_ptr,
                                          iov_len_local);
                 if (0 != count_desc) { /* completed? */
@@ -314,7 +315,8 @@ int32_t opal_generic_simple_pack_function(opal_convertor_t *pConvertor, struct i
                 conv_ptr = pConvertor->pBaseBuf + pStack->disp;
                 pos_desc++; /* advance to the next data */
                 UPDATE_INTERNAL_COUNTERS(description, pos_desc, pElem, count_desc);
-            }
+
+	    }
             if (OPAL_DATATYPE_END_LOOP == pElem->elem.common.type) { /* end of the current loop */
                 DO_DEBUG(opal_output(0,
                                      "pack end_loop count %" PRIsize_t " stack_pos %d"

@@ -409,8 +409,7 @@ opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_d
 			}
 		}
 
-
-		if( convertor->pStack[1].count != pElem->elem.count * pElem->elem.blocklen && convertor->pStack[1].index == 0 && ( *max_data / pData->size > 0 ) && convertor->pStack[0].count != 0 ){
+		if( convertor->pStack[1].count == pElem->elem.count * pElem->elem.blocklen && convertor->pStack[1].index == 0 && ( *max_data / pData->size > 0 ) && convertor->pStack[0].count != 0 ){
 			track = *max_data;
 			opal_iovec_pack_loop( convertor, &dst, &src, *max_data / pData->size, &track );
 			*max_data -= track;
@@ -418,12 +417,12 @@ opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_d
 			convertor->bConverted += track;
 		}
 
+
 		pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
 		do_now_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
 		do_now_bytes *= pElem->elem.count * pElem->elem.blocklen;
 
-		if( convertor->pStack[1].count != pElem->elem.count * pElem->elem.blocklen && *max_data > do_now_bytes && convertor->pStack[0].count != 0 ){
-
+		if( convertor->pStack[1].count == pElem->elem.count * pElem->elem.blocklen && *max_data > do_now_bytes && convertor->pStack[0].count != 0 ){
 			track = *max_data;
 
 			src = convertor->pBaseBuf + convertor->pStack[0].disp;
@@ -440,6 +439,7 @@ opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_d
 			convertor->bConverted += ret;
 			*max_data -= ret;
 			total_size += ret;
+			pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
 		}
 
 		pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
@@ -543,8 +543,15 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
     if( convertor->pStack[0].count < count )
         count = convertor->pStack[0].count;
 
+    if( convertor->pStack[1].disp % ( pData->ub - pData->lb ) == 0 )
+        convertor->pStack[1].disp += count * ( pData->ub - pData->lb );
+    else {
+	convertor->pStack[1].disp / ( pData->ub - pData->lb ) + count * ( pData->ub - pData->lb );
+    }
+
     convertor->pStack[0].disp += count * ( pData->ub - pData->lb );
     convertor->pStack[0].count -= count;
+    convertor->pStack[1].index = 0;
     *max_data = count * pData->size;
 
     while( count-- ){
