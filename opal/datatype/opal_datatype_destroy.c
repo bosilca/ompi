@@ -32,7 +32,7 @@ int32_t opal_datatype_destroy(opal_datatype_t **dt)
     gcc_jit_result_release( pData->pack_opt_result );
     gcc_jit_result_release( pData->pack_opt_partial_result );
 
-    free( pData->iov );
+    //free( pData->iov );
 
     if ((pData->flags & OPAL_DATATYPE_FLAG_PREDEFINED) && (pData->super.obj_reference_count <= 1)) {
         return OPAL_ERROR;
