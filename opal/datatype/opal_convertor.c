@@ -409,6 +409,7 @@ opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_d
 			}
 		}
 
+		pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
 		if( convertor->pStack[1].count == pElem->elem.count * pElem->elem.blocklen && convertor->pStack[1].index == 0 && ( *max_data / pData->size > 0 ) && convertor->pStack[0].count != 0 ){
 			track = *max_data;
 			opal_iovec_pack_loop( convertor, &dst, &src, *max_data / pData->size, &track );
@@ -422,7 +423,8 @@ opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_d
 		do_now_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
 		do_now_bytes *= pElem->elem.count * pElem->elem.blocklen;
 
-		if( convertor->pStack[1].count == pElem->elem.count * pElem->elem.blocklen && *max_data > do_now_bytes && convertor->pStack[0].count != 0 ){
+		while( convertor->pStack[1].count == pElem->elem.count * pElem->elem.blocklen && *max_data >= do_now_bytes && convertor->pStack[0].count != 0 ){
+			
 			track = *max_data;
 
 			src = convertor->pBaseBuf + convertor->pStack[0].disp;
@@ -439,9 +441,12 @@ opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_d
 			convertor->bConverted += ret;
 			*max_data -= ret;
 			total_size += ret;
+			
 			pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
+			do_now_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
+			do_now_bytes *= pElem->elem.count * pElem->elem.blocklen;
 		}
-
+ 
 		pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
 		do_now_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
 		elem_size = do_now_bytes * pElem->elem.count * pElem->elem.blocklen;
@@ -450,7 +455,7 @@ opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_d
 			uint32_t out_size = 1;
 
 			size_t done_disp = ( pElem->elem.count * pElem->elem.blocklen - convertor->pStack[1].count ) * opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
-			if( do_now_bytes - done_disp >= *max_data ){
+			if( elem_size - done_disp >= *max_data ){
 				track = *max_data;
 				struct iovec iov = {
 					.iov_base = dst,
@@ -465,11 +470,11 @@ opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_d
 			} else {
 				struct iovec iov = {
 					.iov_base = dst,
-					.iov_len = do_now_bytes - done_disp
+					.iov_len = elem_size - done_disp
 				};
 
-				do_now_bytes -= done_disp;
-				opal_generic_simple_pack( convertor, &iov, &out_size, &do_now_bytes );
+				elem_size -= done_disp;
+				opal_generic_simple_pack( convertor, &iov, &out_size, &elem_size );
 				dst += do_now_bytes;
 				*max_data -= do_now_bytes;
 				total_size += do_now_bytes;
@@ -480,10 +485,9 @@ opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_d
 		pElem = &(pData->opt_desc.desc[ convertor->pStack[1].index ]);
 		do_now_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
 
-	} while ( *max_data > do_now_bytes && convertor->pStack[0].count != 0 );
+	} while ( *max_data >= do_now_bytes && convertor->pStack[0].count != 0 );
 
 	*max_data = total_size;
-
 }
 
 int32_t 

@@ -63,6 +63,7 @@ static int32_t opal_datatype_optimize_short(opal_datatype_t *pData, size_t count
             == pData->desc.desc[pos_desc].elem.common.type) { /* end of the current loop */
             ddt_endloop_desc_t *end_loop = &(pData->desc.desc[pos_desc].end_loop);
 	    if (0 != last.count) {
+#if 0
 		    if( opal_datatype_basicDatatypes[last.common.type]->size * last.blocklen * last.count > 4096 && last.count != 1 && opal_datatype_basicDatatypes[last.common.type]->size * last.blocklen < 32000 && pData->desc.used < 2 && pData->do_jit == 1 ){
 			    size_t elem_size = opal_datatype_basicDatatypes[last.common.type]->size * last.blocklen;
 			    size_t do_count = 4096 / elem_size,
@@ -99,13 +100,14 @@ static int32_t opal_datatype_optimize_short(opal_datatype_t *pData, size_t count
 			    last.count = 0;
 
 		    } else {
+#endif
 			    CREATE_ELEM( &(pElemDesc[desc_pos]), last.common.type, OPAL_DATATYPE_FLAG_BASIC, last.blocklen,
 					    last.count, last.disp, last.extent);
 			    //pElemDesc++;
 			    desc_pos++;
 			    nbElems++;
 			    last.count = 0;
-		    }
+//		    }
 	    }
 	    CREATE_LOOP_END( &(pElemDesc[desc_pos]), nbElems - pStack->index + 1, /* # of elems in this loop */
 			    end_loop->first_elem_disp, end_loop->size, end_loop->common.flags);
