@@ -25,7 +25,9 @@
 
 #include <stddef.h>
 #include <stdlib.h>
+#if defined(OPAL_HAVE_LIBGCCJIT)
 #include <libgccjit.h>
+#endif  /* defined(OPAL_HAVE_LIBGCCJIT) */
 
 #include "opal/datatype/opal_convertor.h"
 #include "opal/datatype/opal_datatype.h"
@@ -407,6 +409,7 @@ int32_t opal_datatype_commit(opal_datatype_t *pData)
         pLast->first_elem_disp = first_elem_disp;
         pLast->size = pData->size;
     }
+#if defined(OPAL_HAVE_LIBGCCJIT)
 
     pData->do_jit = 1;
     for( int i = 0; i < pData->opt_desc.used; i++ ){
@@ -422,6 +425,7 @@ int32_t opal_datatype_commit(opal_datatype_t *pData)
 	    opal_datatype_create_jit_opt_pack( pData );
 	    opal_datatype_create_jit_opt_partial_pack( pData );
     }
+#endif  /* defined(OPAL_HAVE_LIBGCCJIT) */
 
     return OPAL_SUCCESS;
 }
@@ -455,6 +459,7 @@ opal_generate_iovec( opal_datatype_t *pData )
     return 1;
 }
 
+#if defined(OPAL_HAVE_LIBGCCJIT)
 void opal_datatype_create_jit_pack( opal_datatype_t *pData )
 {
     gcc_jit_context *ctxt;
@@ -1503,3 +1508,5 @@ void opal_datatype_create_jit_opt_partial_pack( opal_datatype_t *pData )
     return;
 
 }
+#endif  /* defined(OPAL_HAVE_LIBGCCJIT) */
+

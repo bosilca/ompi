@@ -23,14 +23,18 @@
 #include "opal/datatype/opal_datatype.h"
 #include "opal/datatype/opal_datatype_internal.h"
 
+#if defined(OPAL_HAVE_LIBGCCJIT)
 #include <libgccjit.h>
+#endif  /* defined(OPAL_HAVE_LIBGCCJIT) */
 
 int32_t opal_datatype_destroy(opal_datatype_t **dt)
 {
     opal_datatype_t *pData = *dt;
 
+#if defined(OPAL_HAVE_LIBGCCJIT)
     gcc_jit_result_release( pData->pack_opt_result );
     gcc_jit_result_release( pData->pack_opt_partial_result );
+#endif  /* defined(OPAL_HAVE_LIBGCCJIT) */
 
     //free( pData->iov );
 

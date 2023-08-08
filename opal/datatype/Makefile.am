@@ -45,7 +45,7 @@ noinst_LTLIBRARIES = \
 
 # these sources will be compiled with the special -D
 libdatatype_reliable_la_SOURCES = opal_datatype_pack.c opal_datatype_unpack.c
-libdatatype_reliable_la_CFLAGS = -DCHECKSUM $(AM_CFLAGS)
+libdatatype_reliable_la_CFLAGS = -DCHECKSUM $(AM_CFLAGS) $(gccjit_CPPFLAGS)
 
 # these sources will be compiled with the normal CFLAGS only
 libdatatype_la_SOURCES = \
@@ -69,8 +69,8 @@ libdatatype_la_SOURCES = \
         opal_datatype_position.c \
         opal_datatype_resize.c \
         opal_datatype_unpack.c
-
-libdatatype_la_LIBADD = libdatatype_reliable.la
+libdatatype_la_CFLAGS = $(gccjit_CPPFLAGS)
+libdatatype_la_LIBADD = libdatatype_reliable.la $(gccjit_LIBS) $(gccjit_LDFLAGS)
 
 # Conditionally install the header files
 if WANT_INSTALL_HEADERS

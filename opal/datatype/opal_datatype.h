@@ -43,7 +43,6 @@
 
 #include <stdint.h>
 #include <stdlib.h>
-#include <libgccjit.h>
 
 #include "opal/class/opal_object.h"
 
@@ -119,6 +118,8 @@ typedef int (*pack_partial_type)(char **dst, char *src, size_t *count, int *inde
 typedef size_t (*pack_opt_partial_type)(char **dst, char *src, size_t *count, 
 		                 size_t *elem_count, int *index, size_t *totdisp,
                                  size_t *disp, size_t *datasize, size_t *max_data );
+
+struct gcc_jit_result;
 /*
  * The datatype description.
  */
@@ -144,6 +145,9 @@ struct opal_datatype_t {
     dt_type_desc_t opt_desc; /**< short description of the data used when conversion is useless
                                   or in the send case (without conversion) */
 
+    /* None of the following fields should remain here as we need to keep
+     * the size of the opal_datatype_t as small as possible for the ABI compatibility.
+     */
     struct iovec       *iov; 
     uint32_t           iovcnt;
 
@@ -152,10 +156,10 @@ struct opal_datatype_t {
     pack_type          jit_pack;
     pack_partial_type  jit_partial_pack;
 
-    gcc_jit_result     *pack_opt_result;
+    struct gcc_jit_result     *pack_opt_result;
     pack_type          jit_opt_pack;
 
-    gcc_jit_result     *pack_opt_partial_result;
+    struct gcc_jit_result     *pack_opt_partial_result;
     pack_opt_partial_type  jit_opt_partial_pack;
 
     size_t *ptypes; /**< array of basic predefined types that facilitate the computing
@@ -224,23 +228,13 @@ OPAL_DECLSPEC int32_t opal_datatype_commit(opal_datatype_t *pData);
 OPAL_DECLSPEC int32_t opal_datatype_destroy(opal_datatype_t **);
 OPAL_DECLSPEC int32_t opal_datatype_is_monotonic(opal_datatype_t *type);
 
+#if defined(OPAL_HAVE_LIBGCCJIT)
 OPAL_DECLSPEC void opal_datatype_create_jit_pack( opal_datatype_t *pData );
 OPAL_DECLSPEC void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData );
 
 OPAL_DECLSPEC void opal_datatype_create_jit_opt_pack( opal_datatype_t *pData );
 OPAL_DECLSPEC void opal_datatype_create_jit_opt_partial_pack( opal_datatype_t *pData );
-
-OPAL_DECLSPEC void opal_datatype_jit_elem( gcc_jit_context *ctxt, gcc_jit_function *func,
-		gcc_jit_block *start_block, gcc_jit_block *end_block,
-		int *blockn, gcc_jit_lvalue *count,
-		dt_elem_desc_t *pElem, gcc_jit_lvalue *dst_input, gcc_jit_lvalue *src_input,
-                gcc_jit_lvalue *src_loop );
-OPAL_DECLSPEC void opal_datatype_jit_partial_elem( gcc_jit_context *ctxt, gcc_jit_function *func,
-		gcc_jit_block *start_block, gcc_jit_block *end_block,
-		int *blockn, gcc_jit_lvalue *do_count, gcc_jit_lvalue *count,
-		dt_elem_desc_t *pElem, gcc_jit_lvalue *dst_input, gcc_jit_lvalue *src_input,
-                gcc_jit_lvalue *src_loop );
-
+#endif  /* defined((OPAL_HAVE_LIBGCCJIT)) */
 
 static inline int32_t opal_datatype_is_committed(const opal_datatype_t *type)
 {

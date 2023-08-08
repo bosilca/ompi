@@ -1154,6 +1154,11 @@ AC_INCLUDES_DEFAULT
 #include <sys/resource.h>
 #endif])
 
+##################################
+# Check for GCCJIT support
+OPAL_CHECK_GCCJIT([gccjit])
+##################################
+
 # checkpoint results
 AC_CACHE_SAVE
 
@@ -1182,6 +1187,7 @@ AC_SUBST(OPAL_3RDPARTY_SUBDIRS)
 AC_SUBST(OPAL_3RDPARTY_DIST_SUBDIRS)
 AC_SUBST(OPAL_3RDPARTY_EXTRA_DIST)
 AC_SUBST(OPAL_3RDPARTY_DISTCLEAN_DIRS)
+
 
 ##################################
 #        Fault Tolerance
