@@ -366,6 +366,7 @@ opal_iovec_pack( opal_convertor_t *convertor,
 void
 opal_calling_pack_routine( char *dst, opal_convertor_t *convertor, size_t *max_data )
 {
+	
 	const opal_datatype_t *pData = convertor->pDesc;
 	char *src = convertor->pBaseBuf + convertor->pStack[0].disp;
 	dt_elem_desc_t *pElem;
@@ -561,7 +562,6 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
     while( count-- ){
         //pData->jit_pack( *dst, *src );
 
-//	    printf("dst %p src %p\n", *dst, *src);
 	pData->jit_opt_pack( *dst, *src );
         *dst += pData->size;
         *src += pData->ub - pData->lb;
@@ -1072,9 +1072,10 @@ int32_t opal_convertor_prepare_for_send(opal_convertor_t *convertor,
 			    convertor->fAdvance = opal_generic_simple_pack;
 		    else
 			    convertor->fAdvance = opal_iovec_pack;
-#endif
+#else
 		    convertor->fAdvance = opal_generic_simple_pack;
-            }
+#endif
+	    }
         }
 #if defined(CHECKSUM)
     }
