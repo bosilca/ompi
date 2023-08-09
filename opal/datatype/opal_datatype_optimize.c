@@ -409,6 +409,7 @@ int32_t opal_datatype_commit(opal_datatype_t *pData)
         pLast->first_elem_disp = first_elem_disp;
         pLast->size = pData->size;
     }
+
 #if defined(OPAL_HAVE_LIBGCCJIT)
 
     pData->do_jit = 1;
@@ -418,7 +419,6 @@ int32_t opal_datatype_commit(opal_datatype_t *pData)
 		    pData->do_jit = 0;
 		    break;
 	    }
-
     }
 
     if( pData->do_jit == 1 ){

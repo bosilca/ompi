@@ -1067,10 +1067,13 @@ int32_t opal_convertor_prepare_for_send(opal_convertor_t *convertor,
                     convertor->fAdvance = opal_pack_homogeneous_contig_with_gaps;
                 }
             } else {
+#if defined(OPAL_HAVE_LIBGCCJIT)
                     if( datatype->do_jit == 0 )
 			    convertor->fAdvance = opal_generic_simple_pack;
 		    else
 			    convertor->fAdvance = opal_iovec_pack;
+#endif
+		    convertor->fAdvance = opal_generic_simple_pack;
             }
         }
 #if defined(CHECKSUM)
