@@ -32,6 +32,21 @@
 #include "opal/datatype/opal_convertor.h"
 #include "opal/datatype/opal_datatype.h"
 #include "opal/datatype/opal_datatype_internal.h"
+#include "opal/util/output.h"
+
+#ifdef __APPLE__
+#ifdef __ARM_ARCH_8A
+#define OMPI_GCC_JIT_ARCH "-march=armv8-a"
+#elif defined(__ARM_ARCH)
+#define OMPI_GCC_JIT_ARCH "-march=armv8"
+#else
+#warning "Unknown architecture for GCC JIT"
+#endif
+#else
+#define OMPI_GCC_JIT_ARCH "-march=cascadelake"
+#endif  /* __APPLE */
+
+static void opal_datatype_jit_pack_datatype(opal_datatype_t* pData);
 
 static int32_t opal_datatype_optimize_short(opal_datatype_t *pData, size_t count,
                                             dt_type_desc_t *pTypeDesc)
@@ -411,9 +426,8 @@ int32_t opal_datatype_commit(opal_datatype_t *pData)
     }
 
 #if defined(OPAL_HAVE_LIBGCCJIT)
-
     pData->do_jit = 1;
-    for( int i = 0; i < pData->opt_desc.used; i++ ){
+    for( int i = 0; i < pData->opt_desc.used; i++ ) {
 	    pElem = &(pData->opt_desc.desc[i]);
 	    if (OPAL_DATATYPE_LOOP == pElem->elem.common.type) {
 		    pData->do_jit = 0;
@@ -421,8 +435,9 @@ int32_t opal_datatype_commit(opal_datatype_t *pData)
 	    }
     }
 
-    if( pData->do_jit == 1 ){
-	    opal_datatype_create_jit_opt_pack( pData );
+    if( pData->do_jit == 1 ) {
+	    //opal_datatype_create_jit_opt_pack( pData );
+        opal_datatype_jit_pack_datatype(pData);
 	    opal_datatype_create_jit_opt_partial_pack( pData );
     }
 #endif  /* defined(OPAL_HAVE_LIBGCCJIT) */
@@ -548,7 +563,7 @@ void opal_datatype_create_jit_pack( opal_datatype_t *pData )
     gcc_jit_result *result = NULL;
 
     gcc_jit_context_set_int_option( ctxt, GCC_JIT_INT_OPTION_OPTIMIZATION_LEVEL, 3 );
-    gcc_jit_context_add_command_line_option( ctxt, "-march=cascadelake");
+    gcc_jit_context_add_command_line_option( ctxt, OMPI_GCC_JIT_ARCH);
     result = gcc_jit_context_compile( ctxt );
     gcc_jit_context_release( ctxt );
 
@@ -960,7 +975,7 @@ void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
     gcc_jit_result *result = NULL;
 
     gcc_jit_context_set_int_option( ctxt, GCC_JIT_INT_OPTION_OPTIMIZATION_LEVEL, 3 );
-    gcc_jit_context_add_command_line_option( ctxt, "-march=cascadelake");
+    gcc_jit_context_add_command_line_option( ctxt, OMPI_GCC_JIT_ARCH);
     result = gcc_jit_context_compile( ctxt );
     gcc_jit_context_release( ctxt );
 
@@ -972,18 +987,18 @@ void opal_datatype_create_jit_partial_pack( opal_datatype_t *pData )
 }
 
 void opal_datatype_jit_elem( gcc_jit_context *ctxt, gcc_jit_function *func,
-		gcc_jit_block *start_block, gcc_jit_block *end_block,
-		int *blockn, gcc_jit_lvalue *count,
-		dt_elem_desc_t *pElem, gcc_jit_lvalue *dst_input, gcc_jit_lvalue *src_input,
-                gcc_jit_lvalue *src_loop )
+                             gcc_jit_block *start_block, gcc_jit_block *end_block,
+                             int *blockn, gcc_jit_lvalue *count,
+                             dt_elem_desc_t *pElem, gcc_jit_lvalue *dst_input, gcc_jit_lvalue *src_input,
+                             gcc_jit_lvalue *src_loop )
 {
     size_t do_now_bytes = opal_datatype_basicDatatypes[pElem->elem.common.type]->size;
     do_now_bytes *= pElem->elem.blocklen;
 
     gcc_jit_type *int_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_INT ),
-                 *sizet_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_SIZE_T ),
-                 *void_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_VOID ),
-                 *void_ptr_type;
+        *sizet_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_SIZE_T ),
+        *void_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_VOID ),
+        *void_ptr_type;
     void_ptr_type = gcc_jit_type_get_pointer( void_type );
 
     // for( int i = 0; i < count; i++ ){
@@ -991,9 +1006,9 @@ void opal_datatype_jit_elem( gcc_jit_context *ctxt, gcc_jit_function *func,
     char block_name1[10], block_name2[10], block_name3[10], block_name4[10];
 
     gcc_jit_block *b_initial = gcc_jit_function_new_block( func, itoa( (*blockn)++, block_name1, 10 ) ),
-                  *b_loop_cond = gcc_jit_function_new_block( func, itoa( (*blockn)++, block_name2, 10 ) ),
-                  *b_loop_body = gcc_jit_function_new_block( func, itoa( (*blockn)++, block_name3, 10 ) ),
-                  *b_after_loop = gcc_jit_function_new_block( func, itoa( (*blockn)++, block_name4, 10 ) );
+        *b_loop_cond = gcc_jit_function_new_block( func, itoa( (*blockn)++, block_name2, 10 ) ),
+        *b_loop_body = gcc_jit_function_new_block( func, itoa( (*blockn)++, block_name3, 10 ) ),
+        *b_after_loop = gcc_jit_function_new_block( func, itoa( (*blockn)++, block_name4, 10 ) );
 
     gcc_jit_block_end_with_jump( start_block, NULL, b_initial );
 
@@ -1003,14 +1018,14 @@ void opal_datatype_jit_elem( gcc_jit_context *ctxt, gcc_jit_function *func,
     gcc_jit_block_end_with_jump( b_initial, NULL, b_loop_cond );
 
     gcc_jit_block_end_with_conditional(
-        b_loop_cond, NULL,
-        gcc_jit_context_new_comparison(
-            ctxt, NULL,
-            GCC_JIT_COMPARISON_LT,
-            gcc_jit_lvalue_as_rvalue(count),
-            gcc_jit_context_new_rvalue_from_int( ctxt, int_type, pElem->elem.count ) ),
-        b_loop_body,
-        b_after_loop );
+                                       b_loop_cond, NULL,
+                                       gcc_jit_context_new_comparison(
+                                                                      ctxt, NULL,
+                                                                      GCC_JIT_COMPARISON_LT,
+                                                                      gcc_jit_lvalue_as_rvalue(count),
+                                                                      gcc_jit_context_new_rvalue_from_int( ctxt, int_type, pElem->elem.count ) ),
+                                       b_loop_body,
+                                       b_after_loop );
 
     // loop_body
     //     memcpy( dst, src, len );
@@ -1026,31 +1041,31 @@ void opal_datatype_jit_elem( gcc_jit_context *ctxt, gcc_jit_function *func,
 
     gcc_jit_function *builtin_memcpy = gcc_jit_context_get_builtin_function( ctxt, "__builtin_memcpy" );
     gcc_jit_rvalue *memcpy_call = gcc_jit_context_new_call(
-                                      ctxt, NULL,
-                                      builtin_memcpy, 3, args );
+                                                           ctxt, NULL,
+                                                           builtin_memcpy, 3, args );
     gcc_jit_block_add_eval( b_loop_body, NULL, memcpy_call );
 
     //     src += extent
     gcc_jit_block_add_assignment( b_loop_body, NULL, src_loop,
-        gcc_jit_lvalue_get_address(
-            gcc_jit_context_new_array_access( ctxt, NULL,
-                gcc_jit_lvalue_as_rvalue( src_loop ),
-                gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pElem->elem.extent ) ), NULL ) );
+                                  gcc_jit_lvalue_get_address(
+                                                             gcc_jit_context_new_array_access( ctxt, NULL,
+                                                                                               gcc_jit_lvalue_as_rvalue( src_loop ),
+                                                                                               gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, pElem->elem.extent ) ), NULL ) );
 
     //     dst += len;
     gcc_jit_block_add_assignment( b_loop_body, NULL, dst_input,
-        gcc_jit_lvalue_get_address(
-            gcc_jit_context_new_array_access( ctxt, NULL,
-                gcc_jit_lvalue_as_rvalue( dst_input ),
-                gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, do_now_bytes ) ),
-            NULL ) );
+                                  gcc_jit_lvalue_get_address(
+                                                             gcc_jit_context_new_array_access( ctxt, NULL,
+                                                                                               gcc_jit_lvalue_as_rvalue( dst_input ),
+                                                                                               gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, do_now_bytes ) ),
+                                                             NULL ) );
 
     //     i++
     gcc_jit_block_add_assignment_op (
-        b_loop_body, NULL,
-        count,
-        GCC_JIT_BINARY_OP_PLUS,
-        gcc_jit_context_one(ctxt, int_type));
+                                     b_loop_body, NULL,
+                                     count,
+                                     GCC_JIT_BINARY_OP_PLUS,
+                                     gcc_jit_context_one(ctxt, int_type));
     // }
 
     gcc_jit_block_end_with_jump(b_loop_body, NULL, b_loop_cond);
@@ -1065,7 +1080,7 @@ void opal_datatype_create_jit_opt_pack( opal_datatype_t *pData )
 {
     gcc_jit_context *ctxt;
     gcc_jit_type *char_type, *void_type, *char_ptr_type, *void_ptr_type, *sizet_type,
-                 *char_ptr_type_const, *int_type;
+        *char_ptr_type_const, *int_type;
 
     ctxt = gcc_jit_context_acquire();
     char_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_CHAR );
@@ -1084,21 +1099,21 @@ void opal_datatype_create_jit_opt_pack( opal_datatype_t *pData )
 
     gcc_jit_function *func;
     func = gcc_jit_context_new_function( ctxt, NULL,
-		    GCC_JIT_FUNCTION_EXPORTED,
-		    void_type,
-		    "pack_opt_function",
-		    2, param,
-		    0 );
+                                         GCC_JIT_FUNCTION_EXPORTED,
+                                         void_type,
+                                         "pack_opt_function",
+                                         2, param,
+                                         0 );
 
     gcc_jit_block *block = gcc_jit_function_new_block( func, "initial" ),
-                  *terminate_block = gcc_jit_function_new_block( func, "terminate_block" );
+        *terminate_block = gcc_jit_function_new_block( func, "terminate_block" );
 
     size_t total_disp = 0;
     ptrdiff_t diff = 0;
 
     gcc_jit_lvalue *dst_val = gcc_jit_function_new_local( func, NULL, char_ptr_type, "dst_val" ),
-                   *src_val = gcc_jit_function_new_local( func, NULL, char_ptr_type, "src_val" ),
-                   *src_loop = gcc_jit_function_new_local( func, NULL, char_ptr_type, "src_loop" );
+        *src_val = gcc_jit_function_new_local( func, NULL, char_ptr_type, "src_val" ),
+        *src_loop = gcc_jit_function_new_local( func, NULL, char_ptr_type, "src_loop" );
     gcc_jit_block_add_assignment( block, NULL, dst_val, gcc_jit_param_as_rvalue( param[0] ) );
     gcc_jit_block_add_assignment( block, NULL, src_val, gcc_jit_param_as_rvalue( param[1] ) );
 
@@ -1108,14 +1123,14 @@ void opal_datatype_create_jit_opt_pack( opal_datatype_t *pData )
     int desc_used = pData->opt_desc.used;
 
     gcc_jit_block *elem_block[desc_used],
-                  *elem_exit_block[desc_used];
+        *elem_exit_block[desc_used];
     int blockn = 0,
         nelem = 0;
 
     for( int i = 0; i <= desc_used; i++ ){
         pElem = &(pData->opt_desc.desc[i]);
-        if( pElem->elem.common.flags & OPAL_DATATYPE_FLAG_DATA){
-	    char block_name[10];
+        if( pElem->elem.common.flags & OPAL_DATATYPE_FLAG_DATA) {
+            char block_name[10];
             elem_block[nelem] = gcc_jit_function_new_block( func, itoa( blockn++, block_name, 10 ) );
 
             char block_exit_name[10];
@@ -1129,7 +1144,7 @@ void opal_datatype_create_jit_opt_pack( opal_datatype_t *pData )
     nelem = 0;
     for( int i = 0; i <= desc_used; i++ ){
         pElem = &(pData->opt_desc.desc[i]);
-        if( pElem->elem.common.flags & OPAL_DATATYPE_FLAG_DATA){
+        if( pElem->elem.common.flags & OPAL_DATATYPE_FLAG_DATA) {
 
             if( nelem != 0 )
                 gcc_jit_block_end_with_jump( elem_exit_block[nelem-1], NULL, elem_block[nelem] );
@@ -1139,55 +1154,55 @@ void opal_datatype_create_jit_opt_pack( opal_datatype_t *pData )
 
             /* src_input = src + disp */
             gcc_jit_lvalue *src_input = gcc_jit_lvalue_get_address(
-                                            gcc_jit_context_new_array_access( ctxt, NULL,
-                                                 gcc_jit_lvalue_as_rvalue( src_val ),
-                                                 gcc_jit_context_new_rvalue_from_int( ctxt, sizet_type, pElem->elem.disp ) ),
-                                            NULL );
+                                                                   gcc_jit_context_new_array_access( ctxt, NULL,
+                                                                                                     gcc_jit_lvalue_as_rvalue( src_val ),
+                                                                                                     gcc_jit_context_new_rvalue_from_int( ctxt, sizet_type, pElem->elem.disp ) ),
+                                                                   NULL );
 
 
 
-	    if( pElem->elem.count != 1 ){
-		    gcc_jit_block *end_block;
-		    char block_name2[10];
-		    end_block = gcc_jit_function_new_block( func, itoa( blockn++, block_name2, 10 ) );
+            if( pElem->elem.count != 1 ){
+                gcc_jit_block *end_block;
+                char block_name2[10];
+                end_block = gcc_jit_function_new_block( func, itoa( blockn++, block_name2, 10 ) );
 
-		    opal_datatype_jit_elem( ctxt, func, elem_block[nelem], end_block,
-				    &blockn, count_val, pElem, dst_val, src_input, src_loop );
+                opal_datatype_jit_elem( ctxt, func, elem_block[nelem], end_block,
+                                        &blockn, count_val, pElem, dst_val, src_input, src_loop );
 
-		    gcc_jit_block_end_with_jump( end_block, NULL, elem_exit_block[ nelem ] );
-		    nelem++;
-	    } else {
+                gcc_jit_block_end_with_jump( end_block, NULL, elem_exit_block[ nelem ] );
+                nelem++;
+            } else {
 
-		    gcc_jit_rvalue *single_args[3] = {
-			    gcc_jit_context_new_cast( ctxt, NULL,
-					    gcc_jit_lvalue_as_rvalue( dst_val ),
-					    void_ptr_type ),
-			    gcc_jit_context_new_cast( ctxt, NULL,
-					    gcc_jit_lvalue_as_rvalue( src_input ),
-					    void_ptr_type ),
-			    gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, do_now_bytes )
-		    };
+                gcc_jit_rvalue *single_args[3] = {
+                    gcc_jit_context_new_cast( ctxt, NULL,
+                                              gcc_jit_lvalue_as_rvalue( dst_val ),
+                                              void_ptr_type ),
+                    gcc_jit_context_new_cast( ctxt, NULL,
+                                              gcc_jit_lvalue_as_rvalue( src_input ),
+                                              void_ptr_type ),
+                    gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, do_now_bytes )
+                };
 
-		    gcc_jit_function *builtin_memcpy = gcc_jit_context_get_builtin_function( ctxt, "__builtin_memcpy" );
-		    gcc_jit_rvalue *single_memcpy_call = gcc_jit_context_new_call(
-                                      ctxt, NULL,
-                                      builtin_memcpy, 3, single_args );
+                gcc_jit_function *builtin_memcpy = gcc_jit_context_get_builtin_function( ctxt, "__builtin_memcpy" );
+                gcc_jit_rvalue *single_memcpy_call = gcc_jit_context_new_call(
+                                                                              ctxt, NULL,
+                                                                              builtin_memcpy, 3, single_args );
 
-		    gcc_jit_block_add_eval( elem_block[nelem], NULL, single_memcpy_call );
+                gcc_jit_block_add_eval( elem_block[nelem], NULL, single_memcpy_call );
 
-		    gcc_jit_block_add_assignment( elem_block[nelem], NULL, dst_val,
-				    gcc_jit_lvalue_get_address(
-					    gcc_jit_context_new_array_access( ctxt, NULL,
-						    gcc_jit_lvalue_as_rvalue( dst_val ),
-						    gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, do_now_bytes ) ),
-					    NULL ) );
+                gcc_jit_block_add_assignment( elem_block[nelem], NULL, dst_val,
+                                              gcc_jit_lvalue_get_address(
+                                                                         gcc_jit_context_new_array_access( ctxt, NULL,
+                                                                                                           gcc_jit_lvalue_as_rvalue( dst_val ),
+                                                                                                           gcc_jit_context_new_rvalue_from_long( ctxt, sizet_type, do_now_bytes ) ),
+                                                                         NULL ) );
 
-		    gcc_jit_block_end_with_jump( elem_block[nelem], NULL, elem_exit_block[ nelem ] );
-		    nelem++;
+                gcc_jit_block_end_with_jump( elem_block[nelem], NULL, elem_exit_block[ nelem ] );
+                nelem++;
 
-	    }
+            }
 
-	}
+        }
 
     }
 
@@ -1197,7 +1212,7 @@ void opal_datatype_create_jit_opt_pack( opal_datatype_t *pData )
     pData->pack_opt_result = NULL;
 
     gcc_jit_context_set_int_option( ctxt, GCC_JIT_INT_OPTION_OPTIMIZATION_LEVEL, 3 );
-    gcc_jit_context_add_command_line_option( ctxt, "-march=cascadelake");
+    gcc_jit_context_add_command_line_option( ctxt, OMPI_GCC_JIT_ARCH);
     //gcc_jit_context_set_bool_option( ctxt, GCC_JIT_BOOL_OPTION_DUMP_INITIAL_GIMPLE, 1 );
 
     pData->pack_opt_result = gcc_jit_context_compile( ctxt );
@@ -1493,7 +1508,7 @@ void opal_datatype_create_jit_opt_partial_pack( opal_datatype_t *pData )
     gcc_jit_block_end_with_return( terminate_block, NULL, gcc_jit_lvalue_as_rvalue( ret ) );
 
     gcc_jit_context_set_int_option( ctxt, GCC_JIT_INT_OPTION_OPTIMIZATION_LEVEL, 3 );
-    gcc_jit_context_add_command_line_option( ctxt, "-march=cascadelake");
+    gcc_jit_context_add_command_line_option( ctxt, OMPI_GCC_JIT_ARCH);
     //gcc_jit_context_set_bool_option( ctxt, GCC_JIT_BOOL_OPTION_DUMP_INITIAL_GIMPLE, 1 );
 
     pData->pack_opt_partial_result = gcc_jit_context_compile( ctxt );
@@ -1508,5 +1523,244 @@ void opal_datatype_create_jit_opt_partial_pack( opal_datatype_t *pData )
     return;
 
 }
-#endif  /* defined(OPAL_HAVE_LIBGCCJIT) */
 
+/**
+ * src = base_src + elem->disp;
+ * uint32_t count = elem->count;
+ * loop_%d:
+ *  count--;
+ *  memcpy(dst, src, elem->blocklen * sizeof(elem->common.type));
+ *  dst += elem->blocklen * sizeof(elem->common.type);
+ *  src += elem->extent;
+ *  if( count > 0 ) {
+ *    goto loop_%d;
+ *  }
+*/
+static void opal_datatype_jit_pack_elem(ddt_elem_desc_t* pElem,
+                                        gcc_jit_context* ctxt,
+                                        gcc_jit_function* func,
+                                        gcc_jit_block** current_block,
+                                        gcc_jit_lvalue* base_src,
+                                        gcc_jit_lvalue* src,
+                                        gcc_jit_lvalue* dst,
+                                        gcc_jit_lvalue* count,
+                                        int idx)
+{
+    char tmp[128], comment[1024];
+    gcc_jit_type* char_ptr = gcc_jit_type_get_pointer(gcc_jit_context_get_type(ctxt, GCC_JIT_TYPE_CHAR));
+    gcc_jit_type *const_char_ptr = gcc_jit_type_get_const( char_ptr );
+    gcc_jit_type* long_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_UNSIGNED_LONG);
+    gcc_jit_type* int_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_INT);
+    gcc_jit_type* uint_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_UNSIGNED_INT);
+    gcc_jit_type* sizet_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_SIZE_T );
+    gcc_jit_type* void_ptr_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_VOID_PTR );
+    gcc_jit_function *builtin_memcpy = gcc_jit_context_get_builtin_function( ctxt, "__builtin_memcpy" );
+    /* const long elem_disp = pElem->disp */
+    gcc_jit_rvalue* elem_disp = gcc_jit_context_new_rvalue_from_long(ctxt,
+                                                                     long_type,
+                                                                     pElem->disp);
+    /* const long elem_extent = pElem->extent */
+    gcc_jit_rvalue* elem_extent = gcc_jit_context_new_rvalue_from_long(ctxt,
+                                                                       long_type,
+                                                                       pElem->extent);
+    /* const int blocklen = pElem->blocklen * opal_datatype_basicDatatypes[pElem->elem.common.type]->size */
+    gcc_jit_rvalue* elem_blocklen = gcc_jit_context_new_rvalue_from_long(ctxt,
+                                                                         sizet_type,
+                                                                         pElem->blocklen * opal_datatype_basicDatatypes[pElem->common.type]->size);
+    /* src = base_src + elem_disp */
+    gcc_jit_block_add_assignment(*current_block, NULL, src,
+                                 gcc_jit_context_new_cast(ctxt, NULL,
+                                                          gcc_jit_lvalue_get_address(
+                                                                                     gcc_jit_context_new_array_access(ctxt, NULL,
+                                                                                                                      gcc_jit_lvalue_as_rvalue(base_src),
+                                                                                                                      elem_disp),
+                                                                                     NULL),
+                                                          char_ptr));
+                                                                                                                      
+    opal_datatype_dump_data_desc((dt_elem_desc_t*)pElem, 1, comment, 1024); 
+    gcc_jit_block_add_comment( *current_block, NULL, comment);
+    snprintf(tmp, 128, "%d", idx);
+    if( 1 == pElem->count ) {
+        /* memcpy(dst, src, pElem->blocklen * sizeof(pElem->common.type)); */
+        gcc_jit_rvalue *args[3] = {
+            gcc_jit_context_new_cast( ctxt, NULL,
+                                      gcc_jit_lvalue_as_rvalue( dst ),
+                                      void_ptr_type ),
+            gcc_jit_context_new_cast( ctxt, NULL,
+                                      gcc_jit_lvalue_as_rvalue( src ),
+                                      void_ptr_type ),
+            elem_blocklen
+        };
+        gcc_jit_rvalue *memcpy_call = gcc_jit_context_new_call( ctxt, NULL,
+                                                                builtin_memcpy,
+                                                                3,
+                                                                args );
+        gcc_jit_block_add_eval( *current_block, NULL, memcpy_call );
+        /*  dst += pElem->blocklen * sizeof(pElem->common.type); */
+        gcc_jit_block_add_assignment(*current_block, NULL, dst,
+                                     gcc_jit_context_new_cast(ctxt, NULL,
+                                                              gcc_jit_lvalue_get_address(
+                                                                                         gcc_jit_context_new_array_access(ctxt, NULL,
+                                                                                                                          gcc_jit_lvalue_as_rvalue(dst),
+                                                                                                                          elem_blocklen),
+                                                                                         NULL),
+                                                              char_ptr));
+    } else {
+        snprintf(tmp, 128, "block_%d", idx);
+        gcc_jit_block * loop_body = gcc_jit_function_new_block(func, tmp);
+        snprintf(tmp, 128, "block_%d", idx+1);
+        gcc_jit_block * next = gcc_jit_function_new_block(func, tmp);
+        /* count = pElem->count */
+        gcc_jit_block_add_assignment(*current_block, NULL, count,
+                                     gcc_jit_context_new_rvalue_from_long(ctxt,
+                                                                          uint_type,
+                                                                          pElem->count));
+        gcc_jit_block_end_with_jump(*current_block, NULL, loop_body);
+        /* count-- */
+        gcc_jit_block_add_assignment_op( loop_body, NULL,
+                                         count,
+                                         GCC_JIT_BINARY_OP_MINUS,
+                                         gcc_jit_context_one( ctxt, uint_type ));
+
+        /* memcpy(dst, src, pElem->blocklen * sizeof(pElem->common.type)); */
+        gcc_jit_rvalue *args[3] = {
+            gcc_jit_context_new_cast( ctxt, NULL,
+                                      gcc_jit_lvalue_as_rvalue( dst ),
+                                      void_ptr_type ),
+            gcc_jit_context_new_cast( ctxt, NULL,
+                                      gcc_jit_lvalue_as_rvalue( src ),
+                                      void_ptr_type ),
+            elem_blocklen
+        };
+        gcc_jit_rvalue *memcpy_call = gcc_jit_context_new_call( ctxt, NULL,
+                                                                builtin_memcpy,
+                                                                3,
+                                                                args );
+        gcc_jit_block_add_eval( loop_body, NULL, memcpy_call );
+
+        /*  dst += pElem->blocklen * sizeof(pElem->common.type); */
+        gcc_jit_block_add_assignment(loop_body, NULL, dst,
+                                     gcc_jit_context_new_cast(ctxt, NULL,
+                                                              gcc_jit_lvalue_get_address(
+                                                                                         gcc_jit_context_new_array_access(ctxt, NULL,
+                                                                                                                          gcc_jit_lvalue_as_rvalue(dst),
+                                                                                                                          elem_blocklen),
+                                                                                         NULL),
+                                                              char_ptr));
+
+        /*  src += pElem->extent; */
+        gcc_jit_block_add_assignment(loop_body, NULL, src,
+                                     gcc_jit_context_new_cast(ctxt, NULL,
+                                                              gcc_jit_lvalue_get_address(
+                                                                                         gcc_jit_context_new_array_access(ctxt, NULL,
+                                                                                                                          gcc_jit_lvalue_as_rvalue(src),
+                                                                                                                          elem_extent),
+                                                                                         NULL),
+                                                              const_char_ptr));
+        /* count > 0 */
+        gcc_jit_rvalue *guard = gcc_jit_context_new_comparison( ctxt, NULL,
+                                                                GCC_JIT_COMPARISON_GT,
+                                                                gcc_jit_lvalue_as_rvalue (count),
+                                                                gcc_jit_context_zero( ctxt, uint_type ));
+        gcc_jit_block_end_with_conditional( loop_body, NULL,
+                                            guard,
+                                            loop_body, /* on_true */
+                                            next); /* on_false */
+        *current_block = next;
+    }
+}
+
+void opal_datatype_jit_pack_datatype(opal_datatype_t* pData)
+{
+    gcc_jit_context *ctxt = gcc_jit_context_acquire();
+    gcc_jit_type *char_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_CHAR );
+    gcc_jit_type *void_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_VOID );
+    gcc_jit_type *sizet_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_SIZE_T );
+    gcc_jit_type *int_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_INT );
+    gcc_jit_type *uint_type = gcc_jit_context_get_type( ctxt, GCC_JIT_TYPE_UNSIGNED_INT );
+
+    gcc_jit_type *char_ptr_type = gcc_jit_type_get_pointer( char_type );
+    gcc_jit_type *void_ptr_type = gcc_jit_type_get_pointer( void_type );
+    gcc_jit_type *char_ptr_type_const = gcc_jit_type_get_const( char_ptr_type );
+    gcc_jit_type *const_char_ptr_type = gcc_jit_type_get_pointer(gcc_jit_type_get_const( char_type ));
+
+    gcc_jit_param *dst_param = gcc_jit_context_new_param( ctxt, NULL, char_ptr_type, "dst" );
+    gcc_jit_param *base_src_param = gcc_jit_context_new_param( ctxt, NULL, const_char_ptr_type, "base_src" );
+    gcc_jit_param *count = gcc_jit_context_new_param( ctxt, NULL, sizet_type, "count" );
+    gcc_jit_param *param[] = {dst_param, base_src_param, count};
+
+    gcc_jit_function *func = gcc_jit_context_new_function( ctxt, NULL,
+                                                           GCC_JIT_FUNCTION_EXPORTED,
+                                                           void_type,
+                                                           "pack_opt_function",
+                                                           3, param,
+                                                           0 );
+
+    gcc_jit_block * main_loop = gcc_jit_function_new_block( func, "initial" ), *current_block = main_loop;
+    /* count-- */
+    gcc_jit_block_add_assignment_op( current_block, NULL,
+                                     count,
+                                     GCC_JIT_BINARY_OP_MINUS,
+                                     gcc_jit_context_one( ctxt, sizet_type ));
+
+    size_t total_disp = 0;
+    ptrdiff_t diff = 0;
+
+    gcc_jit_lvalue *src = gcc_jit_function_new_local( func, NULL, char_ptr_type, "src_val" );
+
+    gcc_jit_lvalue *elem_count = gcc_jit_function_new_local( func, NULL, uint_type, "elem_count" );
+
+    dt_elem_desc_t *pElem;
+
+    for( int i = 0; i < pData->opt_desc.used; i++ ) {
+        pElem = &(pData->opt_desc.desc[i]);
+        if( pElem->elem.common.flags & OPAL_DATATYPE_FLAG_DATA) {
+            opal_datatype_jit_pack_elem(pElem, ctxt, func, &current_block,
+                                        gcc_jit_param_as_lvalue(base_src_param), src, gcc_jit_param_as_lvalue(dst_param), elem_count, i);
+        } else {
+            opal_output(0, "Cannot use JIT pack for this datatype because internal loops are not yet supported\n");
+            opal_datatype_dump(pData);
+        }
+    }
+    /*  base_src += pData->ub - pData->lb; */
+    gcc_jit_block_add_assignment(current_block, NULL, base_src_param,
+                                 gcc_jit_context_new_cast(ctxt, NULL,
+                                                          gcc_jit_lvalue_get_address(
+                                                                                     gcc_jit_context_new_array_access(ctxt, NULL,
+                                                                                                                      gcc_jit_param_as_rvalue(base_src_param),
+                                                                                                                      gcc_jit_context_new_rvalue_from_long(ctxt,
+                                                                                                                                                           uint_type,
+                                                                                                                                                           pData->ub - pData->lb)),
+                                                                                     NULL),
+                                                          const_char_ptr_type));
+    gcc_jit_block * epiloque = gcc_jit_function_new_block( func, "epiloque" );
+    /* count > 0 */
+    gcc_jit_rvalue *guard = gcc_jit_context_new_comparison( ctxt, NULL,
+                                                            GCC_JIT_COMPARISON_GT,
+                                                            gcc_jit_lvalue_as_rvalue (count),
+                                                            gcc_jit_context_zero( ctxt, sizet_type ));
+    gcc_jit_block_end_with_conditional( current_block, NULL,
+                                        guard,
+                                        main_loop, /* on_true */
+                                        epiloque); /* on_false */
+
+    gcc_jit_block_end_with_void_return( epiloque, NULL );
+
+    pData->pack_opt_result = NULL;
+
+#if 1
+    opal_datatype_dump(pData);
+    gcc_jit_context_set_bool_option( ctxt, GCC_JIT_BOOL_OPTION_DUMP_INITIAL_GIMPLE, 1 );
+#endif
+    gcc_jit_context_set_int_option( ctxt, GCC_JIT_INT_OPTION_OPTIMIZATION_LEVEL, 3 );
+    gcc_jit_context_add_command_line_option( ctxt, OMPI_GCC_JIT_ARCH);
+
+    pData->pack_opt_result = gcc_jit_context_compile( ctxt );
+    //    gcc_jit_context_compile_to_file( ctxt, GCC_JIT_OUTPUT_KIND_ASSEMBLER, "gcc_object_file" );
+    gcc_jit_context_release( ctxt );
+
+    void *pack_func = gcc_jit_result_get_code( pData->pack_opt_result, "pack_opt_function" );
+    pData->jit_opt_pack = (pack_type)pack_func;
+}
+
+#endif  /* defined(OPAL_HAVE_LIBGCCJIT) */

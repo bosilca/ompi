@@ -551,7 +551,7 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
     if( convertor->pStack[1].disp % ( pData->ub - pData->lb ) == 0 )
         convertor->pStack[1].disp += count * ( pData->ub - pData->lb );
     else {
-	convertor->pStack[1].disp / ( pData->ub - pData->lb ) + count * ( pData->ub - pData->lb );
+        convertor->pStack[1].disp / ( pData->ub - pData->lb ) + count * ( pData->ub - pData->lb );
     }
 
     convertor->pStack[0].disp += count * ( pData->ub - pData->lb );
@@ -559,14 +559,16 @@ int32_t opal_iovec_pack_loop( opal_convertor_t *convertor,
     convertor->pStack[1].index = 0;
     *max_data = count * pData->size;
 
+    pData->jit_opt_pack( *dst, *src, count );
+#if 0
     while( count-- ){
         //pData->jit_pack( *dst, *src );
 
-	pData->jit_opt_pack( *dst, *src );
+        pData->jit_opt_pack( *dst, *src );
         *dst += pData->size;
         *src += pData->ub - pData->lb;
     }
-
+#endif
     return 1;
 }
 
@@ -588,7 +590,7 @@ opal_iovec_unpack( opal_convertor_t *convertor,
 
         if( iov_track >= *max_data ){
             
-            do{
+            do {
                 if( convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && track != 0 && ( track / pData->size > 0 ) )
                     opal_iovec_unpack_loop( convertor, &dst, &src, track / pData->size, &track );
                 
@@ -597,7 +599,7 @@ opal_iovec_unpack( opal_convertor_t *convertor,
         } else {
 
             *max_data = iov_track;
-            do{
+            do {
 
                 if( convertor->pStack[1].disp == 0 && convertor->pStack[1].index == 0 && iov_track != 0 && ( iov_track / pData->size > 0 ) )
                     opal_iovec_unpack_loop( convertor, &dst, &src, iov_track / pData->size, &iov_track );
