@@ -17,5 +17,18 @@
 # We can always build, unless we were explicitly disabled.
 AC_DEFUN([MCA_ompi_op_sve_CONFIG],[
     AC_CONFIG_FILES([ompi/mca/op/sve/Makefile])
-           [$1],
+    case "${host}" in
+        aarch64)
+            op_sve_support="yes";;
+        *)
+            op_sve_support="no";;
+    esac
+    [$1]
+    AM_CONDITIONAL([MCA_BUILD_ompi_op_has_sve_support],
+                   [test "$op_sve_support" = "yes"])
+    AC_SUBST(MCA_BUILD_ompi_op_has_sve_support)
+    
+    AS_IF([test $op_sve_support == "yes"],
+          [$1],
+          [$2])
 ])dnl
