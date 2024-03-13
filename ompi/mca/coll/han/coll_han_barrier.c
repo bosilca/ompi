@@ -39,7 +39,7 @@ mca_coll_han_barrier_intra_simple(struct ompi_communicator_t *comm,
         /* Put back the fallback collective support and call it once. All
          * future calls will then be automatically redirected.
          */
-        HAN_LOAD_FALLBACK_COLLECTIVES(han_module, comm);
+        HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
         return comm->c_coll->coll_barrier(comm, comm->c_coll->coll_bcast_module);
     }
 

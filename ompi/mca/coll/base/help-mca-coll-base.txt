@@ -45,3 +45,10 @@ using it was destroyed.
 
 This is somewhat unusual: the module itself may be at fault, or this
 may be a symptom of another issue (e.g., a memory problem).
+#
+[comm-select:missing collective]
+%s %s collective require support from a prior collective module for the fallback
+case. Such support is missing in this run.
+hostname:   %s
+priority:   %d
+#

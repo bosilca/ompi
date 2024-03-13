@@ -10,7 +10,6 @@
 #
 # $HEADER$
 #
-dist_ompidata_DATA = help-mpi-coll-cuda.txt
 
 sources = coll_cuda_module.c coll_cuda_reduce.c coll_cuda_allreduce.c \
           coll_cuda_reduce_scatter_block.c coll_cuda_component.c \

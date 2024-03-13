@@ -105,39 +105,17 @@ static int demo_register(void)
 static void
 mca_coll_demo_module_construct(mca_coll_demo_module_t *module)
 {
-    memset(&module->underlying, 0, sizeof(mca_coll_base_comm_coll_t));
+    memset(&module->c_coll, 0, sizeof(mca_coll_base_comm_coll_t));
 }
 
 #define RELEASE(module, func)                                           \
     do {                                                                \
-        if (NULL != module->underlying.coll_ ## func ## _module) { \
-            OBJ_RELEASE(module->underlying.coll_ ## func ## _module); \
+        if (NULL != module->c_coll.coll_ ## func ## _module) { \
+            OBJ_RELEASE(module->c_coll.coll_ ## func ## _module); \
         }                                                               \
     } while (0)
-
-static void
-mca_coll_demo_module_destruct(mca_coll_demo_module_t *module)
-{
-    RELEASE(module, allgather);
-    RELEASE(module, allgatherv);
-    RELEASE(module, allreduce);
-    RELEASE(module, alltoall);
-    RELEASE(module, alltoallv);
-    RELEASE(module, alltoallw);
-    RELEASE(module, barrier);
-    RELEASE(module, bcast);
-    RELEASE(module, exscan);
-    RELEASE(module, gather);
-    RELEASE(module, gatherv);
-    RELEASE(module, reduce);
-    RELEASE(module, reduce_scatter);
-    RELEASE(module, scan);
-    RELEASE(module, scatter);
-    RELEASE(module, scatterv);
-}
-
 
 OBJ_CLASS_INSTANCE(mca_coll_demo_module_t,
                    mca_coll_base_module_t,
                    mca_coll_demo_module_construct,
-                   mca_coll_demo_module_destruct);
+                   NULL);

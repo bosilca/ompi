@@ -35,9 +35,6 @@ mca_coll_base_module_t
 *mca_coll_cuda_comm_query(struct ompi_communicator_t *comm,
                           int *priority);
 
-int mca_coll_cuda_module_enable(mca_coll_base_module_t *module,
-                                struct ompi_communicator_t *comm);
-
 int
 mca_coll_cuda_allreduce(const void *sbuf, void *rbuf, int count,
                         struct ompi_datatype_t *dtype,

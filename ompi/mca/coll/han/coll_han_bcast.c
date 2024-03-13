@@ -83,7 +83,7 @@ mca_coll_han_bcast_intra(void *buff,
         /* Put back the fallback collective support and call it once. All
          * future calls will then be automatically redirected.
          */
-        HAN_LOAD_FALLBACK_COLLECTIVES(han_module, comm);
+        HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
         return comm->c_coll->coll_bcast(buff, count, dtype, root,
                                         comm, comm->c_coll->coll_bcast_module);
     }
@@ -96,7 +96,7 @@ mca_coll_han_bcast_intra(void *buff,
         /* Put back the fallback collective support and call it once. All
          * future calls will then be automatically redirected.
          */
-        HAN_LOAD_FALLBACK_COLLECTIVE(han_module, comm, bcast);
+        HAN_UNINSTALL_COLL_API(comm, han_module, bcast);
         return comm->c_coll->coll_bcast(buff, count, dtype, root,
                                         comm, comm->c_coll->coll_bcast_module);
     }
@@ -245,7 +245,7 @@ mca_coll_han_bcast_intra_simple(void *buff,
         /* Put back the fallback collective support and call it once. All
          * future calls will then be automatically redirected.
          */
-        HAN_LOAD_FALLBACK_COLLECTIVES(han_module, comm);
+        HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
         return comm->c_coll->coll_bcast(buff, count, dtype, root,
                                         comm, comm->c_coll->coll_bcast_module);
     }
@@ -258,7 +258,7 @@ mca_coll_han_bcast_intra_simple(void *buff,
         /* Put back the fallback collective support and call it once. All
          * future calls will then be automatically redirected.
          */
-        HAN_LOAD_FALLBACK_COLLECTIVE(han_module, comm, bcast);
+        HAN_UNINSTALL_COLL_API(comm, han_module, bcast);
         return comm->c_coll->coll_bcast(buff, count, dtype, root,
                                         comm, comm->c_coll->coll_bcast_module);
     }

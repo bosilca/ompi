@@ -50,9 +50,6 @@ int mca_coll_self_init_query(bool enable_progress_threads,
 mca_coll_base_module_t *
 mca_coll_self_comm_query(struct ompi_communicator_t *comm, int *priority);
 
-int mca_coll_self_module_enable(mca_coll_base_module_t *module,
-                                struct ompi_communicator_t *comm);
-
 int mca_coll_self_allgather_intra(const void *sbuf, int scount,
                                   struct ompi_datatype_t *sdtype,
                                   void *rbuf, int rcount,

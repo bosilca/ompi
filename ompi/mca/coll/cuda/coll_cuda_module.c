@@ -30,30 +30,21 @@
 #include "ompi/mca/coll/base/base.h"
 #include "coll_cuda.h"
 
+static int
+mca_coll_cuda_module_enable(mca_coll_base_module_t *module,
+                            struct ompi_communicator_t *comm);
+static int
+mca_coll_cuda_module_disable(mca_coll_base_module_t *module,
+                             struct ompi_communicator_t *comm);
 
 static void mca_coll_cuda_module_construct(mca_coll_cuda_module_t *module)
 {
     memset(&(module->c_coll), 0, sizeof(module->c_coll));
 }
 
-static void mca_coll_cuda_module_destruct(mca_coll_cuda_module_t *module)
-{
-    OBJ_RELEASE(module->c_coll.coll_allreduce_module);
-    OBJ_RELEASE(module->c_coll.coll_reduce_module);
-    OBJ_RELEASE(module->c_coll.coll_reduce_scatter_block_module);
-    OBJ_RELEASE(module->c_coll.coll_scatter_module);
-    /* If the exscan module is not NULL, then this was an
-       intracommunicator, and therefore scan will have a module as
-       well. */
-    if (NULL != module->c_coll.coll_exscan_module) {
-        OBJ_RELEASE(module->c_coll.coll_exscan_module);
-        OBJ_RELEASE(module->c_coll.coll_scan_module);
-    }
-}
-
 OBJ_CLASS_INSTANCE(mca_coll_cuda_module_t, mca_coll_base_module_t,
                    mca_coll_cuda_module_construct,
-                   mca_coll_cuda_module_destruct);
+                   NULL);
 
 
 /*
@@ -89,68 +80,83 @@ mca_coll_cuda_comm_query(struct ompi_communicator_t *comm,
     *priority = mca_coll_cuda_component.priority;
 
     /* Choose whether to use [intra|inter] */
-    cuda_module->super.coll_module_enable = mca_coll_cuda_module_enable;
+    cuda_module->super.coll_module_enable  = mca_coll_cuda_module_enable;
+    cuda_module->super.coll_module_disable = mca_coll_cuda_module_disable;
     cuda_module->super.ft_event = NULL;
 
-    cuda_module->super.coll_allgather  = NULL;
-    cuda_module->super.coll_allgatherv = NULL;
-    cuda_module->super.coll_allreduce  = mca_coll_cuda_allreduce;
-    cuda_module->super.coll_alltoall   = NULL;
-    cuda_module->super.coll_alltoallv  = NULL;
-    cuda_module->super.coll_alltoallw  = NULL;
-    cuda_module->super.coll_barrier    = NULL;
-    cuda_module->super.coll_bcast      = NULL;
-    cuda_module->super.coll_exscan     = mca_coll_cuda_exscan;
-    cuda_module->super.coll_gather     = NULL;
-    cuda_module->super.coll_gatherv    = NULL;
-    cuda_module->super.coll_reduce     = mca_coll_cuda_reduce;
-    cuda_module->super.coll_reduce_scatter = NULL;
+    cuda_module->super.coll_allreduce = mca_coll_cuda_allreduce;
+    cuda_module->super.coll_reduce = mca_coll_cuda_reduce;
     cuda_module->super.coll_reduce_scatter_block = mca_coll_cuda_reduce_scatter_block;
-    cuda_module->super.coll_scan       = mca_coll_cuda_scan;
-    cuda_module->super.coll_scatter    = NULL;
-    cuda_module->super.coll_scatterv   = NULL;
+    if (!OMPI_COMM_IS_INTER(comm)) {
+        cuda_module->super.coll_exscan = mca_coll_cuda_exscan;
+        cuda_module->super.coll_scan = mca_coll_cuda_scan;
+    }
 
     return &(cuda_module->super);
 }
 
+#define CUDA_INSTALL_COLL_API(__comm, __module, __api)                                                                           \
+    do                                                                                                                           \
+    {                                                                                                                            \
+        if ((__comm)->c_coll->coll_##__api)                                                                                      \
+        {                                                                                                                        \
+            MCA_COLL_SAVE_API(__comm, __api, (__module)->c_coll.coll_##__api, (__module)->c_coll.coll_##__api##_module, "cuda"); \
+            MCA_COLL_INSTALL_API(__comm, __api, mca_coll_cuda_##__api, &__module->super, "cuda");                                \
+        }                                                                                                                        \
+        else                                                                                                                     \
+        {                                                                                                                        \
+            opal_show_help("help-mca-coll-base.txt", "comm-select:missing collective", true,                                     \
+                           "cuda", #__api, ompi_process_info.nodename,                                                           \
+                           mca_coll_cuda_component.priority);                                                                    \
+        }                                                                                                                        \
+    } while (0)
 
+#define CUDA_UNINSTALL_COLL_API(__comm, __module, __api)                                                                            \
+    do                                                                                                                              \
+    {                                                                                                                               \
+        if (&(__module)->super == (__comm)->c_coll->coll_##__api##_module)                                                          \
+        {                                                                                                                           \
+            MCA_COLL_INSTALL_API(__comm, __api, (__module)->c_coll.coll_##__api, (__module)->c_coll.coll_##__api##_module, "cuda"); \
+            (__module)->c_coll.coll_##__api##_module = NULL;                                                                        \
+            (__module)->c_coll.coll_##__api = NULL;                                                                                 \
+        }                                                                                                                           \
+    } while (0)
 /*
  * Init module on the communicator
  */
-int mca_coll_cuda_module_enable(mca_coll_base_module_t *module,
-                                struct ompi_communicator_t *comm)
+int
+mca_coll_cuda_module_enable(mca_coll_base_module_t *module,
+                            struct ompi_communicator_t *comm)
 {
-    bool good = true;
-    char *msg = NULL;
     mca_coll_cuda_module_t *s = (mca_coll_cuda_module_t*) module;
 
-#define CHECK_AND_RETAIN(src, dst, name)                                                   \
-    if (NULL == (src)->c_coll->coll_ ## name ## _module) {                                 \
-        good = false;                                                                      \
-        msg = #name;                                                                       \
-    } else if (good) {                                                                     \
-        (dst)->c_coll.coll_ ## name ## _module = (src)->c_coll->coll_ ## name ## _module;  \
-        (dst)->c_coll.coll_ ## name = (src)->c_coll->coll_ ## name;                        \
-        OBJ_RETAIN((src)->c_coll->coll_ ## name ## _module);                               \
-    }
-
-    CHECK_AND_RETAIN(comm, s, allreduce);
-    CHECK_AND_RETAIN(comm, s, reduce);
-    CHECK_AND_RETAIN(comm, s, reduce_scatter_block);
-    CHECK_AND_RETAIN(comm, s, scatter);
+    CUDA_INSTALL_COLL_API(comm, s, allreduce);
+    CUDA_INSTALL_COLL_API(comm, s, reduce);
+    CUDA_INSTALL_COLL_API(comm, s, reduce_scatter_block);
     if (!OMPI_COMM_IS_INTER(comm)) {
         /* MPI does not define scan/exscan on intercommunicators */
-        CHECK_AND_RETAIN(comm, s, exscan);
-        CHECK_AND_RETAIN(comm, s, scan);
+        CUDA_INSTALL_COLL_API(comm, s, exscan);
+        CUDA_INSTALL_COLL_API(comm, s, scan);
     }
 
-    /* All done */
-    if (good) {
-        return OMPI_SUCCESS;
-    }
-    opal_show_help("help-mpi-coll-cuda.txt", "missing collective", true,
-                   ompi_process_info.nodename,
-                   mca_coll_cuda_component.priority, msg);
-    return OMPI_ERR_NOT_FOUND;
+    return OMPI_SUCCESS;
 }
 
+int
+mca_coll_cuda_module_disable(mca_coll_base_module_t *module,
+                             struct ompi_communicator_t *comm)
+{
+    mca_coll_cuda_module_t *s = (mca_coll_cuda_module_t*) module;
+
+    CUDA_UNINSTALL_COLL_API(comm, s, allreduce);
+    CUDA_UNINSTALL_COLL_API(comm, s, reduce);
+    CUDA_UNINSTALL_COLL_API(comm, s, reduce_scatter_block);
+    if (!OMPI_COMM_IS_INTER(comm))
+    {
+        /* MPI does not define scan/exscan on intercommunicators */
+        CUDA_UNINSTALL_COLL_API(comm, s, exscan);
+        CUDA_UNINSTALL_COLL_API(comm, s, scan);
+    }
+
+    return OMPI_SUCCESS;
+}

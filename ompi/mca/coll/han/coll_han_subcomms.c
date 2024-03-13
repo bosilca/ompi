@@ -26,19 +26,21 @@
 #include "coll_han.h"
 #include "coll_han_dynamic.h"
 
-#define HAN_SUBCOM_SAVE_COLLECTIVE(FALLBACKS, COMM, HANM, COLL)          \
-    do {                                                                         \
-        (FALLBACKS).COLL.COLL = (COMM)->c_coll->coll_ ## COLL;                   \
-        (FALLBACKS).COLL.module = (COMM)->c_coll->coll_ ## COLL ## _module;      \
-        (COMM)->c_coll->coll_ ## COLL = (HANM)->fallback.COLL.COLL;              \
-        (COMM)->c_coll->coll_ ## COLL ## _module = (HANM)->fallback.COLL.module; \
-    } while(0)
+#define HAN_SUBCOM_SAVE_COLLECTIVE(FALLBACKS, COMM, HANM, COLL)              \
+    do                                                                       \
+    {                                                                        \
+        (FALLBACKS).COLL.COLL = (COMM)->c_coll->coll_##COLL;                 \
+        (FALLBACKS).COLL.module = (COMM)->c_coll->coll_##COLL##_module;      \
+        (COMM)->c_coll->coll_##COLL = (HANM)->fallback.COLL.COLL;            \
+        (COMM)->c_coll->coll_##COLL##_module = (HANM)->fallback.COLL.module; \
+    } while (0)
 
-#define HAN_SUBCOM_LOAD_COLLECTIVE(FALLBACKS, COMM, HANM, COLL)          \
-    do {                                                                         \
-        (COMM)->c_coll->coll_ ## COLL = (FALLBACKS).COLL.COLL;                   \
-        (COMM)->c_coll->coll_ ## COLL ## _module = (FALLBACKS).COLL.module;      \
-    } while(0)
+#define HAN_SUBCOM_RESTORE_COLLECTIVE(FALLBACKS, COMM, HANM, COLL)           \
+    do                                                                       \
+    {                                                                        \
+        (COMM)->c_coll->coll_##COLL = (HANM)->fallback.COLL.COLL;            \
+        (COMM)->c_coll->coll_##COLL##_module = (HANM)->fallback.COLL.module; \
+    } while (0)
 
 /*
  * Routine that creates the local hierarchical sub-communicators
@@ -64,8 +66,8 @@ int mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
 
     /*
      * We cannot use han allreduce and allgather without sub-communicators,
-     * but we are in the creation of the data structures for the HAN, and
-     * temporarily need to save back the old collective.
+     * but we are in the creation of the data structures for HAN, and
+     * temporarily need to use the old collective.
      *
      * Allgather is used to compute vranks
      * Allreduce is used by ompi_comm_split_type in create_intranode_comm_new
@@ -94,16 +96,16 @@ int mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
     comm->c_coll->coll_allreduce(MPI_IN_PLACE, &local_procs, 1, MPI_INT,
                                  MPI_MAX, comm,
                                  comm->c_coll->coll_allreduce_module);
-    if( local_procs == 1 ) {
+    if (local_procs == 1) {
+        han_module->enabled = false; /* entire module set to pass-through from now on */
         /* restore saved collectives */
-        HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, allgatherv);
-        HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, allgather);
-        HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, allreduce);
-        HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, bcast);
-        HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, reduce);
-        HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, gather);
-        HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, scatter);
-        han_module->enabled = false;  /* entire module set to pass-through from now on */
+        HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, allgatherv);
+        HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, allgather);
+        HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, allreduce);
+        HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, bcast);
+        HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, reduce);
+        HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, gather);
+        HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, scatter);
         return OMPI_ERR_NOT_SUPPORTED;
     }
 
@@ -165,13 +167,13 @@ int mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
     han_module->cached_vranks = vranks;
 
     /* Reset the saved collectives to point back to HAN */
-    HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, allgatherv);
-    HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, allgather);
-    HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, allreduce);
-    HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, bcast);
-    HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, reduce);
-    HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, gather);
-    HAN_SUBCOM_LOAD_COLLECTIVE(fallbacks, comm, han_module, scatter);
+    HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, allgatherv);
+    HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, allgather);
+    HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, allreduce);
+    HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, bcast);
+    HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, reduce);
+    HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, gather);
+    HAN_SUBCOM_RESTORE_COLLECTIVE(fallbacks, comm, han_module, scatter);
 
     OBJ_DESTRUCT(&comm_info);
     return OMPI_SUCCESS;

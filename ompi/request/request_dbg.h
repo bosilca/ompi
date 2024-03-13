@@ -17,7 +17,7 @@
  */
 
 /**
- * Enum inidicating the type of the request
+ * Enum indicating the type of the request
  */
 typedef enum {
     OMPI_REQUEST_PML,      /**< MPI point-to-point request */

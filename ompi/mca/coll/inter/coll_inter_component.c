@@ -113,14 +113,7 @@ mca_coll_inter_module_construct(mca_coll_inter_module_t *module)
     module->inter_comm = NULL;
 }
 
-static void
-mca_coll_inter_module_destruct(mca_coll_inter_module_t *module)
-{
-
-}
-
-
 OBJ_CLASS_INSTANCE(mca_coll_inter_module_t,
                    mca_coll_base_module_t,
                    mca_coll_inter_module_construct,
-                   mca_coll_inter_module_destruct);
+                   NULL);

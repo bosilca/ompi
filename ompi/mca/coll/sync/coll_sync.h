@@ -43,9 +43,6 @@ mca_coll_base_module_t
 *mca_coll_sync_comm_query(struct ompi_communicator_t *comm,
                           int *priority);
 
-int mca_coll_sync_module_enable(mca_coll_base_module_t *module,
-                                struct ompi_communicator_t *comm);
-
 int mca_coll_sync_barrier(struct ompi_communicator_t *comm,
                           mca_coll_base_module_t *module);
 

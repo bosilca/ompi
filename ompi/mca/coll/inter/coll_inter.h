@@ -50,9 +50,6 @@ int mca_coll_inter_init_query(bool allow_inter_user_threads,
 mca_coll_base_module_t *
 mca_coll_inter_comm_query(struct ompi_communicator_t *comm, int *priority);
 
-int mca_coll_inter_module_enable(mca_coll_base_module_t *module,
-                                 struct ompi_communicator_t *comm);
-
 int mca_coll_inter_allgather_inter(const void *sbuf, int scount,
 				   struct ompi_datatype_t *sdtype,
 				   void *rbuf, int rcount,

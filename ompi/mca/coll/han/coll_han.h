@@ -232,13 +232,14 @@ typedef struct mca_coll_han_component_t {
     int max_dynamic_errors;
 } mca_coll_han_component_t;
 
-
 /*
  * Structure used to store what is necessary for the collective operations
  * routines in case of fallback.
  */
-typedef struct mca_coll_han_single_collective_fallback_s {
-    union {
+typedef struct mca_coll_han_single_collective_fallback_s
+{
+    union
+    {
         mca_coll_base_module_allgather_fn_t allgather;
         mca_coll_base_module_allgatherv_fn_t allgatherv;
         mca_coll_base_module_allreduce_fn_t allreduce;
@@ -248,7 +249,7 @@ typedef struct mca_coll_han_single_collective_fallback_s {
         mca_coll_base_module_reduce_fn_t reduce;
         mca_coll_base_module_scatter_fn_t scatter;
     };
-    mca_coll_base_module_t* module;
+    mca_coll_base_module_t *module;
 } mca_coll_han_single_collective_fallback_t;
 
 /*
@@ -256,7 +257,8 @@ typedef struct mca_coll_han_single_collective_fallback_s {
  * by HAN. This structure is used as a fallback during subcommunicator
  * creation.
  */
-typedef struct mca_coll_han_collectives_fallback_s {
+typedef struct mca_coll_han_collectives_fallback_s
+{
     mca_coll_han_single_collective_fallback_t allgather;
     mca_coll_han_single_collective_fallback_t allgatherv;
     mca_coll_han_single_collective_fallback_t allreduce;
@@ -285,7 +287,7 @@ typedef struct mca_coll_han_module_t {
     bool are_ppn_imbalanced;
 
     /* To be able to fallback when the cases are not supported */
-    struct mca_coll_han_collectives_fallback_s fallback;
+    mca_coll_han_collectives_fallback_t fallback;
 
     /* To be able to fallback on reproducible algorithm */
     mca_coll_base_module_reduce_fn_t reproducible_reduce;
@@ -340,30 +342,30 @@ OBJ_CLASS_DECLARATION(mca_coll_han_module_t);
 #define previous_scatter            fallback.scatter.scatter
 #define previous_scatter_module     fallback.scatter.module
 
-
 /* macro to correctly load a fallback collective module */
-#define HAN_LOAD_FALLBACK_COLLECTIVE(HANM, COMM, COLL)                            \
-    do {                                                                          \
-        if ( ((COMM)->c_coll->coll_ ## COLL ## _module) == (mca_coll_base_module_t*)(HANM) ) { \
-            (COMM)->c_coll->coll_ ## COLL = (HANM)->fallback.COLL.COLL;               \
-            mca_coll_base_module_t *coll_module = (COMM)->c_coll->coll_ ## COLL ## _module; \
-            (COMM)->c_coll->coll_ ## COLL ## _module = (HANM)->fallback.COLL.module;  \
-            OBJ_RETAIN((COMM)->c_coll->coll_ ## COLL ## _module);                     \
-            OBJ_RELEASE(coll_module);                                                 \
-        }                                                                             \
-    } while(0)
+#define HAN_UNINSTALL_COLL_API(__comm, __module, __api)                                  \
+    do                                                                                   \
+    {                                                                                    \
+        if (__comm->c_coll->coll_##__api##_module == &__module->super)                   \
+        {                                                                                \
+            __comm->c_coll->coll_##__api = __module->previous_##__api;                   \
+            __comm->c_coll->coll_##__api##_module = __module->previous_##__api##_module; \
+            __module->previous_##__api = NULL;                                           \
+            __module->previous_##__api##_module = NULL;                                  \
+        }                                                                                \
+    } while (0)
 
 /* macro to correctly load /all/ fallback collectives */
-#define HAN_LOAD_FALLBACK_COLLECTIVES(HANM, COMM)                            \
-    do {                                                                     \
-        HAN_LOAD_FALLBACK_COLLECTIVE(HANM, COMM, barrier);                   \
-        HAN_LOAD_FALLBACK_COLLECTIVE(HANM, COMM, bcast);                     \
-        HAN_LOAD_FALLBACK_COLLECTIVE(HANM, COMM, scatter);                   \
-        HAN_LOAD_FALLBACK_COLLECTIVE(HANM, COMM, gather);                    \
-        HAN_LOAD_FALLBACK_COLLECTIVE(HANM, COMM, reduce);                    \
-        HAN_LOAD_FALLBACK_COLLECTIVE(HANM, COMM, allreduce);                 \
-        HAN_LOAD_FALLBACK_COLLECTIVE(HANM, COMM, allgather);                 \
-        HAN_LOAD_FALLBACK_COLLECTIVE(HANM, COMM, allgatherv);                \
+#define HAN_LOAD_FALLBACK_COLLECTIVES(COMM, HANM)                      \
+    do {                                                               \
+        HAN_UNINSTALL_COLL_API(COMM, HANM, barrier);                   \
+        HAN_UNINSTALL_COLL_API(COMM, HANM, bcast);                     \
+        HAN_UNINSTALL_COLL_API(COMM, HANM, scatter);                   \
+        HAN_UNINSTALL_COLL_API(COMM, HANM, gather);                    \
+        HAN_UNINSTALL_COLL_API(COMM, HANM, reduce);                    \
+        HAN_UNINSTALL_COLL_API(COMM, HANM, allreduce);                 \
+        HAN_UNINSTALL_COLL_API(COMM, HANM, allgather);                 \
+        HAN_UNINSTALL_COLL_API(COMM, HANM, allgatherv);                \
         han_module->enabled = false;  /* entire module set to pass-through from now on */ \
     } while(0)
 

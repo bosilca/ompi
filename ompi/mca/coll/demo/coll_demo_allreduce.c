@@ -33,7 +33,7 @@
  *	Accepts:	- same as MPI_Allreduce()
  *	Returns:	- MPI_SUCCESS or error code
  */
-int mca_coll_demo_allreduce_intra(void *sbuf, void *rbuf, int count,
+int mca_coll_demo_allreduce_intra(const void *sbuf, void *rbuf, int count,
                                   struct ompi_datatype_t *dtype,
                                   struct ompi_op_t *op,
                                   struct ompi_communicator_t *comm,
@@ -41,9 +41,9 @@ int mca_coll_demo_allreduce_intra(void *sbuf, void *rbuf, int count,
 {
     mca_coll_demo_module_t *demo_module = (mca_coll_demo_module_t*) module;
     opal_output_verbose(10, ompi_coll_base_framework.framework_output, "In demo allreduce_intra");
-    return demo_module->underlying.coll_allreduce(sbuf, rbuf, count, dtype,
-                                                  op, comm,
-                                                  demo_module->underlying.coll_allreduce_module);
+    return demo_module->c_coll.coll_allreduce(sbuf, rbuf, count, dtype,
+                                              op, comm,
+                                              demo_module->c_coll.coll_allreduce_module);
 }
 
 
@@ -54,7 +54,7 @@ int mca_coll_demo_allreduce_intra(void *sbuf, void *rbuf, int count,
  *	Accepts:	- same as MPI_Allreduce()
  *	Returns:	- MPI_SUCCESS or error code
  */
-int mca_coll_demo_allreduce_inter(void *sbuf, void *rbuf, int count,
+int mca_coll_demo_allreduce_inter(const void *sbuf, void *rbuf, int count,
                                   struct ompi_datatype_t *dtype,
                                   struct ompi_op_t *op,
                                   struct ompi_communicator_t *comm,
@@ -62,7 +62,7 @@ int mca_coll_demo_allreduce_inter(void *sbuf, void *rbuf, int count,
 {
     mca_coll_demo_module_t *demo_module = (mca_coll_demo_module_t*) module;
     opal_output_verbose(10, ompi_coll_base_framework.framework_output, "In demo allreduce_inter");
-    return demo_module->underlying.coll_allreduce(sbuf, rbuf, count, dtype,
-                                                  op, comm,
-                                                  demo_module->underlying.coll_allreduce_module);
+    return demo_module->c_coll.coll_allreduce(sbuf, rbuf, count, dtype,
+                                              op, comm,
+                                              demo_module->c_coll.coll_allreduce_module);
 }

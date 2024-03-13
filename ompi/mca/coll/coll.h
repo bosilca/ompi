@@ -73,6 +73,7 @@
 #include "opal/mca/crs/crs.h"
 #include "opal/mca/crs/base/base.h"
 #include "ompi/request/request.h"
+#include "ompi/mca/coll/base/base.h"
 
 BEGIN_C_DECLS
 
@@ -787,6 +788,29 @@ typedef struct mca_coll_base_comm_coll_t mca_coll_base_comm_coll_t;
 
 /* ******************************************************************** */
 
+#define MCA_COLL_SAVE_API(__comm, __api, __fct, __bmodule, __c_name)           \
+  do                                                                           \
+  {                                                                            \
+      OPAL_OUTPUT_VERBOSE((50, ompi_coll_base_framework.framework_output,      \
+                           "Save %s collective in comm %p (%s) %p into %s:%s", \
+                           #__api, (void *)__comm, __comm->c_name,             \
+                           (void*)(uintptr_t)__comm->c_coll->coll_##__api,     \
+                           __c_name, #__fct));                                 \
+      __fct = __comm->c_coll->coll_##__api;                                    \
+      __bmodule = __comm->c_coll->coll_##__api##_module;                       \
+  } while (0)
+
+#define MCA_COLL_INSTALL_API(__comm, __api, __fct, __bmodule, __c_name)                \
+  do                                                                                   \
+  {                                                                                    \
+    OPAL_OUTPUT_VERBOSE((50, ompi_coll_base_framework.framework_output,                \
+                         "Replace %s collective in comm %p (%s) from %p to %s:%s(%p)", \
+                         #__api, (void *)__comm, __comm->c_name,                       \
+                         (void*)(uintptr_t)__comm->c_coll->coll_##__api,               \
+                         __c_name, #__fct, (void*)(uintptr_t)__fct));                  \
+    __comm->c_coll->coll_##__api = __fct;                                              \
+    __comm->c_coll->coll_##__api##_module = __bmodule;                                 \
+  } while (0)
 
 END_C_DECLS
 

@@ -40,9 +40,9 @@ int mca_coll_demo_bcast_intra(void *buff, int count,
 {
     mca_coll_demo_module_t *demo_module = (mca_coll_demo_module_t*) module;
     opal_output_verbose(10, ompi_coll_base_framework.framework_output, "In demo bcast_intra");
-    return demo_module->underlying.coll_bcast(buff, count, datatype,
-                                              root, comm,
-                                              demo_module->underlying.coll_bcast_module);
+    return demo_module->c_coll.coll_bcast(buff, count, datatype,
+                                          root, comm,
+                                          demo_module->c_coll.coll_bcast_module);
 }
 
 
@@ -60,7 +60,7 @@ int mca_coll_demo_bcast_inter(void *buff, int count,
 {
     mca_coll_demo_module_t *demo_module = (mca_coll_demo_module_t*) module;
     opal_output_verbose(10, ompi_coll_base_framework.framework_output, "In demo bcast_inter");
-    return demo_module->underlying.coll_bcast(buff, count, datatype,
-                                              root, comm,
-                                              demo_module->underlying.coll_bcast_module);
+    return demo_module->c_coll.coll_bcast(buff, count, datatype,
+                                          root, comm,
+                                          demo_module->c_coll.coll_bcast_module);
 }

@@ -43,7 +43,7 @@ libmca_coll_inter_la_LDFLAGS = -module -avoid-version
 
 sources = \
         coll_inter.h \
-        coll_inter.c \
+        coll_inter_module.c \
         coll_inter_allreduce.c \
 	coll_inter_allgather.c \
 	coll_inter_allgatherv.c \

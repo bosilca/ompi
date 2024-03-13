@@ -19,8 +19,6 @@
 # $HEADER$
 #
 
-dist_ompidata_DATA = help-coll-sync.txt
-
 sources = \
         coll_sync.h \
         coll_sync_component.c \

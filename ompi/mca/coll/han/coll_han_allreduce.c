@@ -108,7 +108,7 @@ mca_coll_han_allreduce_intra(const void *sbuf,
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                              "han cannot handle allreduce with this communicator. Drop HAN support in this communicator and fall back on another component\n"));
         /* HAN cannot work with this communicator so fallback on all collectives */
-        HAN_LOAD_FALLBACK_COLLECTIVES(han_module, comm);
+        HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
         return comm->c_coll->coll_allreduce(sbuf, rbuf, count, dtype, op,
                                             comm, comm->c_coll->coll_reduce_module);
     }
@@ -494,7 +494,7 @@ mca_coll_han_allreduce_intra_simple(const void *sbuf,
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                              "han cannot handle allreduce with this communicator. Drop HAN support in this communicator and fall back on another component\n"));
         /* HAN cannot work with this communicator so fallback on all collectives */
-        HAN_LOAD_FALLBACK_COLLECTIVES(han_module, comm);
+        HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
         return comm->c_coll->coll_allreduce(sbuf, rbuf, count, dtype, op,
                                             comm, comm->c_coll->coll_reduce_module);
     }

@@ -25,15 +25,16 @@
 /*
  * Local functions
  */
-static int han_module_enable(mca_coll_base_module_t * module,
-                             struct ompi_communicator_t *comm);
+static int mca_coll_han_module_enable(mca_coll_base_module_t * module,
+                                      struct ompi_communicator_t *comm);
 static int mca_coll_han_module_disable(mca_coll_base_module_t * module,
                                        struct ompi_communicator_t *comm);
 
-#define CLEAN_PREV_COLL(HANDLE, NAME)                    \
-    do {                                                 \
-        (HANDLE)->fallback.NAME.NAME = NULL;             \
-        (HANDLE)->fallback.NAME.module = NULL;           \
+#define CLEAN_PREV_COLL(__module, __api)              \
+    do                                                \
+    {                                                 \
+        (__module)->previous_##__api          = NULL; \
+        (__module)->previous_##__api##_module = NULL; \
     } while (0)
 
 /*
@@ -84,14 +85,6 @@ static void mca_coll_han_module_construct(mca_coll_han_module_t * module)
     han_module_clear(module);
 }
 
-
-#define OBJ_RELEASE_IF_NOT_NULL(obj)            \
-    do {                                        \
-        if (NULL != (obj)) {                    \
-            OBJ_RELEASE(obj);                   \
-        }                                       \
-    } while (0)
-
 /*
  * Module destructor
  */
@@ -139,13 +132,6 @@ mca_coll_han_module_destruct(mca_coll_han_module_t * module)
             ompi_comm_free(&(module->sub_comm[i]));
         }
     }
-
-    OBJ_RELEASE_IF_NOT_NULL(module->previous_allgather_module);
-    OBJ_RELEASE_IF_NOT_NULL(module->previous_allreduce_module);
-    OBJ_RELEASE_IF_NOT_NULL(module->previous_bcast_module);
-    OBJ_RELEASE_IF_NOT_NULL(module->previous_gather_module);
-    OBJ_RELEASE_IF_NOT_NULL(module->previous_reduce_module);
-    OBJ_RELEASE_IF_NOT_NULL(module->previous_scatter_module);
 
     han_module_clear(module);
 }
@@ -237,7 +223,9 @@ mca_coll_han_comm_query(struct ompi_communicator_t * comm, int *priority)
         }
     }
 
-    han_module->super.coll_module_enable = han_module_enable;
+    han_module->super.coll_module_enable = mca_coll_han_module_enable;
+    han_module->super.coll_module_disable = mca_coll_han_module_disable;
+    
     han_module->super.ft_event        = NULL;
     han_module->super.coll_alltoall   = NULL;
     han_module->super.coll_alltoallv  = NULL;
@@ -276,36 +264,43 @@ mca_coll_han_comm_query(struct ompi_communicator_t * comm, int *priority)
  * . ompi_communicator_t *comm
  * . mca_coll_han_module_t *han_module
  */
-#define HAN_SAVE_PREV_COLL_API(__api)                                   \
-    do {                                                                \
-        if (!comm->c_coll->coll_ ## __api || !comm->c_coll->coll_ ## __api ## _module) { \
-            opal_output_verbose(1, ompi_coll_base_framework.framework_output, \
-                                "(%d/%s): no underlying " # __api"; disqualifying myself", \
-                                comm->c_contextid, comm->c_name); \
-            goto handle_error;                                  \
-        }                                                       \
-        han_module->previous_ ## __api            = comm->c_coll->coll_ ## __api; \
-        han_module->previous_ ## __api ## _module = comm->c_coll->coll_ ## __api ## _module; \
-        OBJ_RETAIN(han_module->previous_ ## __api ## _module);  \
-    } while(0)
+#define HAN_INSTALL_COLL_API(__comm, __module, __api)                                         \
+    do                                                                                        \
+    {                                                                                         \
+        if (!__comm->c_coll->coll_##__api || !__comm->c_coll->coll_##__api##_module)          \
+        {                                                                                     \
+            opal_output_verbose(1, ompi_coll_base_framework.framework_output,                 \
+                                "(%d/%s): no underlying " #__api "; disqualifying myself",    \
+                                __comm->c_contextid, __comm->c_name);                         \
+        }                                                                                     \
+        else                                                                                  \
+        {                                                                                     \
+            __module->previous_##__api = __comm->c_coll->coll_##__api;                   \
+            __module->previous_##__api##_module = __comm->c_coll->coll_##__api##_module; \
+            __comm->c_coll->coll_##__api = __module->previous_##__api;                   \
+            __comm->c_coll->coll_##__api##_module = &__module->super;                         \
+        }                                                                                     \
+    } while (0)
+
+/* The HAN_UNINSTALL_COLL_API is in coll_han.h header as it is needed in several places. */
 
 /*
  * Init module on the communicator
  */
 static int
-han_module_enable(mca_coll_base_module_t * module,
-                  struct ompi_communicator_t *comm)
+mca_coll_han_module_enable(mca_coll_base_module_t * module,
+                           struct ompi_communicator_t *comm)
 {
     mca_coll_han_module_t * han_module = (mca_coll_han_module_t*) module;
 
-    HAN_SAVE_PREV_COLL_API(allgather);
-    HAN_SAVE_PREV_COLL_API(allgatherv);
-    HAN_SAVE_PREV_COLL_API(allreduce);
-    HAN_SAVE_PREV_COLL_API(barrier);
-    HAN_SAVE_PREV_COLL_API(bcast);
-    HAN_SAVE_PREV_COLL_API(gather);
-    HAN_SAVE_PREV_COLL_API(reduce);
-    HAN_SAVE_PREV_COLL_API(scatter);
+    HAN_INSTALL_COLL_API(comm, han_module, allgather);
+    HAN_INSTALL_COLL_API(comm, han_module, allgatherv);
+    HAN_INSTALL_COLL_API(comm, han_module, allreduce);
+    HAN_INSTALL_COLL_API(comm, han_module, barrier);
+    HAN_INSTALL_COLL_API(comm, han_module, bcast);
+    HAN_INSTALL_COLL_API(comm, han_module, gather);
+    HAN_INSTALL_COLL_API(comm, han_module, reduce);
+    HAN_INSTALL_COLL_API(comm, han_module, scatter);
 
     /* set reproducible algos */
     mca_coll_han_reduce_reproducible_decision(comm, module);
@@ -314,13 +309,7 @@ han_module_enable(mca_coll_base_module_t * module,
     return OMPI_SUCCESS;
 
 handle_error:
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allgather_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allgatherv_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allreduce_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_bcast_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_gather_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_reduce_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_scatter_module);
+    return mca_coll_han_module_disable(module, comm);
 
     return OMPI_ERROR;
 }
@@ -334,14 +323,14 @@ mca_coll_han_module_disable(mca_coll_base_module_t * module,
 {
     mca_coll_han_module_t * han_module = (mca_coll_han_module_t *) module;
 
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allgather_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allgatherv_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_allreduce_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_barrier_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_bcast_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_gather_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_reduce_module);
-    OBJ_RELEASE_IF_NOT_NULL(han_module->previous_scatter_module);
+    HAN_UNINSTALL_COLL_API(comm, han_module, allgather);
+    HAN_UNINSTALL_COLL_API(comm, han_module, allgatherv);
+    HAN_UNINSTALL_COLL_API(comm, han_module, allreduce);
+    HAN_UNINSTALL_COLL_API(comm, han_module, barrier);
+    HAN_UNINSTALL_COLL_API(comm, han_module, bcast);
+    HAN_UNINSTALL_COLL_API(comm, han_module, gather);
+    HAN_UNINSTALL_COLL_API(comm, han_module, reduce);
+    HAN_UNINSTALL_COLL_API(comm, han_module, scatter);
 
     han_module_clear(han_module);
 
