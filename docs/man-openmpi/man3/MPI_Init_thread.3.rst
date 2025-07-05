@@ -68,6 +68,103 @@ modifies, interprets, nor distributes them:
    /* main program */
    MPI_Finalize();
 
+<<<<<<< Updated upstream
+=======
+   int main(int argv, char *argv[]) {
+       int provided;
+       MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+       /* ...body of main MPI pogram... */
+       MPI_Finalize();
+       return 0;
+   }
+
+
+:ref:`MPI_Init_thread` has both a direct and an indirect mechanism to
+request a specific level of thread support.  :ref:`MPI_Init` only has
+an indirect mechanism to request a specific level of thread support.
+
+Direct request of thread level
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:ref:`MPI_Init_thread` has the *required* parameter, which can be set
+to any one of the following constants (from ``mpi.h``):
+
+* ``MPI_THREAD_SINGLE``: Indicating that only one thread will execute.
+
+* ``MPI_THREAD_FUNNELED``: Indicating that if the process is
+  multithreaded, only the thread that called :ref:`MPI_Init_thread`
+  will make MPI calls.
+
+* ``MPI_THREAD_SERIALIZED``: Indicating that if the process is
+  multithreaded, only one thread will make MPI library calls at one
+  time.
+
+* ``MPI_THREAD_MULTIPLE``: Indicating that if the process is
+  multithreaded, multiple threads may call MPI at once with no
+  restrictions.
+
+The values of these constants adhere to the following relationships:
+
+.. math::
+   :nowrap:
+
+   \begin{eqnarray}
+       MPI\_THREAD\_SINGLE     & < & MPI\_THREAD\_FUNNELED \\
+       MPI\_THREAD\_FUNNELED   & < & MPI\_THREAD\_SERIALIZED \\
+       MPI\_THREAD\_SERIALIZED & < & MPI\_THREAD\_MULTIPLE \\
+   \end{eqnarray}
+
+Indirect request of thread level
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Both :ref:`MPI_Init_thread` and :ref:`MPI_Init` support an indirect
+method of indicating the required thread level: setting the
+``OMPI_MPI_THREAD_LEVEL`` environment variable:
+
+* If the ``OMPI_MPI_THREAD_LEVEL`` environment variable is set at the
+  time :ref:`MPI_Init` is invoked, it behaves as if
+  :ref:`MPI_Init_thread` was invoked with the corresponding
+  ``MPI_THREAD_*`` constant value passed via the *required* parameter.
+
+* If the ``OMPI_MPI_THREAD_LEVEL`` environment variable is set at the
+  time :ref:`MPI_Init_thread` is invoked, the ``MPI_THREAD_*``
+  constant value corresponding to the environment variable value
+  overrides the value passed via the *required* parameter.
+
+The ``OMPI_MPI_THREAD_LEVEL`` environment variable can be set to any
+of the values listed below.  If using one of the string values, any unique
+prefix of those values is sufficient (e.g., both ``F`` and ``FUNN`` will
+uniquely identify ``FUNNELED``, which is short for the
+``MPI_THREAD_FUNNELED`` value).
+
+.. list-table::
+   :header-rows: 1
+
+   * - Value that Open MPI uses
+     - Allowable values (case-insensitive)
+
+   * - ``MPI_THREAD_SINGLE``
+     - ``MPI_THREAD_SINGLE``, ``THREAD_SINGLE``, ``SINGLE``, 0
+
+   * - ``MPI_THREAD_FUNNELED``
+     - ``MPI_THREAD_FUNNELED``, ``THREAD_FUNNELED``, ``FUNNELED``, 1
+
+   * - ``MPI_THREAD_SERIALIZED``
+     - ``MPI_THREAD_SERIALIZED``, ``THREAD_SERIALIZED``,
+       ``SERIALIZED``, 2
+
+   * - ``MPI_THREAD_MULTIPLE``
+     - ``MPI_THREAD_MULTIPLE``, ``THREAD_MULTIPLE``, ``MULTIPLE``, 3
+
+.. note:: Prior to Open MPI v6.0.0, only the integer values 0 through
+          3 were acceptable values for the ``OMPI_MPI_THREAD_LEVEL``
+          environment variable.
+
+          Starting with Open MPI v6.0.0, the Open MPI community
+          recomends using one of the string name variants so that it
+          can be correctly mapped to the corresponding Open MPI ABI
+          value or the MPI Standard ABI value, as relevant.
+>>>>>>> Stashed changes
 
 NOTES
 -----
