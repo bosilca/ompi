@@ -3,6 +3,7 @@
  * Copyright (c) 2024      The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  * Additional copyrights may follow
  *
@@ -28,6 +29,9 @@ static int mca_accelerator_rocm_query_event(int dev_id, opal_accelerator_event_t
 static int mca_accelerator_rocm_wait_event(int dev_id, opal_accelerator_event_t *event, opal_accelerator_stream_t *stream);
 
 static int mca_accelerator_rocm_memcpy_async(int dest_dev_id, int src_dev_id, void *dest, const void *src, size_t size,
+                                  opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type);
+static int mca_accelerator_rocm_memcpy2d_async(int dest_dev_id, int src_dev_id, void *dest, size_t dst_extent,
+                                  const void *src, size_t src_extent, size_t blockLen, size_t count,
                                   opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type);
 static int mca_accelerator_rocm_memcpy(int dest_dev_id, int src_dev_id, void *dest, const void *src,
                             size_t size, opal_accelerator_transfer_type_t type);
@@ -92,6 +96,7 @@ opal_accelerator_base_module_t opal_accelerator_rocm_module =
     .wait_event = mca_accelerator_rocm_wait_event,
 
     .mem_copy_async = mca_accelerator_rocm_memcpy_async,
+    .mem_copy2d_async = mca_accelerator_rocm_memcpy2d_async,
     .mem_copy = mca_accelerator_rocm_memcpy,
     .mem_move_async = mca_accelerator_rocm_memmove_async,
     .mem_move = mca_accelerator_rocm_memmove,
@@ -340,6 +345,32 @@ static int mca_accelerator_rocm_memcpy_async(int dest_dev_id, int src_dev_id, vo
     if (hipSuccess != err ) {
         opal_output_verbose(10, opal_accelerator_base_framework.framework_output,
                             "error while starting asynchronous copy\n");
+        return OPAL_ERROR;
+    }
+
+    return OPAL_SUCCESS;
+}
+
+static int mca_accelerator_rocm_memcpy2d_async(int dest_dev_id, int src_dev_id, void *dest, size_t dst_extent,
+                                               const void *src, size_t src_extent, size_t blockLen, size_t count,
+                                               opal_accelerator_stream_t *stream,
+                                               opal_accelerator_transfer_type_t type)
+{
+    if ((MCA_ACCELERATOR_STREAM_DEFAULT != stream &&
+        (NULL == stream || NULL == stream->stream)) ||
+        NULL == src || NULL == dest || blockLen <= 0 || count <= 0) {
+        return OPAL_ERR_BAD_PARAM;
+    }
+    if (0 == blockLen || 0 == count) {
+        return OPAL_SUCCESS;
+    }
+
+    hipError_t err = hipMemcpy2DAsync(dest, dst_extent, src, src_extent, blockLen, count,
+                                      hipMemcpyDefault, GET_STREAM(stream));
+    if (hipSuccess != err) {
+        opal_output_verbose(10, opal_accelerator_base_framework.framework_output,
+                            "error while starting asynchronous 2D copy: err=%d %s\n",
+                            err, hipGetErrorString(err));
         return OPAL_ERROR;
     }
 

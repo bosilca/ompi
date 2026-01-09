@@ -8,6 +8,7 @@
  * Copyright (c) 2024      The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  *
  * $COPYRIGHT$
  *
@@ -279,6 +280,33 @@ typedef int (*opal_accelerator_base_module_wait_event_fn_t)(
  */
 typedef int (*opal_accelerator_base_module_memcpy_async_fn_t)(
     int dest_dev_id, int src_dev_id, void *dest, const void *src, size_t size,
+    opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type);
+
+/**
+ * Copies 2D strided memory asynchronously from src to dest. This is useful
+ * for copying non-contiguous data where rows have different pitches.
+ * Memory of dest and src may not overlap.
+ *
+ * @param[IN] dest_dev_id    Associated device to copy to or
+ *                           MCA_ACCELERATOR_NO_DEVICE_ID
+ * @param[IN] src_dev_id     Associated device to copy from or
+ *                           MCA_ACCELERATOR_NO_DEVICE_ID
+ * @param[IN] dest           Destination to copy memory to
+ * @param[IN] dst_extent     Extent (stride) of destination memory in bytes
+ * @param[IN] src            Source to copy memory from
+ * @param[IN] src_extent     Extent (stride) of source memory in bytes
+ * @param[IN] blockLen       Length of each block to copy in bytes
+ * @param[IN] count          Number of blocks to copy
+ * @param[IN] stream         Stream to perform asynchronous copy on
+ * @param[IN] type           Transfer type field for performance
+ *                           Can be set to MCA_ACCELERATOR_TRANSFER_UNSPEC
+ *                           if caller is unsure of the transfer direction.
+ *
+ * @return                   OPAL_SUCCESS or error status on failure
+ */
+typedef int (*opal_accelerator_base_module_memcpy2d_async_fn_t)(
+    int dest_dev_id, int src_dev_id, void *dest, size_t dst_extent, 
+    const void *src, size_t src_extent, size_t blockLen, size_t count,
     opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type);
 
 /**
@@ -678,6 +706,7 @@ typedef struct {
     opal_accelerator_base_module_wait_event_fn_t wait_event;
 
     opal_accelerator_base_module_memcpy_async_fn_t mem_copy_async;
+    opal_accelerator_base_module_memcpy2d_async_fn_t mem_copy2d_async;
     opal_accelerator_base_module_memcpy_fn_t mem_copy;
     opal_accelerator_base_module_memmove_async_fn_t mem_move_async;
     opal_accelerator_base_module_memmove_fn_t mem_move;

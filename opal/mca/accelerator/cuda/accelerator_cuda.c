@@ -10,6 +10,7 @@
  * Copyright (c) 2024      The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -37,6 +38,9 @@ static int accelerator_cuda_query_event(int dev_id, opal_accelerator_event_t *ev
 static int accelerator_cuda_wait_event(int dev_id, opal_accelerator_event_t *event, opal_accelerator_stream_t *stream);
 
 static int accelerator_cuda_memcpy_async(int dest_dev_id, int src_dev_id, void *dest, const void *src, size_t size,
+                                  opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type);
+static int accelerator_cuda_memcpy2d_async(int dest_dev_id, int src_dev_id, void *dest, size_t dst_extent,
+                                  const void *src, size_t src_extent, size_t blockLen, size_t count,
                                   opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type);
 static int accelerator_cuda_memcpy(int dest_dev_id, int src_dev_id, void *dest, const void *src,
                             size_t size, opal_accelerator_transfer_type_t type);
@@ -99,6 +103,7 @@ opal_accelerator_base_module_t opal_accelerator_cuda_module =
     accelerator_cuda_wait_event,
 
     accelerator_cuda_memcpy_async,
+    accelerator_cuda_memcpy2d_async,
     accelerator_cuda_memcpy,
     accelerator_cuda_memmove_async,
     accelerator_cuda_memmove,
@@ -666,6 +671,45 @@ static int accelerator_cuda_memcpy_async(int dest_dev_id, int src_dev_id, void *
     if (OPAL_UNLIKELY(CUDA_SUCCESS != result)) {
         opal_show_help("help-accelerator-cuda.txt", "cuMemcpyAsync failed", true, dest, src,
                        size, result);
+        return OPAL_ERROR;
+    }
+    return OPAL_SUCCESS;
+}
+
+static int accelerator_cuda_memcpy2d_async(int dest_dev_id, int src_dev_id, void *dest, size_t dst_extent,
+                                           const void *src, size_t src_extent, size_t blockLen, size_t count,
+                                           opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type)
+{
+    CUresult result;
+    CUDA_MEMCPY2D copy_params;
+
+    int delayed_init = opal_accelerator_cuda_delayed_init_check();
+    if (OPAL_UNLIKELY(OPAL_SUCCESS != delayed_init)) {
+        return delayed_init;
+    }
+
+    if ((MCA_ACCELERATOR_STREAM_DEFAULT != stream && NULL == stream) ||
+        NULL == dest || NULL == src || blockLen <= 0 || count <= 0) {
+        return OPAL_ERR_BAD_PARAM;
+    }
+    if (0 == blockLen || 0 == count) {
+        return OPAL_SUCCESS;
+    }
+
+    memset(&copy_params, 0, sizeof(copy_params));
+    copy_params.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
+    copy_params.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
+    copy_params.srcDevice = (CUdeviceptr)src;
+    copy_params.srcPitch = src_extent;
+    copy_params.dstDevice = (CUdeviceptr)dest;
+    copy_params.dstPitch = dst_extent;
+    copy_params.WidthInBytes = blockLen;
+    copy_params.Height = count;
+
+    result = cuMemcpy2DAsync(&copy_params, GET_STREAM(stream));
+    if (OPAL_UNLIKELY(CUDA_SUCCESS != result)) {
+        opal_show_help("help-accelerator-cuda.txt", "cuMemcpy2DAsync failed", true,
+                       dest, src, result);
         return OPAL_ERROR;
     }
     return OPAL_SUCCESS;

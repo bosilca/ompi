@@ -12,6 +12,7 @@
  * Copyright (c) 2024      The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -51,6 +52,9 @@ static int accelerator_null_query_event(int dev_id, opal_accelerator_event_t *ev
 static int accelerator_null_wait_event(int dev_id, opal_accelerator_event_t *event, opal_accelerator_stream_t *stream);
 
 static int accelerator_null_memcpy_async(int dest_dev_id, int src_dev_id, void *dest, const void *src, size_t size,
+                                         opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type);
+static int accelerator_null_memcpy2d_async(int dest_dev_id, int src_dev_id, void *dest, size_t dst_extent,
+                                         const void *src, size_t src_extent, size_t blockLen, size_t count,
                                          opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type);
 static int accelerator_null_memcpy(int dest_dev_id, int src_dev_id, void *dest, const void *src,
                                    size_t size, opal_accelerator_transfer_type_t type);
@@ -149,6 +153,7 @@ opal_accelerator_base_module_t opal_accelerator_null_module =
     accelerator_null_wait_event,
 
     accelerator_null_memcpy_async,
+    accelerator_null_memcpy2d_async,
     accelerator_null_memcpy,
     accelerator_null_memmove_async,
     accelerator_null_memmove,
@@ -244,6 +249,21 @@ static int accelerator_null_memcpy_async(int dest_dev_id, int src_dev_id, void *
                                   opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type)
 {
     memcpy(dest, src, size);
+    return OPAL_SUCCESS;
+}
+
+static int accelerator_null_memcpy2d_async(int dest_dev_id, int src_dev_id, void *dest, size_t dst_extent,
+                                           const void *src, size_t src_extent, size_t blockLen, size_t count,
+                                           opal_accelerator_stream_t *stream, opal_accelerator_transfer_type_t type)
+{
+    /* Perform strided copy block by block */
+    char *dst_block = (char *)dest;
+    const char *src_block = (const char *)src;
+    for (size_t i = 0; i < count; i++) {
+        memcpy(dst_block, src_block, blockLen);
+        dst_block += dst_extent;
+        src_block += src_extent;
+    }
     return OPAL_SUCCESS;
 }
 
