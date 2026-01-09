@@ -11,7 +11,7 @@
  * Copyright (c) 2004-2006 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2009      Oak Ridge National Labs.  All rights reserved.
- * Copyright (c) 2011      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2011-2026 NVIDIA Corporation.  All rights reserved.
  * Copyright (c) 2013-2018 Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2017      Intel, Inc. All rights reserved
@@ -45,6 +45,9 @@
 #define MEMCPY_ACCELERATOR(DST, SRC, BLENGTH, CONVERTOR) \
     CONVERTOR->cbmemcpy((DST), (SRC), (BLENGTH), (CONVERTOR))
 
+#define MEMCPY2D_ACCELERATOR(DST, DST_EXTENT, SRC, SRC_EXTENT, BLOCKLEN, COUNT, CONVERTOR) \
+    CONVERTOR->cbmemcpy2d((DST), (DST_EXTENT), (SRC), (SRC_EXTENT), (BLOCKLEN), (COUNT), (CONVERTOR))
+
 static void *opal_convertor_accelerator_memcpy(void *dest, const void *src, size_t size, opal_convertor_t *convertor)
 {
     int res;
@@ -62,6 +65,32 @@ static void *opal_convertor_accelerator_memcpy(void *dest, const void *src, size
     }
 }
 
+static int opal_convertor_accelerator_memcpy2d(void *dest, size_t dst_extent, const void *src, 
+                                                size_t src_extent, size_t blockLen, size_t count,
+                                                opal_convertor_t *convertor)
+{
+    if (!(convertor->flags & CONVERTOR_ACCELERATOR)) {
+        /* Fall back to simple row-by-row copy for host memory */
+        char *dst_block = (char *)dest;
+        const char *src_block = (const char *)src;
+        for (size_t i = 0; i < count; i++) {
+            MEMCPY(dst_block, src_block, blockLen);
+            dst_block += dst_extent;
+            src_block += src_extent;
+        }
+        return OPAL_SUCCESS;
+    }
+
+    int res = opal_accelerator.mem_copy2d_async(MCA_ACCELERATOR_NO_DEVICE_ID, MCA_ACCELERATOR_NO_DEVICE_ID,
+                                                dest, dst_extent, src, src_extent, blockLen, count,
+                                              convertor->stream, MCA_ACCELERATOR_TRANSFER_UNSPEC);
+    if (OPAL_SUCCESS != res) {
+        opal_output(0, "Error in accelerator 2D memcpy");
+        return res;
+    }
+    return OPAL_SUCCESS;
+}
+
 static void opal_convertor_construct(opal_convertor_t *convertor)
 {
     convertor->pStack = convertor->static_stack;
@@ -70,6 +99,7 @@ static void opal_convertor_construct(opal_convertor_t *convertor)
     convertor->remoteArch = opal_local_arch;
     convertor->flags = OPAL_DATATYPE_FLAG_NO_GAPS | CONVERTOR_COMPLETED;
     convertor->cbmemcpy = &opal_convertor_accelerator_memcpy;
+    convertor->cbmemcpy2d = &opal_convertor_accelerator_memcpy2d;
 }
 
 static void opal_convertor_destruct(opal_convertor_t *convertor)
@@ -556,6 +586,7 @@ static void opal_convertor_accelerator_init(opal_convertor_t *convertor, const v
     /* This is needed to handle case where convertor is not fully initialized
      * like when trying to do a sendi with convertor on the stack */
     convertor->cbmemcpy = &opal_convertor_accelerator_memcpy;
+    convertor->cbmemcpy2d = &opal_convertor_accelerator_memcpy2d;
 
     if (opal_accelerator.check_addr(addr, &dev_id, &flags) > 0) {
         convertor->flags |= CONVERTOR_ACCELERATOR;
@@ -701,6 +732,7 @@ int opal_convertor_clone(const opal_convertor_t *source, opal_convertor_t *desti
     }
 
     destination->cbmemcpy = source->cbmemcpy;
+    destination->cbmemcpy2d = source->cbmemcpy2d;
 
     return OPAL_SUCCESS;
 }

@@ -11,7 +11,7 @@
  * Copyright (c) 2004-2006 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2009      Oak Ridge National Labs.  All rights reserved.
- * Copyright (c) 2014      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2014-2026 NVIDIA Corporation.  All rights reserved.
  * Copyright (c) 2017-2018 Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2017      Intel, Inc. All rights reserved
@@ -67,6 +67,8 @@ typedef int32_t (*convertor_advance_fct_t)(opal_convertor_t *pConvertor, struct 
                                            uint32_t *out_size, size_t *max_data);
 typedef void *(*memalloc_fct_t)(size_t *pLength, void *userdata);
 typedef void *(*memcpy_fct_t)(void *dest, const void *src, size_t n, opal_convertor_t *pConvertor);
+typedef int (*memcpy2d_fct_t)(void *dest, size_t dst_extent, const void *src, size_t src_extent,
+                              size_t blockLen, size_t count, opal_convertor_t *pConvertor);
 
 /* The master convertor struct (defined in convertor_internal.h) */
 struct opal_convertor_master_t;
@@ -118,6 +120,7 @@ struct opal_convertor_t {
     dt_stack_t static_stack[DT_STATIC_STACK_SIZE]; /**< local stack for small datatypes */
 
     memcpy_fct_t cbmemcpy; /**< memcpy or accelerator memcpy */
+    memcpy2d_fct_t cbmemcpy2d; /**< 2D strided memcpy for accelerator */
     opal_accelerator_stream_t *stream;  /**<Accelerator stream for async copy */
 };
 OPAL_DECLSPEC OBJ_CLASS_DECLARATION(opal_convertor_t);

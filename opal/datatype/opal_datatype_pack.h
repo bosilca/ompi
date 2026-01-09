@@ -4,7 +4,7 @@
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2009      Oak Ridge National Labs.  All rights reserved.
- * Copyright (c) 2011      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2011-2026 NVIDIA Corporation.  All rights reserved.
  * Copyright (c) 2017-2018 Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2020      Cisco Systems, Inc.  All rights reserved.
@@ -28,6 +28,8 @@
 #    undef MEMCPY_CSUM
 #    define MEMCPY_CSUM(DST, SRC, BLENGTH, CONVERTOR) \
         CONVERTOR->cbmemcpy((DST), (SRC), (BLENGTH), (CONVERTOR))
+#    define MEMCPY2D_CSUM(DST, DST_EXTENT, SRC, SRC_EXTENT, BLOCKLEN, COUNT, CONVERTOR) \
+        CONVERTOR->cbmemcpy2d((DST), (DST_EXTENT), (SRC), (SRC_EXTENT), (BLOCKLEN), (COUNT), (CONVERTOR))
 #endif
 
 /**
