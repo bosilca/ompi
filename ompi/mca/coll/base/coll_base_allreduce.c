@@ -1342,3 +1342,342 @@ err_hndl:
 
 }
 /* copied function (with appropriate renaming) ends here */
+
+/*
+ *   ompi_coll_base_allreduce_intra_k_allreduce
+ *
+ *   Function:       2D decomposition allreduce algorithm
+ *   Accepts:        Same as MPI_Allreduce(), plus int k (group size)
+ *   Returns:        MPI_SUCCESS or error code
+ *
+ *   Description:    Arranges N processes in a 2D grid of (N/k) rows x k columns.
+ *                   Phase 1: Allreduce within each row (k processes) using
+ *                            recursive doubling on the full buffer.
+ *                   Phase 2: Each column does an allreduce (recursive doubling)
+ *                            on its 1/k-th piece of the buffer.
+ *                   Phase 3: Allgather within each row (ring) to reconstruct
+ *                            the full result.
+ *
+ *                   The algorithm preserves order of operations and works for
+ *                   both commutative and non-commutative operations (assuming
+ *                   associativity, as required by MPI).
+ *
+ *   Constraints:    k must divide both size and count.  When these conditions
+ *                   are not met, the function falls back to recursive doubling.
+ *
+ *         Example on 8 processes with k=4:
+ *         Groups (rows):  {0,1,2,3} and {4,5,6,7}
+ *         Columns:        {0,4}, {1,5}, {2,6}, {3,7}
+ *         Buffer split:   4 segments, one per column position
+ *
+ *         Phase 1: Allreduce within each group (recursive doubling, full buffer)
+ *           Group 0: 0<->1, 2<->3, then {0,1}<->{2,3}
+ *           Group 1: 4<->5, 6<->7, then {4,5}<->{6,7}
+ *           Result:  each process holds sum of its group for full buffer
+ *
+ *         Phase 2: Allreduce within each column (recursive doubling, 1/4 buffer)
+ *           Col 0: 0<->4 on seg 0   Col 1: 1<->5 on seg 1
+ *           Col 2: 2<->6 on seg 2   Col 3: 3<->7 on seg 3
+ *           Result: each process holds global sum for its segment
+ *
+ *         Phase 3: Allgather within each group (ring)
+ *           Group 0: 0->1->2->3->0 ring exchange of segments
+ *           Group 1: 4->5->6->7->4 ring exchange of segments
+ *           Result:  all processes hold the complete globally reduced buffer
+ */
+int
+ompi_coll_base_allreduce_intra_k_allreduce(const void *sbuf, void *rbuf,
+                                           size_t count,
+                                           struct ompi_datatype_t *dtype,
+                                           struct ompi_op_t *op,
+                                           struct ompi_communicator_t *comm,
+                                           mca_coll_base_module_t *module,
+                                           int k)
+{
+    int ret, line, rank, size;
+    int group_id, local_rank, num_groups;
+    ptrdiff_t lb, extent, gap;
+    ptrdiff_t span;
+    char *tmpbuf_free = NULL, *tmpbuf;
+    int early_segcount, late_segcount, split_rank;
+
+    size = ompi_comm_size(comm);
+    rank = ompi_comm_rank(comm);
+
+    OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
+                 "coll:base:allreduce_intra_k_allreduce rank %d, count %zu, k %d",
+                 rank, count, k));
+
+    if (1 == size) {
+        if (MPI_IN_PLACE != sbuf) {
+            ret = ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
+            if (ret < 0) { line = __LINE__; goto error_hndl; }
+        }
+        return MPI_SUCCESS;
+    }
+
+    if (k <= 1 || k > size || (size % k) != 0 || count < (size_t)k) {
+        return ompi_coll_base_allreduce_intra_recursivedoubling(
+            sbuf, rbuf, count, dtype, op, comm, module);
+    }
+
+    num_groups = size / k;
+    group_id = rank / k;
+    local_rank = rank % k;
+
+    ret = ompi_datatype_get_extent(dtype, &lb, &extent);
+    if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+
+    COLL_BASE_COMPUTE_BLOCKCOUNT(count, k, split_rank, early_segcount, late_segcount);
+
+    span = opal_datatype_span(&dtype->super, count, &gap);
+    tmpbuf_free = (char*) malloc(span);
+    if (NULL == tmpbuf_free) { ret = -1; line = __LINE__; goto error_hndl; }
+    tmpbuf = tmpbuf_free - gap;
+
+    if (MPI_IN_PLACE != sbuf) {
+        ret = ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
+        if (ret < 0) { line = __LINE__; goto error_hndl; }
+    }
+
+    /* ================================================================
+     * Phase 1: Recursive doubling allreduce within each group of k
+     * ================================================================ */
+    {
+        int group_start = group_id * k;
+        int adjsize, extra_ranks, newrank, distance;
+        char *tmpsend, *tmprecv, *tmpswap;
+
+        adjsize = opal_next_poweroftwo(k);
+        adjsize >>= 1;
+        extra_ranks = k - adjsize;
+
+        ret = ompi_datatype_copy_content_same_ddt(dtype, count, tmpbuf, (char*)rbuf);
+        if (ret < 0) { line = __LINE__; goto error_hndl; }
+
+        tmpsend = tmpbuf;
+        tmprecv = (char*)rbuf;
+
+        if (local_rank < (2 * extra_ranks)) {
+            if (0 == (local_rank % 2)) {
+                ret = MCA_PML_CALL(send(tmpsend, count, dtype,
+                                        group_start + local_rank + 1,
+                                        MCA_COLL_BASE_TAG_ALLREDUCE,
+                                        MCA_PML_BASE_SEND_STANDARD, comm));
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                newrank = -1;
+            } else {
+                ret = MCA_PML_CALL(recv(tmprecv, count, dtype,
+                                        group_start + local_rank - 1,
+                                        MCA_COLL_BASE_TAG_ALLREDUCE, comm,
+                                        MPI_STATUS_IGNORE));
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                ompi_op_reduce(op, tmprecv, tmpsend, count, dtype);
+                newrank = local_rank >> 1;
+            }
+        } else {
+            newrank = local_rank - extra_ranks;
+        }
+
+        for (distance = 0x1; distance < adjsize; distance <<= 1) {
+            if (newrank < 0) break;
+            int newremote = newrank ^ distance;
+            int remote_local = (newremote < extra_ranks) ?
+                (newremote * 2 + 1) : (newremote + extra_ranks);
+            int remote = group_start + remote_local;
+
+            ret = ompi_coll_base_sendrecv_actual(tmpsend, count, dtype, remote,
+                                                 MCA_COLL_BASE_TAG_ALLREDUCE,
+                                                 tmprecv, count, dtype, remote,
+                                                 MCA_COLL_BASE_TAG_ALLREDUCE,
+                                                 comm, MPI_STATUS_IGNORE);
+            if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+
+            if (rank < remote) {
+                ompi_op_reduce(op, tmpsend, tmprecv, count, dtype);
+                tmpswap = tmprecv;
+                tmprecv = tmpsend;
+                tmpsend = tmpswap;
+            } else {
+                ompi_op_reduce(op, tmprecv, tmpsend, count, dtype);
+            }
+        }
+
+        if (local_rank < (2 * extra_ranks)) {
+            if (0 == (local_rank % 2)) {
+                ret = MCA_PML_CALL(recv((char*)rbuf, count, dtype,
+                                        group_start + local_rank + 1,
+                                        MCA_COLL_BASE_TAG_ALLREDUCE, comm,
+                                        MPI_STATUS_IGNORE));
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                tmpsend = (char*)rbuf;
+            } else {
+                ret = MCA_PML_CALL(send(tmpsend, count, dtype,
+                                        group_start + local_rank - 1,
+                                        MCA_COLL_BASE_TAG_ALLREDUCE,
+                                        MCA_PML_BASE_SEND_STANDARD, comm));
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+            }
+        }
+
+        if (tmpsend != (char*)rbuf) {
+            ret = ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, tmpsend);
+            if (ret < 0) { line = __LINE__; goto error_hndl; }
+        }
+    }
+
+    /* ================================================================
+     * Phase 2: Recursive doubling allreduce across groups on segment
+     *          local_rank (each process handles 1/k of the buffer)
+     * ================================================================ */
+    if (num_groups > 1) {
+        ptrdiff_t seg_offset;
+        size_t seg_count;
+
+        if (local_rank < split_rank) {
+            seg_count = early_segcount;
+            seg_offset = (ptrdiff_t)local_rank * (ptrdiff_t)early_segcount * extent;
+        } else {
+            seg_count = late_segcount;
+            seg_offset = ((ptrdiff_t)split_rank * (ptrdiff_t)early_segcount +
+                          (ptrdiff_t)(local_rank - split_rank) * (ptrdiff_t)late_segcount) * extent;
+        }
+
+        char *seg_rbuf = (char*)rbuf + seg_offset;
+        char *seg_tmpbuf = tmpbuf + seg_offset;
+
+        int adjsize, extra_ranks, newrank, distance;
+        char *tmpsend, *tmprecv, *tmpswap;
+
+        adjsize = opal_next_poweroftwo(num_groups);
+        adjsize >>= 1;
+        extra_ranks = num_groups - adjsize;
+
+        ret = ompi_datatype_copy_content_same_ddt(dtype, seg_count, seg_tmpbuf, seg_rbuf);
+        if (ret < 0) { line = __LINE__; goto error_hndl; }
+
+        tmpsend = seg_tmpbuf;
+        tmprecv = seg_rbuf;
+
+        if (group_id < (2 * extra_ranks)) {
+            if (0 == (group_id % 2)) {
+                int remote = (group_id + 1) * k + local_rank;
+                ret = MCA_PML_CALL(send(tmpsend, seg_count, dtype, remote,
+                                        MCA_COLL_BASE_TAG_ALLREDUCE,
+                                        MCA_PML_BASE_SEND_STANDARD, comm));
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                newrank = -1;
+            } else {
+                int remote = (group_id - 1) * k + local_rank;
+                ret = MCA_PML_CALL(recv(tmprecv, seg_count, dtype, remote,
+                                        MCA_COLL_BASE_TAG_ALLREDUCE, comm,
+                                        MPI_STATUS_IGNORE));
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                ompi_op_reduce(op, tmprecv, tmpsend, seg_count, dtype);
+                newrank = group_id >> 1;
+            }
+        } else {
+            newrank = group_id - extra_ranks;
+        }
+
+        for (distance = 0x1; distance < adjsize; distance <<= 1) {
+            if (newrank < 0) break;
+            int newremote = newrank ^ distance;
+            int remote_group = (newremote < extra_ranks) ?
+                (newremote * 2 + 1) : (newremote + extra_ranks);
+            int remote = remote_group * k + local_rank;
+
+            ret = ompi_coll_base_sendrecv_actual(tmpsend, seg_count, dtype, remote,
+                                                 MCA_COLL_BASE_TAG_ALLREDUCE,
+                                                 tmprecv, seg_count, dtype, remote,
+                                                 MCA_COLL_BASE_TAG_ALLREDUCE,
+                                                 comm, MPI_STATUS_IGNORE);
+            if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+
+            if (rank < remote) {
+                ompi_op_reduce(op, tmpsend, tmprecv, seg_count, dtype);
+                tmpswap = tmprecv;
+                tmprecv = tmpsend;
+                tmpsend = tmpswap;
+            } else {
+                ompi_op_reduce(op, tmprecv, tmpsend, seg_count, dtype);
+            }
+        }
+
+        if (group_id < (2 * extra_ranks)) {
+            if (0 == (group_id % 2)) {
+                int remote = (group_id + 1) * k + local_rank;
+                ret = MCA_PML_CALL(recv(seg_rbuf, seg_count, dtype, remote,
+                                        MCA_COLL_BASE_TAG_ALLREDUCE, comm,
+                                        MPI_STATUS_IGNORE));
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                tmpsend = seg_rbuf;
+            } else {
+                int remote = (group_id - 1) * k + local_rank;
+                ret = MCA_PML_CALL(send(tmpsend, seg_count, dtype, remote,
+                                        MCA_COLL_BASE_TAG_ALLREDUCE,
+                                        MCA_PML_BASE_SEND_STANDARD, comm));
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+            }
+        }
+
+        if (tmpsend != seg_rbuf) {
+            ret = ompi_datatype_copy_content_same_ddt(dtype, seg_count, seg_rbuf, tmpsend);
+            if (ret < 0) { line = __LINE__; goto error_hndl; }
+        }
+    }
+
+    /* ================================================================
+     * Phase 3: Ring allgather within each group of k
+     *          Each process has its globally reduced segment; collect all.
+     * ================================================================ */
+    if (k > 1) {
+        int group_start = group_id * k;
+        int sendto = group_start + ((local_rank + 1) % k);
+        int recvfrom = group_start + ((local_rank + k - 1) % k);
+
+        for (int step = 0; step < k - 1; step++) {
+            int send_block = (local_rank - step + k) % k;
+            int recv_block = (local_rank - step - 1 + k) % k;
+
+            ptrdiff_t send_offset, recv_offset;
+            size_t send_count, recv_count;
+
+            if (send_block < split_rank) {
+                send_count = early_segcount;
+                send_offset = (ptrdiff_t)send_block * (ptrdiff_t)early_segcount * extent;
+            } else {
+                send_count = late_segcount;
+                send_offset = ((ptrdiff_t)split_rank * (ptrdiff_t)early_segcount +
+                               (ptrdiff_t)(send_block - split_rank) * (ptrdiff_t)late_segcount) * extent;
+            }
+
+            if (recv_block < split_rank) {
+                recv_count = early_segcount;
+                recv_offset = (ptrdiff_t)recv_block * (ptrdiff_t)early_segcount * extent;
+            } else {
+                recv_count = late_segcount;
+                recv_offset = ((ptrdiff_t)split_rank * (ptrdiff_t)early_segcount +
+                               (ptrdiff_t)(recv_block - split_rank) * (ptrdiff_t)late_segcount) * extent;
+            }
+
+            ret = ompi_coll_base_sendrecv_actual(
+                (char*)rbuf + send_offset, send_count, dtype, sendto,
+                MCA_COLL_BASE_TAG_ALLREDUCE,
+                (char*)rbuf + recv_offset, recv_count, dtype, recvfrom,
+                MCA_COLL_BASE_TAG_ALLREDUCE,
+                comm, MPI_STATUS_IGNORE);
+            if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+        }
+    }
+
+    if (NULL != tmpbuf_free) free(tmpbuf_free);
+    return MPI_SUCCESS;
+
+ error_hndl:
+    OPAL_OUTPUT((ompi_coll_base_framework.framework_output, "%s:%4d\tRank %d Error occurred %d\n",
+                 __FILE__, line, rank, ret));
+    (void)line;  // silence compiler warning
+    if (NULL != tmpbuf_free) free(tmpbuf_free);
+    return ret;
+}

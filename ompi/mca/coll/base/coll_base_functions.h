@@ -212,6 +212,7 @@ int ompi_coll_base_allreduce_intra_ring_segmented(ALLREDUCE_ARGS, uint32_t segsi
 int ompi_coll_base_allreduce_intra_basic_linear(ALLREDUCE_ARGS);
 int ompi_coll_base_allreduce_intra_redscat_allgather(ALLREDUCE_ARGS);
 int ompi_coll_base_allreduce_intra_allgather_reduce(ALLREDUCE_ARGS);
+int ompi_coll_base_allreduce_intra_k_allreduce(ALLREDUCE_ARGS, int k);
 
 /* AlltoAll */
 int ompi_coll_base_alltoall_intra_pairwise(ALLTOALL_ARGS);
