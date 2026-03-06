@@ -1351,33 +1351,54 @@ err_hndl:
  *   Returns:        MPI_SUCCESS or error code
  *
  *   Description:    Arranges N processes in a 2D grid of (N/k) rows x k columns.
- *                   Phase 1: Allreduce within each row (k processes) using
- *                            recursive doubling on the full buffer.
- *                   Phase 2: Each column does an allreduce (recursive doubling)
- *                            on its 1/k-th piece of the buffer.
+ *                   Phase 1: Reduce within each row of k processes.
+ *                   Phase 2: Each column does an allreduce on its 1/k-th
+ *                            piece of the buffer.
  *                   Phase 3: Allgather within each row (ring) to reconstruct
  *                            the full result.
  *
- *                   The algorithm preserves order of operations and works for
- *                   both commutative and non-commutative operations (assuming
- *                   associativity, as required by MPI).
+ *                   Phase 1 has two compile-time variants selected by
+ *                   K_ALLREDUCE_REDSCAT_PHASE1:
+ *                   - Defined:   reduce-scatter via recursive halving.
+ *                                Each process gets only its 1/k segment
+ *                                reduced.  Less data moved than allreduce.
+ *                                Requires power-of-two k and commutative op.
+ *                   - Undefined: full allreduce via recursive doubling
+ *                                (default).  Preserves operation order;
+ *                                works for non-commutative operations and
+ *                                any k.
  *
- *   Constraints:    k must divide both size and count.  When these conditions
- *                   are not met, the function falls back to recursive doubling.
+ *                   Phase 2 has two compile-time variants selected by
+ *                   K_ALLREDUCE_RING_PHASE2:
+ *                   - Defined:   ring allreduce (reduce-scatter + allgather).
+ *                                Requires commutative op and count >= size.
+ *                   - Undefined: recursive doubling allreduce (default).
+ *                                Preserves operation order; works for both
+ *                                commutative and non-commutative operations.
+ *
+ *   Constraints:    k must divide size and count must be >= k.
+ *                   K_ALLREDUCE_REDSCAT_PHASE1 additionally requires
+ *                   power-of-two k and a commutative operation.
+ *                   K_ALLREDUCE_RING_PHASE2 additionally requires a
+ *                   commutative operation and count >= size.
+ *                   When constraints are not met, the function falls back
+ *                   to plain recursive doubling.
  *
  *         Example on 8 processes with k=4:
  *         Groups (rows):  {0,1,2,3} and {4,5,6,7}
  *         Columns:        {0,4}, {1,5}, {2,6}, {3,7}
  *         Buffer split:   4 segments, one per column position
  *
- *         Phase 1: Allreduce within each group (recursive doubling, full buffer)
+ *         Phase 1: Reduce within each group
  *           Group 0: 0<->1, 2<->3, then {0,1}<->{2,3}
  *           Group 1: 4<->5, 6<->7, then {4,5}<->{6,7}
- *           Result:  each process holds sum of its group for full buffer
+ *           If reduce-scatter: each process holds its 1/k segment reduced.
+ *           If allreduce: each process holds full buffer reduced.
  *
- *         Phase 2: Allreduce within each column (recursive doubling, 1/4 buffer)
- *           Col 0: 0<->4 on seg 0   Col 1: 1<->5 on seg 1
- *           Col 2: 2<->6 on seg 2   Col 3: 3<->7 on seg 3
+ *         Phase 2: Allreduce within each column (1/4 buffer)
+ *           Col 0: {0,4} on seg 0   Col 1: {1,5} on seg 1
+ *           Col 2: {2,6} on seg 2   Col 3: {3,7} on seg 3
+ *           Uses ring (if K_ALLREDUCE_RING_PHASE2) or recursive doubling.
  *           Result: each process holds global sum for its segment
  *
  *         Phase 3: Allgather within each group (ring)
@@ -1420,6 +1441,18 @@ ompi_coll_base_allreduce_intra_k_allreduce(const void *sbuf, void *rbuf,
         return ompi_coll_base_allreduce_intra_recursivedoubling(
             sbuf, rbuf, count, dtype, op, comm, module);
     }
+#ifdef K_ALLREDUCE_REDSCAT_PHASE1
+    if ((k & (k - 1)) != 0 || !ompi_op_is_commute(op)) {
+        return ompi_coll_base_allreduce_intra_recursivedoubling(
+            sbuf, rbuf, count, dtype, op, comm, module);
+    }
+#endif
+#ifdef K_ALLREDUCE_RING_PHASE2
+    if (count < (size_t)size || !ompi_op_is_commute(op)) {
+        return ompi_coll_base_allreduce_intra_recursivedoubling(
+            sbuf, rbuf, count, dtype, op, comm, module);
+    }
+#endif
 
     num_groups = size / k;
     group_id = rank / k;
@@ -1441,8 +1474,73 @@ ompi_coll_base_allreduce_intra_k_allreduce(const void *sbuf, void *rbuf,
     }
 
     /* ================================================================
-     * Phase 1: Recursive doubling allreduce within each group of k
+     * Phase 1: Reduction within each group of k.
      * ================================================================ */
+
+#ifdef K_ALLREDUCE_REDSCAT_PHASE1
+    /* --- Reduce-scatter using recursive halving ---
+     * Each process ends up with its 1/k segment fully reduced within the
+     * group, at the correct offset in rbuf.  Uses vector halving with
+     * distance halving (mask = k/2 .. 1) so that process local_rank
+     * naturally receives k-segment local_rank.
+     * Requires k to be a power of two and a commutative operation. */
+    {
+        int group_start = group_id * k;
+        int block_lo = 0, block_hi = k;
+
+        for (int mask = k >> 1; mask > 0; mask >>= 1) {
+            int partner_local = local_rank ^ mask;
+            int partner = group_start + partner_local;
+
+            int nmid = (block_lo + block_hi) / 2;
+
+            ptrdiff_t lo_off  = ((block_lo < split_rank)
+                ? (ptrdiff_t)block_lo * (ptrdiff_t)early_segcount
+                : (ptrdiff_t)split_rank * (ptrdiff_t)early_segcount +
+                  (ptrdiff_t)(block_lo - split_rank) * (ptrdiff_t)late_segcount) * extent;
+            ptrdiff_t mid_off = ((nmid < split_rank)
+                ? (ptrdiff_t)nmid * (ptrdiff_t)early_segcount
+                : (ptrdiff_t)split_rank * (ptrdiff_t)early_segcount +
+                  (ptrdiff_t)(nmid - split_rank) * (ptrdiff_t)late_segcount) * extent;
+            ptrdiff_t hi_off  = ((block_hi < split_rank)
+                ? (ptrdiff_t)block_hi * (ptrdiff_t)early_segcount
+                : (ptrdiff_t)split_rank * (ptrdiff_t)early_segcount +
+                  (ptrdiff_t)(block_hi - split_rank) * (ptrdiff_t)late_segcount) * extent;
+
+            size_t lower_cnt = (size_t)((mid_off - lo_off) / extent);
+            size_t upper_cnt = (size_t)((hi_off - mid_off) / extent);
+
+            if (local_rank < partner_local) {
+                ret = ompi_coll_base_sendrecv_actual(
+                    (char*)rbuf + mid_off, upper_cnt, dtype, partner,
+                    MCA_COLL_BASE_TAG_ALLREDUCE,
+                    tmpbuf + lo_off, lower_cnt, dtype, partner,
+                    MCA_COLL_BASE_TAG_ALLREDUCE,
+                    comm, MPI_STATUS_IGNORE);
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+
+                ompi_op_reduce(op, tmpbuf + lo_off,
+                               (char*)rbuf + lo_off, lower_cnt, dtype);
+                block_hi = nmid;
+            } else {
+                ret = ompi_coll_base_sendrecv_actual(
+                    (char*)rbuf + lo_off, lower_cnt, dtype, partner,
+                    MCA_COLL_BASE_TAG_ALLREDUCE,
+                    tmpbuf + mid_off, upper_cnt, dtype, partner,
+                    MCA_COLL_BASE_TAG_ALLREDUCE,
+                    comm, MPI_STATUS_IGNORE);
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+
+                ompi_op_reduce(op, tmpbuf + mid_off,
+                               (char*)rbuf + mid_off, upper_cnt, dtype);
+                block_lo = nmid;
+            }
+        }
+    }
+#else  /* !K_ALLREDUCE_REDSCAT_PHASE1 */
+    /* --- Allreduce using recursive doubling ---
+     * Every process in the group ends up with the full reduced buffer.
+     * Preserves operation order; works for non-commutative operations. */
     {
         int group_start = group_id * k;
         int adjsize, extra_ranks, newrank, distance;
@@ -1525,10 +1623,11 @@ ompi_coll_base_allreduce_intra_k_allreduce(const void *sbuf, void *rbuf,
             if (ret < 0) { line = __LINE__; goto error_hndl; }
         }
     }
+#endif /* K_ALLREDUCE_REDSCAT_PHASE1 */
 
     /* ================================================================
-     * Phase 2: Recursive doubling allreduce across groups on segment
-     *          local_rank (each process handles 1/k of the buffer)
+     * Phase 2: Allreduce across groups on segment local_rank
+     *          (each process handles 1/k of the buffer).
      * ================================================================ */
     if (num_groups > 1) {
         ptrdiff_t seg_offset;
@@ -1544,87 +1643,173 @@ ompi_coll_base_allreduce_intra_k_allreduce(const void *sbuf, void *rbuf,
         }
 
         char *seg_rbuf = (char*)rbuf + seg_offset;
-        char *seg_tmpbuf = tmpbuf + seg_offset;
 
-        int adjsize, extra_ranks, newrank, distance;
-        char *tmpsend, *tmprecv, *tmpswap;
+#ifdef K_ALLREDUCE_RING_PHASE2
+        /* --- Ring allreduce (reduce-scatter + allgather) ---
+         * The ring has num_groups processes; each process's position
+         * in the ring is group_id.  The segment is further split
+         * into num_groups sub-blocks for reduce-scatter + allgather.
+         * Requires commutative operation and seg_count >= num_groups. */
+        {
+            char *inbuf = tmpbuf;
 
-        adjsize = opal_next_poweroftwo(num_groups);
-        adjsize >>= 1;
-        extra_ranks = num_groups - adjsize;
+            int col_send_to = ((group_id + 1) % num_groups) * k + local_rank;
+            int col_recv_from = ((group_id + num_groups - 1) % num_groups) * k + local_rank;
 
-        ret = ompi_datatype_copy_content_same_ddt(dtype, seg_count, seg_tmpbuf, seg_rbuf);
-        if (ret < 0) { line = __LINE__; goto error_hndl; }
+            int sub_early, sub_late, sub_split;
+            COLL_BASE_COMPUTE_BLOCKCOUNT(seg_count, num_groups,
+                                         sub_split, sub_early, sub_late);
 
-        tmpsend = seg_tmpbuf;
-        tmprecv = seg_rbuf;
+            /* Reduce-scatter phase (num_groups - 1 steps).
+             * After completion, sub-block (group_id+1)%ng is fully reduced. */
+            for (int step = 0; step < num_groups - 1; step++) {
+                int sb = (group_id - step + num_groups) % num_groups;
+                int rb = (group_id - step - 1 + num_groups) % num_groups;
 
-        if (group_id < (2 * extra_ranks)) {
-            if (0 == (group_id % 2)) {
-                int remote = (group_id + 1) * k + local_rank;
-                ret = MCA_PML_CALL(send(tmpsend, seg_count, dtype, remote,
-                                        MCA_COLL_BASE_TAG_ALLREDUCE,
-                                        MCA_PML_BASE_SEND_STANDARD, comm));
+                ptrdiff_t send_off, recv_off;
+                size_t send_cnt, recv_cnt;
+
+                send_cnt = (sb < sub_split) ? (size_t)sub_early : (size_t)sub_late;
+                send_off = ((sb < sub_split)
+                            ? (ptrdiff_t)sb * (ptrdiff_t)sub_early
+                            : (ptrdiff_t)sub_split * (ptrdiff_t)sub_early +
+                              (ptrdiff_t)(sb - sub_split) * (ptrdiff_t)sub_late) * extent;
+
+                recv_cnt = (rb < sub_split) ? (size_t)sub_early : (size_t)sub_late;
+                recv_off = ((rb < sub_split)
+                            ? (ptrdiff_t)rb * (ptrdiff_t)sub_early
+                            : (ptrdiff_t)sub_split * (ptrdiff_t)sub_early +
+                              (ptrdiff_t)(rb - sub_split) * (ptrdiff_t)sub_late) * extent;
+
+                ret = ompi_coll_base_sendrecv_actual(
+                    seg_rbuf + send_off, send_cnt, dtype, col_send_to,
+                    MCA_COLL_BASE_TAG_ALLREDUCE,
+                    inbuf, recv_cnt, dtype, col_recv_from,
+                    MCA_COLL_BASE_TAG_ALLREDUCE,
+                    comm, MPI_STATUS_IGNORE);
                 if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
-                newrank = -1;
-            } else {
-                int remote = (group_id - 1) * k + local_rank;
-                ret = MCA_PML_CALL(recv(tmprecv, seg_count, dtype, remote,
-                                        MCA_COLL_BASE_TAG_ALLREDUCE, comm,
-                                        MPI_STATUS_IGNORE));
-                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
-                ompi_op_reduce(op, tmprecv, tmpsend, seg_count, dtype);
-                newrank = group_id >> 1;
+
+                ompi_op_reduce(op, inbuf, seg_rbuf + recv_off, recv_cnt, dtype);
             }
-        } else {
-            newrank = group_id - extra_ranks;
-        }
 
-        for (distance = 0x1; distance < adjsize; distance <<= 1) {
-            if (newrank < 0) break;
-            int newremote = newrank ^ distance;
-            int remote_group = (newremote < extra_ranks) ?
-                (newremote * 2 + 1) : (newremote + extra_ranks);
-            int remote = remote_group * k + local_rank;
+            /* Allgather phase (num_groups - 1 steps).
+             * Distribute the fully-reduced sub-blocks around the ring. */
+            for (int step = 0; step < num_groups - 1; step++) {
+                int sb = (group_id + 1 - step + num_groups) % num_groups;
+                int rb = (group_id - step + num_groups) % num_groups;
 
-            ret = ompi_coll_base_sendrecv_actual(tmpsend, seg_count, dtype, remote,
-                                                 MCA_COLL_BASE_TAG_ALLREDUCE,
-                                                 tmprecv, seg_count, dtype, remote,
-                                                 MCA_COLL_BASE_TAG_ALLREDUCE,
-                                                 comm, MPI_STATUS_IGNORE);
-            if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                ptrdiff_t send_off, recv_off;
+                size_t send_cnt, recv_cnt;
 
-            if (rank < remote) {
-                ompi_op_reduce(op, tmpsend, tmprecv, seg_count, dtype);
-                tmpswap = tmprecv;
-                tmprecv = tmpsend;
-                tmpsend = tmpswap;
-            } else {
-                ompi_op_reduce(op, tmprecv, tmpsend, seg_count, dtype);
-            }
-        }
+                send_cnt = (sb < sub_split) ? (size_t)sub_early : (size_t)sub_late;
+                send_off = ((sb < sub_split)
+                            ? (ptrdiff_t)sb * (ptrdiff_t)sub_early
+                            : (ptrdiff_t)sub_split * (ptrdiff_t)sub_early +
+                              (ptrdiff_t)(sb - sub_split) * (ptrdiff_t)sub_late) * extent;
 
-        if (group_id < (2 * extra_ranks)) {
-            if (0 == (group_id % 2)) {
-                int remote = (group_id + 1) * k + local_rank;
-                ret = MCA_PML_CALL(recv(seg_rbuf, seg_count, dtype, remote,
-                                        MCA_COLL_BASE_TAG_ALLREDUCE, comm,
-                                        MPI_STATUS_IGNORE));
-                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
-                tmpsend = seg_rbuf;
-            } else {
-                int remote = (group_id - 1) * k + local_rank;
-                ret = MCA_PML_CALL(send(tmpsend, seg_count, dtype, remote,
-                                        MCA_COLL_BASE_TAG_ALLREDUCE,
-                                        MCA_PML_BASE_SEND_STANDARD, comm));
+                recv_cnt = (rb < sub_split) ? (size_t)sub_early : (size_t)sub_late;
+                recv_off = ((rb < sub_split)
+                            ? (ptrdiff_t)rb * (ptrdiff_t)sub_early
+                            : (ptrdiff_t)sub_split * (ptrdiff_t)sub_early +
+                              (ptrdiff_t)(rb - sub_split) * (ptrdiff_t)sub_late) * extent;
+
+                ret = ompi_coll_base_sendrecv_actual(
+                    seg_rbuf + send_off, send_cnt, dtype, col_send_to,
+                    MCA_COLL_BASE_TAG_ALLREDUCE,
+                    seg_rbuf + recv_off, recv_cnt, dtype, col_recv_from,
+                    MCA_COLL_BASE_TAG_ALLREDUCE,
+                    comm, MPI_STATUS_IGNORE);
                 if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
             }
         }
+#else  /* !K_ALLREDUCE_RING_PHASE2 */
+        /* --- Recursive doubling allreduce across groups ---
+         * Preserves order of operations; works for both commutative
+         * and non-commutative operations. */
+        {
+            char *seg_tmpbuf = tmpbuf + seg_offset;
 
-        if (tmpsend != seg_rbuf) {
-            ret = ompi_datatype_copy_content_same_ddt(dtype, seg_count, seg_rbuf, tmpsend);
+            int adjsize, extra_ranks, newrank, distance;
+            char *tmpsend, *tmprecv, *tmpswap;
+
+            adjsize = opal_next_poweroftwo(num_groups);
+            adjsize >>= 1;
+            extra_ranks = num_groups - adjsize;
+
+            ret = ompi_datatype_copy_content_same_ddt(dtype, seg_count, seg_tmpbuf, seg_rbuf);
             if (ret < 0) { line = __LINE__; goto error_hndl; }
+
+            tmpsend = seg_tmpbuf;
+            tmprecv = seg_rbuf;
+
+            if (group_id < (2 * extra_ranks)) {
+                if (0 == (group_id % 2)) {
+                    int remote = (group_id + 1) * k + local_rank;
+                    ret = MCA_PML_CALL(send(tmpsend, seg_count, dtype, remote,
+                                            MCA_COLL_BASE_TAG_ALLREDUCE,
+                                            MCA_PML_BASE_SEND_STANDARD, comm));
+                    if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                    newrank = -1;
+                } else {
+                    int remote = (group_id - 1) * k + local_rank;
+                    ret = MCA_PML_CALL(recv(tmprecv, seg_count, dtype, remote,
+                                            MCA_COLL_BASE_TAG_ALLREDUCE, comm,
+                                            MPI_STATUS_IGNORE));
+                    if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                    ompi_op_reduce(op, tmprecv, tmpsend, seg_count, dtype);
+                    newrank = group_id >> 1;
+                }
+            } else {
+                newrank = group_id - extra_ranks;
+            }
+
+            for (distance = 0x1; distance < adjsize; distance <<= 1) {
+                if (newrank < 0) break;
+                int newremote = newrank ^ distance;
+                int remote_group = (newremote < extra_ranks) ?
+                    (newremote * 2 + 1) : (newremote + extra_ranks);
+                int remote = remote_group * k + local_rank;
+
+                ret = ompi_coll_base_sendrecv_actual(tmpsend, seg_count, dtype, remote,
+                                                     MCA_COLL_BASE_TAG_ALLREDUCE,
+                                                     tmprecv, seg_count, dtype, remote,
+                                                     MCA_COLL_BASE_TAG_ALLREDUCE,
+                                                     comm, MPI_STATUS_IGNORE);
+                if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+
+                if (rank < remote) {
+                    ompi_op_reduce(op, tmpsend, tmprecv, seg_count, dtype);
+                    tmpswap = tmprecv;
+                    tmprecv = tmpsend;
+                    tmpsend = tmpswap;
+                } else {
+                    ompi_op_reduce(op, tmprecv, tmpsend, seg_count, dtype);
+                }
+            }
+
+            if (group_id < (2 * extra_ranks)) {
+                if (0 == (group_id % 2)) {
+                    int remote = (group_id + 1) * k + local_rank;
+                    ret = MCA_PML_CALL(recv(seg_rbuf, seg_count, dtype, remote,
+                                            MCA_COLL_BASE_TAG_ALLREDUCE, comm,
+                                            MPI_STATUS_IGNORE));
+                    if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                    tmpsend = seg_rbuf;
+                } else {
+                    int remote = (group_id - 1) * k + local_rank;
+                    ret = MCA_PML_CALL(send(tmpsend, seg_count, dtype, remote,
+                                            MCA_COLL_BASE_TAG_ALLREDUCE,
+                                            MCA_PML_BASE_SEND_STANDARD, comm));
+                    if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+                }
+            }
+
+            if (tmpsend != seg_rbuf) {
+                ret = ompi_datatype_copy_content_same_ddt(dtype, seg_count, seg_rbuf, tmpsend);
+                if (ret < 0) { line = __LINE__; goto error_hndl; }
+            }
         }
+#endif /* K_ALLREDUCE_RING_PHASE2 */
     }
 
     /* ================================================================
