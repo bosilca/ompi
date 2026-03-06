@@ -34,6 +34,7 @@ static int coll_tuned_allreduce_forced_algorithm = 0;
 static int coll_tuned_allreduce_segment_size = 0;
 static int coll_tuned_allreduce_tree_fanout;
 static int coll_tuned_allreduce_chain_fanout;
+static int coll_tuned_allreduce_k = 4;
 
 /* valid values for coll_tuned_allreduce_forced_algorithm */
 static const mca_base_var_enum_value_t allreduce_algorithms[] = {
@@ -81,7 +82,7 @@ int ompi_coll_tuned_allreduce_intra_check_forced_init (coll_tuned_force_algorith
     mca_param_indices->algorithm_param_index =
         mca_base_component_var_register(&mca_coll_tuned_component.super.collm_version,
                                         "allreduce_algorithm",
-                                        "Which allreduce algorithm is used. Can be locked down to any of: 0 ignore, 1 basic linear, 2 nonoverlapping (tuned reduce + tuned bcast), 3 recursive doubling, 4 ring, 5 segmented ring, 6 rabenseifner, 7 allgather_reduce, 8 k_allreduce (2D grid: allreduce + allreduce + allgather, k via segmentsize). "
+                                        "Which allreduce algorithm is used. Can be locked down to any of: 0 ignore, 1 basic linear, 2 nonoverlapping (tuned reduce + tuned bcast), 3 recursive doubling, 4 ring, 5 segmented ring, 6 rabenseifner, 7 allgather_reduce, 8 k_allreduce (2D grid: allreduce + allreduce + allgather, group size set via allreduce_algorithm_k). "
                                         "Only relevant if coll_tuned_use_dynamic_rules is true.",
                                         MCA_BASE_VAR_TYPE_INT, new_enum, 0, MCA_BASE_VAR_FLAG_SETTABLE,
                                         OPAL_INFO_LVL_5,
@@ -123,6 +124,17 @@ int ompi_coll_tuned_allreduce_intra_check_forced_init (coll_tuned_force_algorith
                                       MCA_BASE_VAR_SCOPE_ALL,
                                       &coll_tuned_allreduce_chain_fanout);
 
+    mca_param_indices->k_param_index =
+      mca_base_component_var_register(&mca_coll_tuned_component.super.collm_version,
+                                      "allreduce_algorithm_k",
+                                      "Group size (number of columns in 2D grid) for the k_allreduce algorithm. "
+                                      "Processes are arranged in a grid of (size/k) rows by k columns. "
+                                      "Must divide the communicator size evenly. 0 means use the communicator size.",
+                                      MCA_BASE_VAR_TYPE_INT, NULL, 0, MCA_BASE_VAR_FLAG_SETTABLE,
+                                      OPAL_INFO_LVL_5,
+                                      MCA_BASE_VAR_SCOPE_ALL,
+                                      &coll_tuned_allreduce_k);
+
     return (MPI_SUCCESS);
 }
 
@@ -154,8 +166,11 @@ int ompi_coll_tuned_allreduce_intra_do_this(const void *sbuf, void *rbuf, size_t
         return ompi_coll_base_allreduce_intra_redscat_allgather(sbuf, rbuf, count, dtype, op, comm, module);
     case (7):
         return ompi_coll_base_allreduce_intra_allgather_reduce(sbuf, rbuf, count, dtype, op, comm, module);
-    case (8):
-        return ompi_coll_base_allreduce_intra_k_allreduce(sbuf, rbuf, count, dtype, op, comm, module, segsize);
+    case (8): {
+        mca_coll_tuned_module_t *tuned_module = (mca_coll_tuned_module_t *) module;
+        return ompi_coll_base_allreduce_intra_k_allreduce(sbuf, rbuf, count, dtype, op, comm, module,
+                                                          tuned_module->user_forced[ALLREDUCE].k);
+    }
     } /* switch */
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
         "coll:tuned:allreduce_intra_do_this attempt to select algorithm %d when only 0-%d is valid?",

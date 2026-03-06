@@ -57,6 +57,7 @@ struct coll_tuned_force_algorithm_mca_param_indices_t {
     int  tree_fanout_param_index;    /* tree fanout/in to use */
     int  chain_fanout_param_index;   /* K-chain fanout/in to use */
     int  max_requests_param_index;   /* Maximum number of outstanding send or recv requests */
+    int  k_param_index;              /* group size for 2D grid algorithms (e.g. k_allreduce) */
 };
 typedef struct coll_tuned_force_algorithm_mca_param_indices_t coll_tuned_force_algorithm_mca_param_indices_t;
 
@@ -70,6 +71,7 @@ struct coll_tuned_force_algorithm_params_t {
     int  tree_fanout;    /* tree fanout/in to use */
     int  chain_fanout;   /* K-chain fanout/in to use */
     int  max_requests;   /* Maximum number of outstanding send or recv requests */
+    int  k;              /* group size for 2D grid algorithms (e.g. k_allreduce) */
 };
 typedef struct coll_tuned_force_algorithm_params_t coll_tuned_force_algorithm_params_t;
 
