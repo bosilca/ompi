@@ -143,6 +143,14 @@ Process 1: keeps [101, 201) → segment 1 with 100 elements ✓
 Each process handles only its assigned 1/k segment of the buffer.  Processes
 with the same `local_rank` form a **column** of `num_groups` processes.
 
+**Multi-rail affinity**: On systems with k NICs per node (e.g., DGX with 8
+GPUs and 8 NICs), each column's traffic flows through a distinct NIC because
+communicating partners share the same `local_rank`, which maps to the same NIC
+index.  This makes Phase 2 **inherently rail-optimized by construction** —
+all k NICs are active simultaneously, and the aggregate inter-node bandwidth
+during Phase 2 is k × (per-NIC bandwidth).  No special routing or process
+placement is required; the property follows directly from the 2D grid layout.
+
 ### Variant A: Recursive Doubling (default)
 
 Same recursive doubling pattern as Phase 1's allreduce, but:
@@ -321,4 +329,7 @@ groups.
 
 4. **Topology awareness**: The parameter k could be automatically set based on
    hardware topology (e.g., k = processes per node) to align Phase 1 with
-   intra-node communication and Phase 2 with inter-node communication.
+   intra-node communication and Phase 2 with inter-node communication.  On
+   multi-rail systems (e.g., DGX), setting k equal to the number of NICs per
+   node guarantees that Phase 2 fully utilizes all available inter-node
+   bandwidth.
