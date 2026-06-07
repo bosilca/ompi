@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2024      Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  *
  * Additional copyrights may follow
  *
@@ -722,9 +723,10 @@ cleanup1:
     reduce_buf_input[0] = !!(bufs_on_device);
     reduce_buf_input[1] = avg_send_bytes;
     reduce_buf_input[2] = !!(need_bufs);
-    rc =comm->c_coll->coll_allreduce(
-        &reduce_buf_input, &reduce_buf_output, 3, MPI_LONG_LONG, &ompi_mpi_op_sum.op,
-        comm, comm->c_coll->coll_allreduce_module );
+    ompi_coll_args_t _ar;
+    ompi_coll_args_allreduce(&_ar, &reduce_buf_input, &reduce_buf_output, 3, MPI_LONG_LONG,
+                             &ompi_mpi_op_sum.op);
+    rc = comm->c_coll->coll_allreduce(&_ar, comm, comm->c_coll->coll_allreduce_module );
     if (rc != OMPI_SUCCESS) {return rc;}
 
     if (reduce_buf_output[0] > 0) {
@@ -754,18 +756,15 @@ cleanup1:
     return rc;
 }
 
-int mca_coll_han_alltoallv_using_smsc(
-        const void *sbuf,
-        ompi_count_array_t scounts,
-        ompi_disp_array_t sdispls,
-        struct ompi_datatype_t *sdtype,
-        void* rbuf,
-        ompi_count_array_t rcounts,
-        ompi_disp_array_t rdispls,
-        struct ompi_datatype_t *rdtype,
-        struct ompi_communicator_t *comm,
-        mca_coll_base_module_t *module)
+int mca_coll_han_alltoallv_using_smsc(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = args->src.info_v.buffer;
+    ompi_count_array_t scounts = args->src.info_v.counts;
+    ompi_disp_array_t sdispls = args->src.info_v.displacements;
+    struct ompi_datatype_t *sdtype = args->src.info_v.datatype;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    ompi_disp_array_t rdispls = args->dst.info_v.displacements;
+    struct ompi_datatype_t *rdtype = args->dst.info_v.datatype;
     int rc;
     void **send_from_addrs = NULL;
     void **recv_to_addrs = NULL;
@@ -783,8 +782,7 @@ int mca_coll_han_alltoallv_using_smsc(
         opal_output_verbose(1, mca_coll_han_component.han_output, "in mca_coll_han_alltoallv_using_smsc, "
             "but MCA_SMSC_FEATURE_CAN_MAP not available.  Disqualifying this alg!\n");
         HAN_UNINSTALL_COLL_API(comm, han_module, alltoallv);
-        return han_module->previous_alltoallv(sbuf, scounts, sdispls, sdtype, rbuf, rcounts, rdispls, rdtype,
-                                             comm, han_module->previous_alltoallv_module);
+        return han_module->previous_alltoallv(args, comm, han_module->previous_alltoallv_module);
     }
 
     /* Create the subcommunicators */
@@ -793,8 +791,7 @@ int mca_coll_han_alltoallv_using_smsc(
                              "han cannot handle alltoallv with this communicator. Fall back on another component\n");
         /* HAN cannot work with this communicator so fallback on all collectives */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
-        return han_module->previous_alltoallv(sbuf, scounts, sdispls, sdtype, rbuf, rcounts, rdispls, rdtype,
-                                          comm, han_module->previous_alltoallv_module);
+        return han_module->previous_alltoallv(args, comm, han_module->previous_alltoallv_module);
     }
 
     /* Topo must be initialized to know rank distribution which then is used to
@@ -808,16 +805,14 @@ int mca_coll_han_alltoallv_using_smsc(
          * future calls will then be automatically redirected.
          */
         HAN_UNINSTALL_COLL_API(comm, han_module, alltoallv);
-        return han_module->previous_alltoallv(sbuf, scounts, sdispls, sdtype, rbuf, rcounts, rdispls, rdtype,
-                                             comm, han_module->previous_alltoallv_module);
+        return han_module->previous_alltoallv(args, comm, han_module->previous_alltoallv_module);
     }
 
     int w_size = ompi_comm_size(comm);
 
     int use_smsc;
     if (sbuf == MPI_IN_PLACE) {
-        return han_module->previous_alltoallv(sbuf, scounts, sdispls, sdtype, rbuf, rcounts, rdispls, rdtype,
-                                             comm, han_module->previous_alltoallv_module);
+        return han_module->previous_alltoallv(args, comm, han_module->previous_alltoallv_module);
     }
 
     /* Cache the decide_to_use_smsc_alg result to avoid per-call allreduce.
@@ -830,7 +825,7 @@ int mca_coll_han_alltoallv_using_smsc(
         use_smsc = han_module->a2av_cache.use_smsc;
     } else {
         rc = decide_to_use_smsc_alg(&use_smsc,
-            sbuf, scounts, sdispls, sdtype, rbuf, rcounts, rdispls, rdtype, comm);
+            sbuf, scounts, sdispls, sdtype, args->dst.info_v.buffer, rcounts, rdispls, rdtype, comm);
         if (rc != 0) {
             opal_output_verbose(1, mca_coll_han_component.han_output,
                 "decide_to_use_smsc_alg failed during execution! rc=%d\n", rc);
@@ -841,8 +836,7 @@ int mca_coll_han_alltoallv_using_smsc(
         }
     }
     if (!use_smsc) {
-        return han_module->previous_alltoallv(sbuf, scounts, sdispls, sdtype, rbuf, rcounts, rdispls, rdtype,
-                                             comm, han_module->previous_alltoallv_module);
+        return han_module->previous_alltoallv(args, comm, han_module->previous_alltoallv_module);
     }
 
     ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
@@ -911,8 +905,10 @@ int mca_coll_han_alltoallv_using_smsc(
     assert(buf_packed == serialization_buf_length);
 
     /* Always run allgather — all ranks must participate (collective) */
-    rc = low_comm->c_coll->coll_allgather(&low_gather_in, sizeof(low_gather_in), MPI_BYTE,
-            low_gather_out, sizeof(low_gather_in), MPI_BYTE, low_comm,
+    ompi_coll_args_t _ag;
+    ompi_coll_args_allgather(&_ag, &low_gather_in, sizeof(low_gather_in), MPI_BYTE,
+            low_gather_out, sizeof(low_gather_in), MPI_BYTE);
+    rc = low_comm->c_coll->coll_allgather(&_ag, low_comm,
             low_comm->c_coll->coll_allgather_module);
     if (rc != 0) {
         opal_output_verbose(1, mca_coll_han_component.han_output,
@@ -1021,7 +1017,7 @@ int mca_coll_han_alltoallv_using_smsc(
             send_types[jlow] = peers[jlow].sendtype;
 
 
-            recv_to_addrs[jlow] = (uint8_t*)rbuf + ompi_disp_array_get(rdispls,remote_wrank)*r_extent;
+            recv_to_addrs[jlow] = (uint8_t*)args->dst.info_v.buffer + ompi_disp_array_get(rdispls,remote_wrank)*r_extent;
             recv_counts[jlow] = ompi_count_array_get(rcounts,remote_wrank);
             recv_types[jlow] = &(rdtype->super);
         }
@@ -1044,7 +1040,11 @@ int mca_coll_han_alltoallv_using_smsc(
     rc=0;
 
     cleanup:
-    low_comm->c_coll->coll_barrier(low_comm, low_comm->c_coll->coll_barrier_module);
+    {
+        ompi_coll_args_t _br;
+        ompi_coll_args_barrier(&_br);
+        low_comm->c_coll->coll_barrier(&_br, low_comm, low_comm->c_coll->coll_barrier_module);
+    }
 
     if (send_from_addrs && !mca_coll_han_component.han_use_persist_buffers) {
         free(send_from_addrs);

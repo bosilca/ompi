@@ -14,6 +14,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -95,6 +96,7 @@ int mca_sharedfp_individual_write_ordered (ompio_file_t *fh,
     OMPI_MPI_OFFSET_TYPE temp = 0, offset = 0;
     mca_sharedfp_individual_header_record *headnode = NULL;
     struct mca_sharedfp_base_data_t *sh = NULL;
+    ompi_coll_args_t coll_args;
 
 
     if(fh->f_sharedfp_data==NULL){
@@ -132,14 +134,10 @@ int mca_sharedfp_individual_write_ordered (ompio_file_t *fh,
     }
 
     /*collect the total bytes to be written*/
-    ret = fh->f_comm->c_coll->coll_gather ( &totalbytes, 
-                                            1, 
-                                            OMPI_OFFSET_DATATYPE,
-                                            offbuff, 
-                                            1, 
-                                            OMPI_OFFSET_DATATYPE, 
-                                            0,
-                                            fh->f_comm, 
+    ompi_coll_args_gather(&coll_args, &totalbytes, 1, OMPI_OFFSET_DATATYPE,
+                          offbuff, 1, OMPI_OFFSET_DATATYPE, 0);
+    ret = fh->f_comm->c_coll->coll_gather ( &coll_args,
+                                            fh->f_comm,
                                             fh->f_comm->c_coll->coll_gather_module );
 
     if ( OMPI_SUCCESS != ret ) {
@@ -164,25 +162,19 @@ int mca_sharedfp_individual_write_ordered (ompio_file_t *fh,
 
 
     /* Scatter the results to the other processes */
-    ret = fh->f_comm->c_coll->coll_scatter ( offbuff, 
-                                             1, 
-                                             OMPI_OFFSET_DATATYPE,
-                                             &offset, 
-                                             1, 
-                                             OMPI_OFFSET_DATATYPE, 
-                                             0,
-                                             fh->f_comm, 
+    ompi_coll_args_scatter(&coll_args, offbuff, 1, OMPI_OFFSET_DATATYPE,
+                           &offset, 1, OMPI_OFFSET_DATATYPE, 0);
+    ret = fh->f_comm->c_coll->coll_scatter ( &coll_args,
+                                             fh->f_comm,
                                              fh->f_comm->c_coll->coll_scatter_module );
     if ( OMPI_SUCCESS != ret )  {
 	opal_output(0,"sharedfp_individual_write_ordered: Error in scattering offsets \n");
 	goto exit;
     }
 
-    ret = fh->f_comm->c_coll->coll_bcast ( &global_offset, 
-                                           1, 
-                                           OMPI_OFFSET_DATATYPE,
-                                           0, 
-                                           fh->f_comm, 
+    ompi_coll_args_bcast(&coll_args, &global_offset, 1, OMPI_OFFSET_DATATYPE, 0);
+    ret = fh->f_comm->c_coll->coll_bcast ( &coll_args,
+                                           fh->f_comm,
                                            fh->f_comm->c_coll->coll_bcast_module );
     if ( OMPI_SUCCESS != ret )  {
 	opal_output(0,"sharedfp_individual_write_ordered: Error while bcasting global offset \n");

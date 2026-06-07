@@ -10,6 +10,7 @@
  *                         All rights reserved.
  * Copyright (c) 2020      IBM Corporation. All rights reserved.
  * Copyright (c) 2022      Triad National Security, LLC. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -341,6 +342,7 @@ static void ompi_spc_dump(void)
 {
     int i, j, world_size, offset;
     long long *recv_buffer = NULL, *send_buffer;
+    ompi_coll_args_t coll_args;
 
     int rank = ompi_comm_rank(ompi_spc_comm);
     world_size = ompi_comm_size(ompi_spc_comm);
@@ -370,9 +372,9 @@ static void ompi_spc_dump(void)
             return;
         }
     }
-    (void)ompi_spc_comm->c_coll->coll_gather(send_buffer, OMPI_SPC_NUM_COUNTERS, MPI_LONG_LONG,
-                                             recv_buffer, OMPI_SPC_NUM_COUNTERS, MPI_LONG_LONG,
-                                             0, ompi_spc_comm,
+    ompi_coll_args_gather(&coll_args, send_buffer, OMPI_SPC_NUM_COUNTERS, MPI_LONG_LONG,
+                          recv_buffer, OMPI_SPC_NUM_COUNTERS, MPI_LONG_LONG, 0);
+    (void)ompi_spc_comm->c_coll->coll_gather(&coll_args, ompi_spc_comm,
                                              ompi_spc_comm->c_coll->coll_gather_module);
 
     /* Once rank 0 has all of the information, print the aggregated counter values for each rank in order */
@@ -398,7 +400,8 @@ static void ompi_spc_dump(void)
     }
     free(send_buffer);
 
-    ompi_spc_comm->c_coll->coll_barrier(ompi_spc_comm, ompi_spc_comm->c_coll->coll_barrier_module);
+    ompi_coll_args_barrier(&coll_args);
+    ompi_spc_comm->c_coll->coll_barrier(&coll_args, ompi_spc_comm, ompi_spc_comm->c_coll->coll_barrier_module);
 }
 
 /* Frees any dynamically allocated OMPI SPC data structures */

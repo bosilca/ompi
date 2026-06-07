@@ -16,6 +16,7 @@
  * Copyright (c) 2014-2015 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -42,12 +43,7 @@
  *	Returns:	- MPI_SUCCESS or an MPI error code
  */
 int
-mca_coll_basic_alltoallv_inter(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps,
-                               struct ompi_datatype_t *sdtype, void *rbuf,
-                               ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                               struct ompi_datatype_t *rdtype,
-                               struct ompi_communicator_t *comm,
-                               mca_coll_base_module_t *module)
+mca_coll_basic_alltoallv_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int i;
     int rsize;
@@ -64,8 +60,8 @@ mca_coll_basic_alltoallv_inter(const void *sbuf, ompi_count_array_t scounts, omp
 
     rsize = ompi_comm_remote_size(comm);
 
-    ompi_datatype_type_extent(sdtype, &sndextent);
-    ompi_datatype_type_extent(rdtype, &rcvextent);
+    ompi_datatype_type_extent(args->src.info_v.datatype, &sndextent);
+    ompi_datatype_type_extent(args->dst.info_v.datatype, &rcvextent);
 
     /* Initiate all send/recv to/from others. */
     nreqs = rsize * 2;
@@ -75,9 +71,9 @@ mca_coll_basic_alltoallv_inter(const void *sbuf, ompi_count_array_t scounts, omp
     /* Post all receives first  */
     /* A simple optimization: do not send and recv msgs of length zero */
     for (i = 0; i < rsize; ++i) {
-        prcv = ((char *) rbuf) + (ompi_disp_array_get(rdisps, i) * rcvextent);
-        if (ompi_count_array_get(rcounts, i) > 0) {
-            err = MCA_PML_CALL(irecv(prcv, ompi_count_array_get(rcounts, i), rdtype,
+        prcv = ((char *) args->dst.info_v.buffer) + (ompi_disp_array_get(args->dst.info_v.displacements, i) * rcvextent);
+        if (ompi_count_array_get(args->dst.info_v.counts, i) > 0) {
+            err = MCA_PML_CALL(irecv(prcv, ompi_count_array_get(args->dst.info_v.counts, i), args->dst.info_v.datatype,
                                      i, MCA_COLL_BASE_TAG_ALLTOALLV, comm,
                                      &preq[i]));
             if (MPI_SUCCESS != err) {
@@ -89,9 +85,9 @@ mca_coll_basic_alltoallv_inter(const void *sbuf, ompi_count_array_t scounts, omp
 
     /* Now post all sends */
     for (i = 0; i < rsize; ++i) {
-        psnd = ((char *) sbuf) + (ompi_disp_array_get(sdisps, i) * sndextent);
-        if (ompi_count_array_get(scounts, i) > 0) {
-            err = MCA_PML_CALL(isend(psnd, ompi_count_array_get(scounts, i), sdtype,
+        psnd = ((char *) args->src.info_v.buffer) + (ompi_disp_array_get(args->src.info_v.displacements, i) * sndextent);
+        if (ompi_count_array_get(args->src.info_v.counts, i) > 0) {
+            err = MCA_PML_CALL(isend(psnd, ompi_count_array_get(args->src.info_v.counts, i), args->src.info_v.datatype,
                                      i, MCA_COLL_BASE_TAG_ALLTOALLV,
                                      MCA_PML_BASE_SEND_STANDARD, comm,
                                      &preq[rsize + i]));

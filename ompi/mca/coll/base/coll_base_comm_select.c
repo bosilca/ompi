@@ -23,6 +23,7 @@
  * Copyright (c) 2017      FUJITSU LIMITED.  All rights reserved.
  * Copyright (c) 2020      BULL S.A.S. All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -69,7 +70,7 @@ static int query(const mca_base_component_t * component,
                  ompi_communicator_t * comm, int *priority,
                  mca_coll_base_module_t ** module);
 
-static int query_3_0_0(const mca_coll_base_component_3_0_0_t *
+static int query_4_0_0(const mca_coll_base_component_4_0_0_t *
                        coll_component, ompi_communicator_t * comm,
                        int *priority,
                        mca_coll_base_module_t ** module);
@@ -570,7 +571,7 @@ static int query(const mca_base_component_t * component,
         0 == component->mca_type_minor_version &&
         0 == component->mca_type_release_version) {
 
-        return query_3_0_0((const mca_coll_base_component_3_0_0_t *)component, comm, priority, module);
+        return query_4_0_0((const mca_coll_base_component_4_0_0_t *)component, comm, priority, module);
     }
 
     /* Unknown coll API version -- return error */
@@ -579,7 +580,7 @@ static int query(const mca_base_component_t * component,
 }
 
 
-static int query_3_0_0(const mca_coll_base_component_3_0_0_t * component,
+static int query_4_0_0(const mca_coll_base_component_4_0_0_t * component,
                        ompi_communicator_t * comm, int *priority,
                        mca_coll_base_module_t ** module)
 {

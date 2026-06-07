@@ -4,6 +4,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015      Bull SAS.  All rights reserved.
  * Copyright (c) 2017      IBM Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -228,8 +229,7 @@ barrier_hypercube_bottom(ompi_coll_portals4_request_t *request)
 
 
 int
-ompi_coll_portals4_barrier_intra(struct ompi_communicator_t *comm,
-        mca_coll_base_module_t *module)
+ompi_coll_portals4_barrier_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int ret;
     mca_coll_portals4_module_t *portals4_module = (mca_coll_portals4_module_t*) module;
@@ -268,27 +268,26 @@ ompi_coll_portals4_barrier_intra(struct ompi_communicator_t *comm,
 
 
 int
-ompi_coll_portals4_ibarrier_intra(struct ompi_communicator_t *comm,
-        ompi_request_t **ompi_req,
-        mca_coll_base_module_t *module)
+ompi_coll_portals4_ibarrier_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     int ret;
+    ompi_request_t **ompi_req = request;
     mca_coll_portals4_module_t *portals4_module = (mca_coll_portals4_module_t*) module;
-    ompi_coll_portals4_request_t *request;
+    ompi_coll_portals4_request_t *p4_request;
 
 
-    OMPI_COLL_PORTALS4_REQUEST_ALLOC(comm, request);
-    if (NULL == request) {
+    OMPI_COLL_PORTALS4_REQUEST_ALLOC(comm, p4_request);
+    if (NULL == p4_request) {
         opal_output_verbose(1, ompi_coll_base_framework.framework_output,
                 "%s:%d: request alloc failed\n",
                 __FILE__, __LINE__);
         return OMPI_ERR_TEMP_OUT_OF_RESOURCE;
     }
 
-    *ompi_req = &request->super;
-    request->is_sync = false;
+    *ompi_req = &p4_request->super;
+    p4_request->is_sync = false;
 
-    ret = barrier_hypercube_top(comm, request, portals4_module);
+    ret = barrier_hypercube_top(comm, p4_request, portals4_module);
     if (OMPI_SUCCESS != ret) {
         opal_output_verbose(1, ompi_coll_base_framework.framework_output,
                 "%s:%d: ompi_coll_portals4_barrier_hypercube_top failed %d\n",

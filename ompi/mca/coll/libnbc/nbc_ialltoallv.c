@@ -12,6 +12,7 @@
  * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * Copyright (c) 2018      FUJITSU LIMITED.  All rights reserved.
  * Copyright (c) 2021      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -152,12 +153,11 @@ static int nbc_alltoallv_init(const void* sendbuf, ompi_count_array_t sendcounts
   return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_ialltoallv(const void* sendbuf, ompi_count_array_t sendcounts, ompi_disp_array_t sdispls,
-                                MPI_Datatype sendtype, void* recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t rdispls,
-                                MPI_Datatype recvtype, struct ompi_communicator_t *comm, ompi_request_t ** request,
-                                mca_coll_base_module_t *module) {
-    int res = nbc_alltoallv_init(sendbuf, sendcounts, sdispls, sendtype,
-                                 recvbuf, recvcounts, rdispls, recvtype,
+int ompi_coll_libnbc_ialltoallv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_alltoallv_init(args->src.info_v.buffer, args->src.info_v.counts,
+                                 args->src.info_v.displacements, args->src.info_v.datatype,
+                                 args->dst.info_v.buffer, args->dst.info_v.counts,
+                                 args->dst.info_v.displacements, args->dst.info_v.datatype,
                                  comm, request, module, false);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
         return res;
@@ -243,12 +243,11 @@ static int nbc_alltoallv_inter_init (const void* sendbuf, ompi_count_array_t sen
   return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_ialltoallv_inter (const void* sendbuf, ompi_count_array_t sendcounts, ompi_disp_array_t sdispls,
-				       MPI_Datatype sendtype, void* recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t rdispls,
-				       MPI_Datatype recvtype, struct ompi_communicator_t *comm, ompi_request_t ** request,
-				       mca_coll_base_module_t *module) {
-    int res = nbc_alltoallv_inter_init(sendbuf, sendcounts, sdispls, sendtype,
-                                       recvbuf, recvcounts, rdispls, recvtype,
+int ompi_coll_libnbc_ialltoallv_inter (ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_alltoallv_inter_init(args->src.info_v.buffer, args->src.info_v.counts,
+                                       args->src.info_v.displacements, args->src.info_v.datatype,
+                                       args->dst.info_v.buffer, args->dst.info_v.counts,
+                                       args->dst.info_v.displacements, args->dst.info_v.datatype,
                                        comm, request, module, false);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
         return res;
@@ -411,11 +410,11 @@ static inline int a2av_sched_inplace(int rank, int p, NBC_Schedule *schedule,
   return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_alltoallv_init(const void* sendbuf, ompi_count_array_t sendcounts, ompi_disp_array_t sdispls,
-                                    MPI_Datatype sendtype, void* recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t rdispls,
-                                    MPI_Datatype recvtype, struct ompi_communicator_t *comm, MPI_Info info, ompi_request_t ** request,
-                                    mca_coll_base_module_t *module) {
-    int res = nbc_alltoallv_init(sendbuf, sendcounts, sdispls, sendtype, recvbuf, recvcounts, rdispls, recvtype,
+int ompi_coll_libnbc_alltoallv_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_alltoallv_init(args->src.info_v.buffer, args->src.info_v.counts,
+                                 args->src.info_v.displacements, args->src.info_v.datatype,
+                                 args->dst.info_v.buffer, args->dst.info_v.counts,
+                                 args->dst.info_v.displacements, args->dst.info_v.datatype,
                                  comm, request, module, true);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
         return res;
@@ -424,11 +423,11 @@ int ompi_coll_libnbc_alltoallv_init(const void* sendbuf, ompi_count_array_t send
     return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_alltoallv_inter_init(const void* sendbuf, ompi_count_array_t sendcounts, ompi_disp_array_t sdispls,
-                                          MPI_Datatype sendtype, void* recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t rdispls,
-                                          MPI_Datatype recvtype, struct ompi_communicator_t *comm, MPI_Info info, ompi_request_t ** request,
-                                          mca_coll_base_module_t *module) {
-    int res = nbc_alltoallv_inter_init(sendbuf, sendcounts, sdispls, sendtype, recvbuf, recvcounts, rdispls, recvtype,
+int ompi_coll_libnbc_alltoallv_inter_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_alltoallv_inter_init(args->src.info_v.buffer, args->src.info_v.counts,
+                                       args->src.info_v.displacements, args->src.info_v.datatype,
+                                       args->dst.info_v.buffer, args->dst.info_v.counts,
+                                       args->dst.info_v.displacements, args->dst.info_v.datatype,
                                        comm, request, module, true);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
         return res;

@@ -3,6 +3,7 @@
  * Copyright (c) 2017      The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -33,7 +34,9 @@ ompi_osc_portals4_fence(int mpi_assert, struct ompi_win_t *win)
 
     comm_ret = ompi_osc_portals4_complete_all(module);
 
-    ret = module->comm->c_coll->coll_barrier(module->comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    ret = module->comm->c_coll->coll_barrier(&coll_args, module->comm,
                                             module->comm->c_coll->coll_barrier_module);
 
     return (OMPI_SUCCESS == comm_ret) ? ret : comm_ret;

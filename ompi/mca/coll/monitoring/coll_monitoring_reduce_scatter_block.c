@@ -2,6 +2,7 @@
  * Copyright (c) 2016-2018 Inria. All rights reserved.
  * Copyright (c) 2019      Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -16,20 +17,15 @@
 #include "ompi/communicator/communicator.h"
 #include "coll_monitoring.h"
 
-int mca_coll_monitoring_reduce_scatter_block(const void *sbuf, void *rbuf,
-                                             size_t rcount,
-                                             struct ompi_datatype_t *dtype,
-                                             struct ompi_op_t *op,
-                                             struct ompi_communicator_t *comm,
-                                             mca_coll_base_module_t *module)
+int mca_coll_monitoring_reduce_scatter_block(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     size_t type_size, data_size;
     const int comm_size = ompi_comm_size(comm);
     const int my_rank = ompi_comm_rank(comm);
     int i, rank;
-    ompi_datatype_type_size(dtype, &type_size);
-    data_size = rcount * type_size;
+    ompi_datatype_type_size(args->dst.info.datatype, &type_size);
+    data_size = args->dst.info.count * type_size;
     for( i = 0; i < comm_size; ++i ) {
         if( my_rank == i ) continue; /* No communication for self */
         /**
@@ -41,24 +37,18 @@ int mca_coll_monitoring_reduce_scatter_block(const void *sbuf, void *rbuf,
         }
     }
     mca_common_monitoring_coll_a2a(data_size * (comm_size - 1), monitoring_module->data);
-    return monitoring_module->real.coll_reduce_scatter_block(sbuf, rbuf, rcount, dtype, op, comm, monitoring_module->real.coll_reduce_scatter_block_module);
+    return monitoring_module->real.coll_reduce_scatter_block(args, comm, monitoring_module->real.coll_reduce_scatter_block_module);
 }
 
-int mca_coll_monitoring_ireduce_scatter_block(const void *sbuf, void *rbuf,
-                                              size_t rcount,
-                                              struct ompi_datatype_t *dtype,
-                                              struct ompi_op_t *op,
-                                              struct ompi_communicator_t *comm,
-                                              ompi_request_t ** request,
-                                              mca_coll_base_module_t *module)
+int mca_coll_monitoring_ireduce_scatter_block(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     size_t type_size, data_size;
     const int comm_size = ompi_comm_size(comm);
     const int my_rank = ompi_comm_rank(comm);
     int i, rank;
-    ompi_datatype_type_size(dtype, &type_size);
-    data_size = rcount * type_size;
+    ompi_datatype_type_size(args->dst.info.datatype, &type_size);
+    data_size = args->dst.info.count * type_size;
     for( i = 0; i < comm_size; ++i ) {
         if( my_rank == i ) continue; /* No communication for self */
         /**
@@ -70,5 +60,5 @@ int mca_coll_monitoring_ireduce_scatter_block(const void *sbuf, void *rbuf,
         }
     }
     mca_common_monitoring_coll_a2a(data_size * (comm_size - 1), monitoring_module->data);
-    return monitoring_module->real.coll_ireduce_scatter_block(sbuf, rbuf, rcount, dtype, op, comm, request, monitoring_module->real.coll_ireduce_scatter_block_module);
+    return monitoring_module->real.coll_ireduce_scatter_block(args, comm, request, monitoring_module->real.coll_ireduce_scatter_block_module);
 }

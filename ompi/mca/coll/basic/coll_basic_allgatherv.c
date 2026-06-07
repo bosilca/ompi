@@ -12,6 +12,7 @@
  * Copyright (c) 2012      Oak Ridge National Labs.  All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -38,12 +39,7 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_allgatherv_inter(const void *sbuf, size_t scount,
-                                struct ompi_datatype_t *sdtype,
-                                void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t disps,
-                                struct ompi_datatype_t *rdtype,
-                                struct ompi_communicator_t *comm,
-                                mca_coll_base_module_t *module)
+mca_coll_basic_allgatherv_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int rsize, err, i;
     size_t *scounts;
@@ -60,15 +56,19 @@ mca_coll_basic_allgatherv_inter(const void *sbuf, size_t scount,
     }
 
     for (i = 0; i < rsize; i++) {
-        scounts[i] = scount;
+        scounts[i] = args->src.info.count;
         sdisps[i] = 0;
     }
 
     OMPI_COUNT_ARRAY_INIT(&scounts_desc, scounts);
     OMPI_DISP_ARRAY_INIT(&sdisps_desc, sdisps);
-    err = comm->c_coll->coll_alltoallv(sbuf, scounts_desc, sdisps_desc, sdtype,
-                                      rbuf, rcounts, disps, rdtype, comm,
-                                      comm->c_coll->coll_alltoallv_module);
+    ompi_coll_args_t _ata;
+    ompi_coll_args_alltoallv(&_ata, args->src.info.buffer, scounts_desc, sdisps_desc,
+                             args->src.info.datatype, args->dst.info_v.buffer,
+                             args->dst.info_v.counts, args->dst.info_v.displacements,
+                             args->dst.info_v.datatype);
+    err = comm->c_coll->coll_alltoallv(&_ata, comm,
+                                       comm->c_coll->coll_alltoallv_module);
 
     if (NULL != scounts) {
         free(scounts);

@@ -7,6 +7,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2025      Amazon.com, Inc. or its affiliates.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -90,12 +91,7 @@ int ompi_coll_tuned_alltoallv_intra_check_forced_init(coll_tuned_force_algorithm
 
 /* If the user selects dynamic rules and specifies the algorithm to
  * use, then this function is called.  */
-int ompi_coll_tuned_alltoallv_intra_do_this(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps,
-                                            struct ompi_datatype_t *sdtype,
-                                            void* rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                                            struct ompi_datatype_t *rdtype,
-                                            struct ompi_communicator_t *comm,
-                                            mca_coll_base_module_t *module,
+int ompi_coll_tuned_alltoallv_intra_do_this(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                             int algorithm)
 {
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
@@ -104,17 +100,11 @@ int ompi_coll_tuned_alltoallv_intra_do_this(const void *sbuf, ompi_count_array_t
 
     switch (algorithm) {
     case (0):
-        return ompi_coll_tuned_alltoallv_intra_dec_fixed(sbuf, scounts, sdisps, sdtype,
-                                                         rbuf, rcounts, rdisps, rdtype,
-                                                         comm, module);
+        return ompi_coll_tuned_alltoallv_intra_dec_fixed(args, comm, module);
     case (1):
-        return ompi_coll_base_alltoallv_intra_basic_linear(sbuf, scounts, sdisps, sdtype,
-                                                           rbuf, rcounts, rdisps, rdtype,
-                                                           comm, module);
+        return ompi_coll_base_alltoallv_intra_basic_linear(args, comm, module);
     case (2):
-        return ompi_coll_base_alltoallv_intra_pairwise(sbuf, scounts, sdisps, sdtype,
-                                                       rbuf, rcounts, rdisps, rdtype,
-                                                       comm, module);
+        return ompi_coll_base_alltoallv_intra_pairwise(args, comm, module);
     }  /* switch */
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
                  "coll:tuned:alltoall_intra_do_this attempt to select "

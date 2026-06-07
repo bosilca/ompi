@@ -11,6 +11,7 @@
  *                         All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -32,15 +33,11 @@
  *	Accepts:	- same as MPI_Allreduce()
  *	Returns:	- MPI_SUCCESS or error code
  */
-int mca_coll_self_allreduce_intra(const void *sbuf, void *rbuf, size_t count,
-                                  struct ompi_datatype_t *dtype,
-                                  struct ompi_op_t *op,
-                                  struct ompi_communicator_t *comm,
-                                  mca_coll_base_module_t *module)
+int mca_coll_self_allreduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
-    if (MPI_IN_PLACE == sbuf) {
+    if (MPI_IN_PLACE == args->src.info.buffer) {
         return MPI_SUCCESS;
     } else {
-        return ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
+        return ompi_datatype_copy_content_same_ddt(args->dst.info.datatype, args->dst.info.count, (char*)args->dst.info.buffer, (char*)args->src.info.buffer);
     }
 }

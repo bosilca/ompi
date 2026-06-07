@@ -11,6 +11,7 @@
  *                         All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -38,13 +39,9 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_gather_inter(const void *sbuf, size_t scount,
-                            struct ompi_datatype_t *sdtype,
-                            void *rbuf, size_t rcount,
-                            struct ompi_datatype_t *rdtype,
-                            int root, struct ompi_communicator_t *comm,
-                            mca_coll_base_module_t *module)
+mca_coll_basic_gather_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    int root = args->root;
     int i;
     int err;
     int size;
@@ -60,19 +57,20 @@ mca_coll_basic_gather_inter(const void *sbuf, size_t scount,
         err = OMPI_SUCCESS;
     } else if (MPI_ROOT != root) {
         /* Everyone but root sends data and returns. */
-        err = MCA_PML_CALL(send(sbuf, scount, sdtype, root,
+        err = MCA_PML_CALL(send(args->src.info.buffer, args->src.info.count,
+                                args->src.info.datatype, root,
                                 MCA_COLL_BASE_TAG_GATHER,
                                 MCA_PML_BASE_SEND_STANDARD, comm));
     } else {
         /* I am the root, loop receiving the data. */
-        err = ompi_datatype_get_extent(rdtype, &lb, &extent);
+        err = ompi_datatype_get_extent(args->dst.info.datatype, &lb, &extent);
         if (OMPI_SUCCESS != err) {
             return OMPI_ERROR;
         }
 
-        incr = extent * rcount;
-        for (i = 0, ptmp = (char *) rbuf; i < size; ++i, ptmp += incr) {
-            err = MCA_PML_CALL(recv(ptmp, rcount, rdtype, i,
+        incr = extent * args->dst.info.count;
+        for (i = 0, ptmp = (char *) args->dst.info.buffer; i < size; ++i, ptmp += incr) {
+            err = MCA_PML_CALL(recv(ptmp, args->dst.info.count, args->dst.info.datatype, i,
                                     MCA_COLL_BASE_TAG_GATHER,
                                     comm, MPI_STATUS_IGNORE));
             if (MPI_SUCCESS != err) {

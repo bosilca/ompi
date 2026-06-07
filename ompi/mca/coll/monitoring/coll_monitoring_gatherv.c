@@ -2,6 +2,7 @@
  * Copyright (c) 2016-2018 Inria. All rights reserved.
  * Copyright (c) 2019      Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -15,23 +16,17 @@
 #include "ompi/communicator/communicator.h"
 #include "coll_monitoring.h"
 
-int mca_coll_monitoring_gatherv(const void *sbuf, size_t scount,
-                                struct ompi_datatype_t *sdtype,
-                                void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t disps,
-                                struct ompi_datatype_t *rdtype,
-                                int root,
-                                struct ompi_communicator_t *comm,
-                                mca_coll_base_module_t *module)
+int mca_coll_monitoring_gatherv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
-    if( root == ompi_comm_rank(comm) ) {
+    if( args->root == ompi_comm_rank(comm) ) {
         int i, rank;
         size_t type_size, data_size, data_size_aggreg = 0;
         const int comm_size = ompi_comm_size(comm);
-        ompi_datatype_type_size(rdtype, &type_size);
+        ompi_datatype_type_size(args->dst.info_v.datatype, &type_size);
         for( i = 0; i < comm_size; ++i ) {
-            if( root == i ) continue; /* No communication for self */
-            data_size = ompi_count_array_get(rcounts, i) * type_size;
+            if( args->root == i ) continue; /* No communication for self */
+            data_size = ompi_count_array_get(args->dst.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
              * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -43,27 +38,20 @@ int mca_coll_monitoring_gatherv(const void *sbuf, size_t scount,
         }
         mca_common_monitoring_coll_a2o(data_size_aggreg, monitoring_module->data);
     }
-    return monitoring_module->real.coll_gatherv(sbuf, scount, sdtype, rbuf, rcounts, disps, rdtype, root, comm, monitoring_module->real.coll_gatherv_module);
+    return monitoring_module->real.coll_gatherv(args, comm, monitoring_module->real.coll_gatherv_module);
 }
 
-int mca_coll_monitoring_igatherv(const void *sbuf, size_t scount,
-                                 struct ompi_datatype_t *sdtype,
-                                 void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t disps,
-                                 struct ompi_datatype_t *rdtype,
-                                 int root,
-                                 struct ompi_communicator_t *comm,
-                                 ompi_request_t ** request,
-                                 mca_coll_base_module_t *module)
+int mca_coll_monitoring_igatherv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
-    if( root == ompi_comm_rank(comm) ) {
+    if( args->root == ompi_comm_rank(comm) ) {
         int i, rank;
         size_t type_size, data_size, data_size_aggreg = 0;
         const int comm_size = ompi_comm_size(comm);
-        ompi_datatype_type_size(rdtype, &type_size);
+        ompi_datatype_type_size(args->dst.info_v.datatype, &type_size);
         for( i = 0; i < comm_size; ++i ) {
-            if( root == i ) continue; /* No communication for self */
-            data_size = ompi_count_array_get(rcounts, i) * type_size;
+            if( args->root == i ) continue; /* No communication for self */
+            data_size = ompi_count_array_get(args->dst.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
              * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -75,5 +63,5 @@ int mca_coll_monitoring_igatherv(const void *sbuf, size_t scount,
         }
         mca_common_monitoring_coll_a2o(data_size_aggreg, monitoring_module->data);
     }
-    return monitoring_module->real.coll_igatherv(sbuf, scount, sdtype, rbuf, rcounts, disps, rdtype, root, comm, request, monitoring_module->real.coll_igatherv_module);
+    return monitoring_module->real.coll_igatherv(args, comm, request, monitoring_module->real.coll_igatherv_module);
 }

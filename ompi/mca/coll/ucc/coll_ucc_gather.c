@@ -3,6 +3,7 @@
  * Copyright (c) 2021 Mellanox Technologies. All rights reserved.
  * Copyright (c) 2022 NVIDIA Corporation. All rights reserved.
  * Copyright (c) 2025      Fujitsu Limited. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -83,33 +84,24 @@ fallback:
     return UCC_ERR_NOT_SUPPORTED;
 }
 
-int mca_coll_ucc_gather(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                        void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                        int root, struct ompi_communicator_t *comm,
-                        mca_coll_base_module_t *module)
+int mca_coll_ucc_gather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*)module;
     ucc_coll_req_h         req;
 
     UCC_VERBOSE(3, "running ucc gather");
-    COLL_UCC_CHECK(mca_coll_ucc_gather_init_common(sbuf, scount, sdtype, rbuf, rcount,
-                                                   rdtype, root, false, ucc_module,
+    COLL_UCC_CHECK(mca_coll_ucc_gather_init_common(args->src.info.buffer, args->src.info.count, args->src.info.datatype, args->dst.info.buffer, args->dst.info.count,
+                                                   args->dst.info.datatype, args->root, false, ucc_module,
                                                    &req, NULL));
     COLL_UCC_POST_AND_CHECK(req);
     COLL_UCC_CHECK(coll_ucc_req_wait(req));
     return OMPI_SUCCESS;
 fallback:
     UCC_VERBOSE(3, "running fallback gather");
-    return ucc_module->previous_gather(sbuf, scount, sdtype, rbuf, rcount,
-                                       rdtype, root, comm,
-                                       ucc_module->previous_gather_module);
+    return ucc_module->previous_gather(args, comm, ucc_module->previous_gather_module);
 }
 
-int mca_coll_ucc_igather(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                         void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                         int root, struct ompi_communicator_t *comm,
-                         ompi_request_t** request,
-                         mca_coll_base_module_t *module)
+int mca_coll_ucc_igather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*)module;
     ucc_coll_req_h         req;
@@ -117,8 +109,8 @@ int mca_coll_ucc_igather(const void *sbuf, size_t scount, struct ompi_datatype_t
 
     UCC_VERBOSE(3, "running ucc igather");
     COLL_UCC_GET_REQ(coll_req, comm);
-    COLL_UCC_CHECK(mca_coll_ucc_gather_init_common(sbuf, scount, sdtype, rbuf, rcount,
-                                                   rdtype, root, false, ucc_module,
+    COLL_UCC_CHECK(mca_coll_ucc_gather_init_common(args->src.info.buffer, args->src.info.count, args->src.info.datatype, args->dst.info.buffer, args->dst.info.count,
+                                                   args->dst.info.datatype, args->root, false, ucc_module,
                                                    &req, coll_req));
     COLL_UCC_POST_AND_CHECK(req);
     *request = &coll_req->super;
@@ -128,15 +120,11 @@ fallback:
     if (coll_req) {
         mca_coll_ucc_req_free((ompi_request_t **)&coll_req);
     }
-    return ucc_module->previous_igather(sbuf, scount, sdtype, rbuf, rcount,
-                                        rdtype, root, comm, request,
+    return ucc_module->previous_igather(args, comm, request,
                                         ucc_module->previous_igather_module);
 }
 
-int mca_coll_ucc_gather_init(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                             void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype, int root,
-                             struct ompi_communicator_t *comm, struct ompi_info_t *info,
-                             ompi_request_t **request, mca_coll_base_module_t *module)
+int mca_coll_ucc_gather_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t *) module;
     ucc_coll_req_h req;
@@ -144,8 +132,8 @@ int mca_coll_ucc_gather_init(const void *sbuf, size_t scount, struct ompi_dataty
 
     COLL_UCC_GET_REQ_PERSISTENT(coll_req, comm);
     UCC_VERBOSE(3, "gather_init init %p", coll_req);
-    COLL_UCC_CHECK(mca_coll_ucc_gather_init_common(sbuf, scount, sdtype, rbuf, rcount,
-                                                   rdtype, root, true, ucc_module,
+    COLL_UCC_CHECK(mca_coll_ucc_gather_init_common(args->src.info.buffer, args->src.info.count, args->src.info.datatype, args->dst.info.buffer, args->dst.info.count,
+                                                   args->dst.info.datatype, args->root, true, ucc_module,
                                                    &req, coll_req));
     *request = &coll_req->super;
     return OMPI_SUCCESS;
@@ -154,6 +142,6 @@ fallback:
     if (coll_req) {
         mca_coll_ucc_req_free((ompi_request_t **) &coll_req);
     }
-    return ucc_module->previous_gather_init(sbuf, scount, sdtype, rbuf, rcount, rdtype, root, comm,
-                                            info, request, ucc_module->previous_gather_init_module);
+    return ucc_module->previous_gather_init(args, comm, info, request,
+                                            ucc_module->previous_gather_init_module);
 }

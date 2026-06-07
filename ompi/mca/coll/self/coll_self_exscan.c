@@ -11,6 +11,7 @@
  *                         All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -31,11 +32,7 @@
  *	Accepts:	- same arguments as MPI_Exccan()
  *	Returns:	- MPI_SUCCESS
  */
-int mca_coll_self_exscan_intra(const void *sbuf, void *rbuf, size_t count,
-                               struct ompi_datatype_t *dtype,
-                               struct ompi_op_t *op,
-                               struct ompi_communicator_t *comm,
-                               mca_coll_base_module_t *module)
+int mca_coll_self_exscan_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     /* Since there's only one process, there's nothing to do */
 

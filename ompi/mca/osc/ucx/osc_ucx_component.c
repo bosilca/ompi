@@ -6,6 +6,7 @@
  *
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
  * Copyright (c) 2025      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -394,8 +395,9 @@ static int exchange_len_info(void *my_info, size_t my_info_len, char **recv_info
     ompi_count_array_t lens_desc;
     ompi_disp_array_t disps_desc;
 
-    ret = comm->c_coll->coll_allgather(&my_info_len, 1, MPI_INT,
-                                       lens, 1, MPI_INT, comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_allgather(&coll_args, &my_info_len, 1, MPI_INT, lens, 1, MPI_INT);
+    ret = comm->c_coll->coll_allgather(&coll_args, comm,
                                        comm->c_coll->coll_allgather_module);
     if (OMPI_SUCCESS != ret) {
         free(lens);
@@ -412,8 +414,9 @@ static int exchange_len_info(void *my_info, size_t my_info_len, char **recv_info
     (*recv_info_ptr) = (char *)calloc(total_len, sizeof(char));
     OMPI_COUNT_ARRAY_INIT(&lens_desc, lens);
     OMPI_DISP_ARRAY_INIT(&disps_desc, *disps_ptr);
-    ret = comm->c_coll->coll_allgatherv(my_info, my_info_len, MPI_BYTE,
-                                        (void *)(*recv_info_ptr), lens_desc, disps_desc, MPI_BYTE,
+    ompi_coll_args_allgatherv(&coll_args, my_info, my_info_len, MPI_BYTE,
+                              (void *)(*recv_info_ptr), lens_desc, disps_desc, MPI_BYTE);
+    ret = comm->c_coll->coll_allgatherv(&coll_args,
                                         comm, comm->c_coll->coll_allgatherv_module);
     if (OMPI_SUCCESS != ret) {
         free(lens);
@@ -471,7 +474,9 @@ static const char* ompi_osc_ucx_set_no_lock_info(opal_infosubscriber_t *obj, con
         }
         win->w_flags &= ~OMPI_WIN_NO_LOCKS;
     }
-    module->comm->c_coll->coll_barrier(module->comm, module->comm->c_coll->coll_barrier_module);
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    module->comm->c_coll->coll_barrier(&coll_args, module->comm, module->comm->c_coll->coll_barrier_module);
     return module->no_locks ? "true" : "false";
 }
 
@@ -713,8 +718,9 @@ select_unlock:
     values[2] = adjusted_size;
     values[3] = -(long)adjusted_size;
 
-    ret = module->comm->c_coll->coll_allreduce(MPI_IN_PLACE, values, 4, MPI_LONG,
-                                               MPI_MIN, module->comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_allreduce(&coll_args, MPI_IN_PLACE, values, 4, MPI_LONG, MPI_MIN);
+    ret = module->comm->c_coll->coll_allreduce(&coll_args, module->comm,
                                                module->comm->c_coll->coll_allreduce_module);
     if (OMPI_SUCCESS != ret) {
         goto error;
@@ -739,9 +745,9 @@ select_unlock:
 
     if (!same_disp_unit || !same_size) {
         long* peer_values = malloc(comm_size * val_count * sizeof(long));
-        ret = module->comm->c_coll->coll_allgather(values, val_count * sizeof(long), MPI_BYTE,
-                                                    peer_values, sizeof(long) * val_count, MPI_BYTE,
-                                                    module->comm,
+        ompi_coll_args_allgather(&coll_args, values, val_count * sizeof(long), MPI_BYTE,
+                                 peer_values, sizeof(long) * val_count, MPI_BYTE);
+        ret = module->comm->c_coll->coll_allgather(&coll_args, module->comm,
                                                     module->comm->c_coll->coll_allgather_module);
         if (OMPI_SUCCESS != ret) {
             goto error;
@@ -813,7 +819,8 @@ select_unlock:
                 unlink_needed = true;
             }
 
-            ret = module->comm->c_coll->coll_bcast (&module->seg_ds, sizeof (module->seg_ds), MPI_BYTE, 0,
+            ompi_coll_args_bcast(&coll_args, &module->seg_ds, sizeof (module->seg_ds), MPI_BYTE, 0);
+            ret = module->comm->c_coll->coll_bcast (&coll_args,
                                                     module->comm, module->comm->c_coll->coll_bcast_module);
             if (OMPI_SUCCESS != ret) {
                 goto error;
@@ -826,7 +833,8 @@ select_unlock:
             }
 
             /* wait for all processes to attach */
-            ret = module->comm->c_coll->coll_barrier (module->comm, module->comm->c_coll->coll_barrier_module);
+            ompi_coll_args_barrier(&coll_args);
+            ret = module->comm->c_coll->coll_barrier (&coll_args, module->comm, module->comm->c_coll->coll_barrier_module);
             if (OMPI_SUCCESS != ret) {
                 goto error;
             }
@@ -928,9 +936,9 @@ select_unlock:
     my_info[2] = ompi_comm_rank(&ompi_mpi_comm_world.comm);
 
     recv_buf = (char *)calloc(comm_size, sizeof(my_info));
-    ret = comm->c_coll->coll_allgather((void *)my_info, sizeof(my_info),
-                                       MPI_BYTE, recv_buf, sizeof(my_info),
-                                       MPI_BYTE, comm, comm->c_coll->coll_allgather_module);
+    ompi_coll_args_allgather(&coll_args, (void *)my_info, sizeof(my_info), MPI_BYTE,
+                             recv_buf, sizeof(my_info), MPI_BYTE);
+    ret = comm->c_coll->coll_allgather(&coll_args, comm, comm->c_coll->coll_allgather_module);
     if (ret != OMPI_SUCCESS) {
         goto error;
     }
@@ -986,7 +994,8 @@ select_unlock:
 
     /* sync with everyone */
 
-    ret = module->comm->c_coll->coll_barrier(module->comm,
+    ompi_coll_args_barrier(&coll_args);
+    ret = module->comm->c_coll->coll_barrier(&coll_args, module->comm,
                                              module->comm->c_coll->coll_barrier_module);
     if (ret != OMPI_SUCCESS) {
         goto error;
@@ -1213,7 +1222,9 @@ int ompi_osc_ucx_free(struct ompi_win_t *win) {
         return ret;
     }
 
-    ret = module->comm->c_coll->coll_barrier(module->comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    ret = module->comm->c_coll->coll_barrier(&coll_args, module->comm,
                                              module->comm->c_coll->coll_barrier_module);
     if (ret != OMPI_SUCCESS) {
         return ret;

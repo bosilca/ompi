@@ -16,6 +16,7 @@
  * Copyright (c) 2020      High Performance Computing Center Stuttgart,
  *                         University of Stuttgart.  All rights reserved.
  * Copyright (c) 2025      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -290,8 +291,10 @@ component_select(struct ompi_win_t *win, void **base, size_t size, ptrdiff_t dis
         }
 
         total = size;
-        ret = module->comm->c_coll->coll_allgather(&total, 1, MPI_UNSIGNED_LONG,
-                                                  rbuf, 1, MPI_UNSIGNED_LONG,
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_allgather(&coll_args, &total, 1, MPI_UNSIGNED_LONG,
+                                 rbuf, 1, MPI_UNSIGNED_LONG);
+        ret = module->comm->c_coll->coll_allgather(&coll_args,
                                                   module->comm,
                                                   module->comm->c_coll->coll_allgather_module);
         if (OMPI_SUCCESS != ret) {
@@ -336,7 +339,8 @@ component_select(struct ompi_win_t *win, void **base, size_t size, ptrdiff_t dis
             unlink_needed = true;
         }
 
-        ret = module->comm->c_coll->coll_bcast (&module->seg_ds, sizeof (module->seg_ds), MPI_BYTE, 0,
+        ompi_coll_args_bcast(&coll_args, &module->seg_ds, sizeof (module->seg_ds), MPI_BYTE, 0);
+        ret = module->comm->c_coll->coll_bcast (&coll_args,
                                                 module->comm, module->comm->c_coll->coll_bcast_module);
         if (OMPI_SUCCESS != ret) {
             free(rbuf);
@@ -350,7 +354,8 @@ component_select(struct ompi_win_t *win, void **base, size_t size, ptrdiff_t dis
         }
 
         /* wait for all processes to attach */
-        ret = module->comm->c_coll->coll_barrier (module->comm, module->comm->c_coll->coll_barrier_module);
+        ompi_coll_args_barrier(&coll_args);
+        ret = module->comm->c_coll->coll_barrier (&coll_args, module->comm, module->comm->c_coll->coll_barrier_module);
         if (OMPI_SUCCESS != ret) {
             free(rbuf);
             goto error;
@@ -403,8 +408,10 @@ component_select(struct ompi_win_t *win, void **base, size_t size, ptrdiff_t dis
 
     /* share everyone's displacement units. */
     module->disp_units = malloc(sizeof(ptrdiff_t) * comm_size);
-    ret = module->comm->c_coll->coll_allgather(&disp_unit, sizeof(ptrdiff_t), MPI_BYTE,
-                                              module->disp_units, sizeof(ptrdiff_t), MPI_BYTE,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_allgather(&coll_args, &disp_unit, sizeof(ptrdiff_t), MPI_BYTE,
+                             module->disp_units, sizeof(ptrdiff_t), MPI_BYTE);
+    ret = module->comm->c_coll->coll_allgather(&coll_args,
                                               module->comm,
                                               module->comm->c_coll->coll_allgather_module);
     if (OMPI_SUCCESS != ret) goto error;
@@ -462,7 +469,8 @@ component_select(struct ompi_win_t *win, void **base, size_t size, ptrdiff_t dis
 #endif
     }
 
-    ret = module->comm->c_coll->coll_barrier(module->comm,
+    ompi_coll_args_barrier(&coll_args);
+    ret = module->comm->c_coll->coll_barrier(&coll_args, module->comm,
                                             module->comm->c_coll->coll_barrier_module);
     if (OMPI_SUCCESS != ret) goto error;
 
@@ -547,7 +555,9 @@ ompi_osc_sm_free(struct ompi_win_t *win)
     /* free memory */
     if (NULL != module->segment_base) {
         /* synchronize */
-        module->comm->c_coll->coll_barrier(module->comm,
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_barrier(&coll_args);
+        module->comm->c_coll->coll_barrier(&coll_args, module->comm,
                                           module->comm->c_coll->coll_barrier_module);
 
         opal_shmem_segment_detach (&module->seg_ds);
@@ -584,7 +594,9 @@ ompi_osc_sm_set_info(struct ompi_win_t *win, struct opal_info_t *info)
         (ompi_osc_sm_module_t*) win->w_osc_module;
 
     /* enforce collectiveness... */
-    return module->comm->c_coll->coll_barrier(module->comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    return module->comm->c_coll->coll_barrier(&coll_args, module->comm,
                                              module->comm->c_coll->coll_barrier_module);
 }
 

@@ -2,6 +2,7 @@
  * Copyright (c) 2016-2018 Inria. All rights reserved.
  * Copyright (c) 2019      Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -14,11 +15,11 @@
 #include "ompi/communicator/communicator.h"
 #include "coll_monitoring.h"
 
-int mca_coll_monitoring_barrier(struct ompi_communicator_t *comm,
-                                mca_coll_base_module_t *module)
+int mca_coll_monitoring_barrier(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     int i, rank;
+    (void) args;
     const int comm_size = ompi_comm_size(comm);
     const int my_rank = ompi_comm_rank(comm);
     for( i = 0; i < comm_size; ++i ) {
@@ -32,15 +33,14 @@ int mca_coll_monitoring_barrier(struct ompi_communicator_t *comm,
 	}
     }
     mca_common_monitoring_coll_a2a(0, monitoring_module->data);
-    return monitoring_module->real.coll_barrier(comm, monitoring_module->real.coll_barrier_module);
+    return monitoring_module->real.coll_barrier(args, comm, monitoring_module->real.coll_barrier_module);
 }
 
-int mca_coll_monitoring_ibarrier(struct ompi_communicator_t *comm,
-                                 ompi_request_t ** request,
-                                 mca_coll_base_module_t *module)
+int mca_coll_monitoring_ibarrier(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     int i, rank;
+    (void) args;
     const int comm_size = ompi_comm_size(comm);
     const int my_rank = ompi_comm_rank(comm);
     for( i = 0; i < comm_size; ++i ) {
@@ -54,5 +54,5 @@ int mca_coll_monitoring_ibarrier(struct ompi_communicator_t *comm,
 	}
     }
     mca_common_monitoring_coll_a2a(0, monitoring_module->data);
-    return monitoring_module->real.coll_ibarrier(comm, request, monitoring_module->real.coll_ibarrier_module);
+    return monitoring_module->real.coll_ibarrier(args, comm, request, monitoring_module->real.coll_ibarrier_module);
 }

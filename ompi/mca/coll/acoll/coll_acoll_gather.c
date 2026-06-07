@@ -1,6 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode:nil -*- */
 /*
  * Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -36,10 +37,14 @@
  * Memory:      The base rank of each subgroup may create temporary buffer.
  *
  */
-int mca_coll_acoll_gather_intra(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                                void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype, int root,
-                                struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
+int mca_coll_acoll_gather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
+    int root = args->root;
     int i, err, rank, size;
     char *wkg = NULL, *workbuf = NULL;
     MPI_Status status;
@@ -73,7 +78,7 @@ int mca_coll_acoll_gather_intra(const void *sbuf, size_t scount, struct ompi_dat
     if (rank == root) {
         ompi_datatype_type_extent(rdtype, &rextent);
         /* Just use the recv buffer */
-        wkg = (char *) rbuf;
+        wkg = (char *) args->dst.info.buffer;
         if (MPI_IN_PLACE != sbuf) {
             MPI_Aint root_ofst = rextent * (ptrdiff_t) (rcount * root);
             err = ompi_datatype_sndrcv((void *) sbuf, scount, sdtype, wkg + (ptrdiff_t) root_ofst,
@@ -201,7 +206,7 @@ int mca_coll_acoll_gather_intra(const void *sbuf, size_t scount, struct ompi_dat
                 size_t recv_amt = (i + node_cnt > size) ? rcount * (size - i) : rcount * node_cnt;
                 MPI_Aint rcv_ofst = rextent * (ptrdiff_t) (rcount * i);
 
-                err = MCA_PML_CALL(recv((char *) rbuf + (ptrdiff_t) rcv_ofst, recv_amt, rdtype, i,
+                err = MCA_PML_CALL(recv((char *) args->dst.info.buffer + (ptrdiff_t) rcv_ofst, recv_amt, rdtype, i,
                                         MCA_COLL_BASE_TAG_GATHER, comm, &status));
                 total_recv += recv_amt;
             }

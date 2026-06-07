@@ -2,6 +2,7 @@
  * Copyright (c) 2016-2018 Inria. All rights reserved.
  * Copyright (c) 2019      Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -15,21 +16,17 @@
 #include "ompi/communicator/communicator.h"
 #include "coll_monitoring.h"
 
-int mca_coll_monitoring_gather(const void *sbuf, size_t scount,
-                               struct ompi_datatype_t *sdtype,
-                               void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                               int root, struct ompi_communicator_t *comm,
-                               mca_coll_base_module_t *module)
+int mca_coll_monitoring_gather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
-    if( root == ompi_comm_rank(comm) ) {
+    if( args->root == ompi_comm_rank(comm) ) {
         int i, rank;
         size_t type_size, data_size;
         const int comm_size = ompi_comm_size(comm);
-        ompi_datatype_type_size(rdtype, &type_size);
-        data_size = rcount * type_size;
+        ompi_datatype_type_size(args->dst.info.datatype, &type_size);
+        data_size = args->dst.info.count * type_size;
         for( i = 0; i < comm_size; ++i ) {
-            if( root == i ) continue; /* No communication for self */
+            if( args->root == i ) continue; /* No communication for self */
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
              * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -40,25 +37,20 @@ int mca_coll_monitoring_gather(const void *sbuf, size_t scount,
         }
         mca_common_monitoring_coll_a2o(data_size * (comm_size - 1), monitoring_module->data);
     }
-    return monitoring_module->real.coll_gather(sbuf, scount, sdtype, rbuf, rcount, rdtype, root, comm, monitoring_module->real.coll_gather_module);
+    return monitoring_module->real.coll_gather(args, comm, monitoring_module->real.coll_gather_module);
 }
 
-int mca_coll_monitoring_igather(const void *sbuf, size_t scount,
-                                struct ompi_datatype_t *sdtype,
-                                void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                                int root, struct ompi_communicator_t *comm,
-                                ompi_request_t ** request,
-                                mca_coll_base_module_t *module)
+int mca_coll_monitoring_igather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
-    if( root == ompi_comm_rank(comm) ) {
+    if( args->root == ompi_comm_rank(comm) ) {
         int i, rank;
         size_t type_size, data_size;
         const int comm_size = ompi_comm_size(comm);
-        ompi_datatype_type_size(rdtype, &type_size);
-        data_size = rcount * type_size;
+        ompi_datatype_type_size(args->dst.info.datatype, &type_size);
+        data_size = args->dst.info.count * type_size;
         for( i = 0; i < comm_size; ++i ) {
-            if( root == i ) continue; /* No communication for self */
+            if( args->root == i ) continue; /* No communication for self */
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
              * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -69,5 +61,5 @@ int mca_coll_monitoring_igather(const void *sbuf, size_t scount,
         }
         mca_common_monitoring_coll_a2o(data_size * (comm_size - 1), monitoring_module->data);
     }
-    return monitoring_module->real.coll_igather(sbuf, scount, sdtype, rbuf, rcount, rdtype, root, comm, request, monitoring_module->real.coll_igather_module);
+    return monitoring_module->real.coll_igather(args, comm, request, monitoring_module->real.coll_igather_module);
 }

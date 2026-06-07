@@ -7,6 +7,7 @@
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2025      Amazon.com, Inc. or its affiliates.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -125,11 +126,7 @@ int ompi_coll_tuned_allreduce_intra_check_forced_init (coll_tuned_force_algorith
     return (MPI_SUCCESS);
 }
 
-int ompi_coll_tuned_allreduce_intra_do_this(const void *sbuf, void *rbuf, size_t count,
-                                            struct ompi_datatype_t *dtype,
-                                            struct ompi_op_t *op,
-                                            struct ompi_communicator_t *comm,
-                                            mca_coll_base_module_t *module,
+int ompi_coll_tuned_allreduce_intra_do_this(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                             int algorithm, int faninout, int segsize)
 {
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
@@ -138,21 +135,21 @@ int ompi_coll_tuned_allreduce_intra_do_this(const void *sbuf, void *rbuf, size_t
 
     switch (algorithm) {
     case (0):
-        return ompi_coll_tuned_allreduce_intra_dec_fixed(sbuf, rbuf, count, dtype, op, comm, module);
+        return ompi_coll_tuned_allreduce_intra_dec_fixed(args, comm, module);
     case (1):
-        return ompi_coll_base_allreduce_intra_basic_linear(sbuf, rbuf, count, dtype, op, comm, module);
+        return ompi_coll_base_allreduce_intra_basic_linear(args, comm, module);
     case (2):
-        return ompi_coll_base_allreduce_intra_nonoverlapping(sbuf, rbuf, count, dtype, op, comm, module);
+        return ompi_coll_base_allreduce_intra_nonoverlapping(args, comm, module);
     case (3):
-        return ompi_coll_base_allreduce_intra_recursivedoubling(sbuf, rbuf, count, dtype, op, comm, module);
+        return ompi_coll_base_allreduce_intra_recursivedoubling(args, comm, module);
     case (4):
-        return ompi_coll_base_allreduce_intra_ring(sbuf, rbuf, count, dtype, op, comm, module);
+        return ompi_coll_base_allreduce_intra_ring(args, comm, module);
     case (5):
-        return ompi_coll_base_allreduce_intra_ring_segmented(sbuf, rbuf, count, dtype, op, comm, module, segsize);
+        return ompi_coll_base_allreduce_intra_ring_segmented(args, comm, module, segsize);
     case (6):
-        return ompi_coll_base_allreduce_intra_redscat_allgather(sbuf, rbuf, count, dtype, op, comm, module);
+        return ompi_coll_base_allreduce_intra_redscat_allgather(args, comm, module);
     case (7):
-        return ompi_coll_base_allreduce_intra_allgather_reduce(sbuf, rbuf, count, dtype, op, comm, module);
+        return ompi_coll_base_allreduce_intra_allgather_reduce(args, comm, module);
     } /* switch */
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
         "coll:tuned:allreduce_intra_do_this attempt to select algorithm %d when only 0-%d is valid?",

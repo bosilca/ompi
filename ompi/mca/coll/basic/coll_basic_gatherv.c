@@ -12,6 +12,7 @@
  * Copyright (c) 2015-2021 Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -37,13 +38,13 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_gatherv_intra(const void *sbuf, size_t scount,
-                             struct ompi_datatype_t *sdtype,
-                             void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t disps,
-                             struct ompi_datatype_t *rdtype, int root,
-                             struct ompi_communicator_t *comm,
-                             mca_coll_base_module_t *module)
+mca_coll_basic_gatherv_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    struct ompi_datatype_t *rdtype = args->dst.info_v.datatype;
     int err, i, peer, rank, size;
     char *ptmp;
     ptrdiff_t lb, extent;
@@ -52,7 +53,7 @@ mca_coll_basic_gatherv_intra(const void *sbuf, size_t scount,
     size = ompi_comm_size(comm);
     rank = ompi_comm_rank(comm);
 
-    if (root == rank) {
+    if (args->root == rank) {
         /* Root receives from everyone else */
         ompi_datatype_type_size(rdtype, &rdsize);
         if (OPAL_UNLIKELY(0 == rdsize)) {
@@ -68,7 +69,7 @@ mca_coll_basic_gatherv_intra(const void *sbuf, size_t scount,
         if (MPI_IN_PLACE != sbuf && (0 < scount) && (0 < ompi_count_array_get(rcounts, rank))) {
             /* Directly copy self sbuf to rbuf */
             err = ompi_datatype_sndrcv(sbuf, scount, sdtype,
-                                       ((char *) rbuf) + (extent * ompi_disp_array_get(disps, rank)),
+                                       ((char *) args->dst.info_v.buffer) + (extent * ompi_disp_array_get(args->dst.info_v.displacements, rank)),
                                        ompi_count_array_get(rcounts, rank), rdtype);
             if (MPI_SUCCESS != err) {
                 return err;
@@ -94,7 +95,7 @@ mca_coll_basic_gatherv_intra(const void *sbuf, size_t scount,
 
         for (i = 1; i < size; ++i) {
             peer = (rank + i) % size;
-            ptmp = ((char *) rbuf) + (extent * ompi_disp_array_get(disps, peer));
+            ptmp = ((char *) args->dst.info_v.buffer) + (extent * ompi_disp_array_get(args->dst.info_v.displacements, peer));
             /* Only receive if there is something to receive */
             if (0 < ompi_count_array_get(rcounts, peer)) {
                 err = MCA_PML_CALL(irecv(ptmp, ompi_count_array_get(rcounts, peer), rdtype, peer,
@@ -132,7 +133,7 @@ mca_coll_basic_gatherv_intra(const void *sbuf, size_t scount,
     size_t sdsize;
     ompi_datatype_type_size(sdtype, &sdsize);
     if (scount > 0 && sdsize > 0) {
-        return MCA_PML_CALL(send(sbuf, scount, sdtype, root, MCA_COLL_BASE_TAG_GATHERV,
+        return MCA_PML_CALL(send(sbuf, scount, sdtype, args->root, MCA_COLL_BASE_TAG_GATHERV,
                                  MCA_PML_BASE_SEND_STANDARD, comm));
     }
     return MPI_SUCCESS;
@@ -146,13 +147,9 @@ mca_coll_basic_gatherv_intra(const void *sbuf, size_t scount,
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_gatherv_inter(const void *sbuf, size_t scount,
-                             struct ompi_datatype_t *sdtype,
-                             void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t disps,
-                             struct ompi_datatype_t *rdtype, int root,
-                             struct ompi_communicator_t *comm,
-                             mca_coll_base_module_t *module)
+mca_coll_basic_gatherv_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    int root = args->root;
     int i, size, err;
     char *ptmp;
     ptrdiff_t lb, extent;
@@ -168,12 +165,13 @@ mca_coll_basic_gatherv_inter(const void *sbuf, size_t scount,
         err = OMPI_SUCCESS;
     } else if (MPI_ROOT != root) {
         /* Everyone but root sends data and returns. */
-        err = MCA_PML_CALL(send(sbuf, scount, sdtype, root,
+        err = MCA_PML_CALL(send(args->src.info.buffer, args->src.info.count,
+                                args->src.info.datatype, root,
                                 MCA_COLL_BASE_TAG_GATHERV,
                                 MCA_PML_BASE_SEND_STANDARD, comm));
     } else {
         /* I am the root, loop receiving data. */
-        err = ompi_datatype_get_extent(rdtype, &lb, &extent);
+        err = ompi_datatype_get_extent(args->dst.info_v.datatype, &lb, &extent);
         if (OMPI_SUCCESS != err) {
             return OMPI_ERROR;
         }
@@ -182,8 +180,8 @@ mca_coll_basic_gatherv_inter(const void *sbuf, size_t scount,
         if( NULL == reqs ) { return OMPI_ERR_OUT_OF_RESOURCE; }
 
         for (i = 0; i < size; ++i) {
-            ptmp = ((char *) rbuf) + (extent * ompi_disp_array_get(disps, i));
-            err = MCA_PML_CALL(irecv(ptmp, ompi_count_array_get(rcounts, i), rdtype, i,
+            ptmp = ((char *) args->dst.info_v.buffer) + (extent * ompi_disp_array_get(args->dst.info_v.displacements, i));
+            err = MCA_PML_CALL(irecv(ptmp, ompi_count_array_get(args->dst.info_v.counts, i), args->dst.info_v.datatype, i,
                                      MCA_COLL_BASE_TAG_GATHERV,
                                      comm, &reqs[i]));
             if (OMPI_SUCCESS != err) {

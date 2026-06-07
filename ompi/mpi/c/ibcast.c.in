@@ -7,6 +7,7 @@
  *                         reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -98,7 +99,9 @@ PROTOTYPE ERROR_CLASS ibcast(BUFFER_OUT buffer, COUNT count, DATATYPE datatype,
 
     /* Invoke the coll component to perform the back-end operation */
 
-    err = comm->c_coll->coll_ibcast(buffer, count, datatype, root, comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_bcast(&coll_args, buffer, count, datatype, root);
+    err = comm->c_coll->coll_ibcast(&coll_args, comm,
                                   request,
                                   comm->c_coll->coll_ibcast_module);
     if (OPAL_LIKELY(OMPI_SUCCESS == err)) {
@@ -107,6 +110,7 @@ PROTOTYPE ERROR_CLASS ibcast(BUFFER_OUT buffer, COUNT count, DATATYPE datatype,
                 datatype = NULL;
             }
         }
+        ((ompi_coll_base_nbc_request_t *) *request)->args = coll_args;
         ompi_coll_base_retain_datatypes(*request, datatype, NULL);
     }
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);

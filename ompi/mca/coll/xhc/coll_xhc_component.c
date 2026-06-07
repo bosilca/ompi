@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021-2024 Computer Architecture and VLSI Systems (CARV)
  *                         Laboratory, ICS Forth. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -74,7 +75,7 @@ const char *mca_coll_xhc_component_version_string =
 mca_coll_xhc_component_t mca_coll_xhc_component = {
     .super = {
         .collm_version = {
-            MCA_COLL_BASE_VERSION_3_0_0,
+            MCA_COLL_BASE_VERSION_4_0_0,
 
             .mca_component_name = "xhc",
             MCA_BASE_MAKE_VERSION(component, OMPI_MAJOR_VERSION,

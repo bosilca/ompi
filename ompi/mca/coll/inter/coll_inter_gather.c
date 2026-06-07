@@ -13,6 +13,7 @@
  * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -39,13 +40,11 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_inter_gather_inter(const void *sbuf, size_t scount,
-                            struct ompi_datatype_t *sdtype,
-                            void *rbuf, size_t rcount,
-                            struct ompi_datatype_t *rdtype,
-                            int root, struct ompi_communicator_t *comm,
-                            mca_coll_base_module_t *module)
+mca_coll_inter_gather_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    int root = args->root;
     int err;
     int rank;
     int size;
@@ -71,9 +70,9 @@ mca_coll_inter_gather_inter(const void *sbuf, size_t scount,
         }
         ptmp = ptmp_free - gap;
 
-	err = comm->c_local_comm->c_coll->coll_gather(sbuf, scount, sdtype,
-						     ptmp, scount, sdtype,
-						     0, comm->c_local_comm,
+	ompi_coll_args_t _g;
+	ompi_coll_args_gather(&_g, args->src.info.buffer, scount, sdtype, ptmp, scount, sdtype, 0);
+	err = comm->c_local_comm->c_coll->coll_gather(&_g, comm->c_local_comm,
                                                      comm->c_local_comm->c_coll->coll_gather_module);
 	if (0 == rank) {
 	    /* First process sends data to the root */
@@ -87,7 +86,7 @@ mca_coll_inter_gather_inter(const void *sbuf, size_t scount,
         free(ptmp_free);
     } else {
         /* I am the root, loop receiving the data. */
-	err = MCA_PML_CALL(recv(rbuf, rcount*(size_t)size, rdtype, 0,
+	err = MCA_PML_CALL(recv(args->dst.info.buffer, args->dst.info.count*(size_t)size, args->dst.info.datatype, 0,
 				MCA_COLL_BASE_TAG_GATHER,
 				comm, MPI_STATUS_IGNORE));
 	if (OMPI_SUCCESS != err) {

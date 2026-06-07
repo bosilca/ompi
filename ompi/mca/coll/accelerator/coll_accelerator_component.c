@@ -7,6 +7,7 @@
  * Copyright (c) 2015      Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -49,7 +50,7 @@ mca_coll_accelerator_component_t mca_coll_accelerator_component = {
          * about the component itself */
 
         .collm_version = {
-            MCA_COLL_BASE_VERSION_3_0_0,
+            MCA_COLL_BASE_VERSION_4_0_0,
 
             /* Component name and version */
             .mca_component_name = "accelerator",

@@ -1,6 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode:nil -*- */
 /*
  * Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -301,8 +302,9 @@ static inline int mca_coll_acoll_allgather_intra(const void *sbuf, size_t scount
     coll_allgather_decision_fixed(size, dsize * rcount, sg_size, &use_ring, &use_lin);
 
     if (use_lin) {
-        err = ompi_coll_base_allgather_intra_basic_linear(sbuf, scount, sdtype, rbuf, rcount,
-                                                          rdtype, comm, module);
+        ompi_coll_args_t _ag;
+        ompi_coll_args_allgather(&_ag, sbuf, scount, sdtype, rbuf, rcount, rdtype);
+        err = ompi_coll_base_allgather_intra_basic_linear(&_ag, comm, module);
         return err;
     }
     if (use_ring) {
@@ -461,10 +463,11 @@ static inline int mca_coll_acoll_allgather_intra(const void *sbuf, size_t scount
  * Memory:      No additional memory requirements beyond user-supplied buffers.
  *
  */
-int mca_coll_acoll_allgather(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                             void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                             struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
+int mca_coll_acoll_allgather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     int i;
     int err;
     int size;
@@ -489,8 +492,7 @@ int mca_coll_acoll_allgather(const void *sbuf, size_t scount, struct ompi_dataty
     err = check_and_create_subc(comm, acoll_module, &subc);
     /* Fallback to ring if subc is not obtained */
     if (NULL == subc) {
-        return ompi_coll_base_allgather_intra_ring(sbuf, scount, sdtype, rbuf, rcount, rdtype, comm,
-                                                   module);
+        return ompi_coll_base_allgather_intra_ring(args, comm, module);
     }
 
     size = ompi_comm_size(comm);
@@ -529,7 +531,7 @@ int mca_coll_acoll_allgather(const void *sbuf, size_t scount, struct ompi_dataty
         }
         intra_comm = 1 == num_nodes ? comm : subc->local_r_comm;
     }
-    err = mca_coll_acoll_allgather_intra(sbuf, scount, sdtype, local_rbuf, rcount, rdtype,
+    err = mca_coll_acoll_allgather_intra(args->src.info.buffer, args->src.info.count, args->src.info.datatype, local_rbuf, rcount, rdtype,
                                          intra_comm, module);
     if (MPI_SUCCESS != err) {
         return err;
@@ -538,7 +540,9 @@ int mca_coll_acoll_allgather(const void *sbuf, size_t scount, struct ompi_dataty
     /* Return if intra-node communicator */
     if ((1 == num_nodes) || (size <= 2)) {
         /* Call barrier to ensure that the data is copied properly before returning */
-        ompi_coll_base_barrier_intra_basic_linear(comm, module);
+        ompi_coll_args_t _bar;
+        ompi_coll_args_barrier(&_bar);
+        ompi_coll_base_barrier_intra_basic_linear(&_bar, comm, module);
 
         /* All done */
         return err;
@@ -616,15 +620,18 @@ int mca_coll_acoll_allgather(const void *sbuf, size_t scount, struct ompi_dataty
     /* Loop over data blocks */
     for (i = 0; i < num_data_blks; i++) {
         char *buff = (char *) rbuf + (ptrdiff_t) blk_ofst[i] * rext;
-        err = ompi_coll_base_bcast_intra_basic_linear(buff, data_blk_size[i], rdtype, 0, subc->local_r_comm,
-                                         module);
+        ompi_coll_args_t _b;
+        ompi_coll_args_bcast(&_b, buff, data_blk_size[i], rdtype, 0);
+        err = ompi_coll_base_bcast_intra_basic_linear(&_b, subc->local_r_comm, module);
         if (MPI_SUCCESS != err) {
             return err;
         }
     }
 
     /* Call barrier to ensure that the data is copied properly before returning */
-    ompi_coll_base_barrier_intra_basic_linear(comm, module);
+    ompi_coll_args_t _bar;
+    ompi_coll_args_barrier(&_bar);
+    ompi_coll_base_barrier_intra_basic_linear(&_bar, comm, module);
 
     /* All done */
     return err;

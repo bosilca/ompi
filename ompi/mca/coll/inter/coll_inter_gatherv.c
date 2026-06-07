@@ -14,6 +14,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
  * Copyright (c) 2026      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -39,13 +40,11 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_inter_gatherv_inter(const void *sbuf, size_t scount,
-                             struct ompi_datatype_t *sdtype,
-                             void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t disps,
-                             struct ompi_datatype_t *rdtype, int root,
-                             struct ompi_communicator_t *comm,
-                             mca_coll_base_module_t *module)
+mca_coll_inter_gatherv_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    int root = args->root;
     int i, rank, size, size_local, err;
     size_t total = 0;
     size_t *count=NULL;
@@ -63,10 +62,10 @@ mca_coll_inter_gatherv_inter(const void *sbuf, size_t scount,
     size_local = ompi_comm_size(comm);
 
     if (MPI_ROOT == root) { /* I am the root, receiving the data from zero. */
-        ompi_datatype_create_indexed(size, rcounts, disps, rdtype, &ndtype);
+        ompi_datatype_create_indexed(size, args->dst.info_v.counts, args->dst.info_v.displacements, args->dst.info_v.datatype, &ndtype);
         ompi_datatype_commit(&ndtype);
 
-        err = MCA_PML_CALL(recv(rbuf, 1, ndtype, 0,
+        err = MCA_PML_CALL(recv(args->dst.info_v.buffer, 1, ndtype, 0,
                                 MCA_COLL_BASE_TAG_GATHERV,
                                 comm, MPI_STATUS_IGNORE));
         ompi_datatype_destroy(&ndtype);
@@ -82,9 +81,10 @@ mca_coll_inter_gatherv_inter(const void *sbuf, size_t scount,
         }
     }
 
-    err = comm->c_local_comm->c_coll->coll_gather(&scount, sizeof(size_t), MPI_BYTE,
-                                                  count, sizeof(size_t), MPI_BYTE,
-                                                  0, comm->c_local_comm,
+    ompi_coll_args_t _g;
+    ompi_coll_args_gather(&_g, &scount, sizeof(size_t), MPI_BYTE,
+                          count, sizeof(size_t), MPI_BYTE, 0);
+    err = comm->c_local_comm->c_coll->coll_gather(&_g, comm->c_local_comm,
                                                   comm->c_local_comm->c_coll->coll_gather_module);
     if (OMPI_SUCCESS != err) {
         goto exit;
@@ -111,9 +111,10 @@ mca_coll_inter_gatherv_inter(const void *sbuf, size_t scount,
     }
     OMPI_COUNT_ARRAY_INIT(&count_arg, count);
     OMPI_DISP_ARRAY_INIT(&displace_arg, displace);
-    err = comm->c_local_comm->c_coll->coll_gatherv(sbuf, scount, sdtype,
-                                                   ptmp, count_arg, displace_arg,
-                                                   sdtype,0, comm->c_local_comm,
+    ompi_coll_args_t _gv;
+    ompi_coll_args_gatherv(&_gv, args->src.info.buffer, scount, sdtype,
+                           ptmp, count_arg, displace_arg, sdtype, 0);
+    err = comm->c_local_comm->c_coll->coll_gatherv(&_gv, comm->c_local_comm,
                                                    comm->c_local_comm->c_coll->coll_gatherv_module);
     if (OMPI_SUCCESS != err) {
         goto exit;

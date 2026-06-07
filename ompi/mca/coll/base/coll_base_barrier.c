@@ -16,6 +16,7 @@
  * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -113,8 +114,7 @@ ompi_coll_base_sendrecv_zero( int dest, int stag,
  * synchronous guarantee made by last ring of sends are synchronous
  *
  */
-int ompi_coll_base_barrier_intra_doublering(struct ompi_communicator_t *comm,
-                                             mca_coll_base_module_t *module)
+int ompi_coll_base_barrier_intra_doublering(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int rank, size, err = 0, line = 0, left, right;
 
@@ -185,8 +185,7 @@ int ompi_coll_base_barrier_intra_doublering(struct ompi_communicator_t *comm,
  * To make synchronous, uses sync sends and sync sendrecvs
  */
 
-int ompi_coll_base_barrier_intra_recursivedoubling(struct ompi_communicator_t *comm,
-                                                    mca_coll_base_module_t *module)
+int ompi_coll_base_barrier_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int rank, size, adjsize, err, line, mask, remote;
 
@@ -266,8 +265,7 @@ int ompi_coll_base_barrier_intra_recursivedoubling(struct ompi_communicator_t *c
  * To make synchronous, uses sync sends and sync sendrecvs
  */
 
-int ompi_coll_base_barrier_intra_bruck(struct ompi_communicator_t *comm,
-                                        mca_coll_base_module_t *module)
+int ompi_coll_base_barrier_intra_bruck(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int rank, size, distance, to, from, err, line = 0;
 
@@ -304,8 +302,7 @@ int ompi_coll_base_barrier_intra_bruck(struct ompi_communicator_t *comm,
  * To make synchronous, uses sync sends and sync sendrecvs
  */
 /* special case for two processes */
-int ompi_coll_base_barrier_intra_two_procs(struct ompi_communicator_t *comm,
-                                            mca_coll_base_module_t *module)
+int ompi_coll_base_barrier_intra_two_procs(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int remote, size, err;
 
@@ -343,8 +340,7 @@ int ompi_coll_base_barrier_intra_two_procs(struct ompi_communicator_t *comm,
 
 /* copied function (with appropriate renaming) starts here */
 
-int ompi_coll_base_barrier_intra_basic_linear(struct ompi_communicator_t *comm,
-                                              mca_coll_base_module_t *module)
+int ompi_coll_base_barrier_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int i, err, rank, size, line;
     ompi_request_t** requests = NULL;
@@ -424,8 +420,7 @@ int ompi_coll_base_barrier_intra_basic_linear(struct ompi_communicator_t *comm,
  * Another recursive doubling type algorithm, but in this case
  * we go up the tree and back down the tree.
  */
-int ompi_coll_base_barrier_intra_tree(struct ompi_communicator_t *comm,
-                                       mca_coll_base_module_t *module)
+int ompi_coll_base_barrier_intra_tree(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int rank, size, depth, err, jump, partner;
 

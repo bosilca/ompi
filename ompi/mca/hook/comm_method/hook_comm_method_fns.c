@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2016-2022 IBM Corporation. All rights reserved.
  * Copyright (c) 2024      Jeffrey M. Squyres.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -513,11 +514,14 @@ ompi_report_comm_methods(int called_from_location)
 
     MPI_Datatype mydt;
     MPI_Op myop;
+    ompi_coll_args_t coll_args;
     MPI_Type_contiguous(sizeof(comm_method_string_conversion_t), MPI_BYTE, &mydt);
     MPI_Type_commit(&mydt);
     MPI_Op_create(myfn, 1, &myop);
+    ompi_coll_args_allreduce(&coll_args, MPI_IN_PLACE, (void*)&comm_method_string_conversion,
+                             1, mydt, myop);
     leader_comm->c_coll->coll_allreduce(
-        MPI_IN_PLACE, (void*)&comm_method_string_conversion, 1, mydt, myop, leader_comm,
+        &coll_args, leader_comm,
             leader_comm->c_coll->coll_allreduce_module);
     MPI_Op_free(&myop);
     MPI_Type_free(&mydt);
@@ -557,10 +561,9 @@ ompi_report_comm_methods(int called_from_location)
         } else {
             lens = disps = NULL;
         }
+        ompi_coll_args_gather(&coll_args, &len, 1, MPI_INT, lens, 1, MPI_INT, 0);
         leader_comm->c_coll->coll_gather(
-            &len, 1, MPI_INT,
-            lens, 1, MPI_INT,
-            0, leader_comm, leader_comm->c_coll->coll_gather_module);
+            &coll_args, leader_comm, leader_comm->c_coll->coll_gather_module);
         if (myleaderrank == 0) {
             int tlen = 0;
             char *p;
@@ -576,17 +579,17 @@ ompi_report_comm_methods(int called_from_location)
             }
             OMPI_COUNT_ARRAY_INIT(&lens_desc, lens);
             OMPI_DISP_ARRAY_INIT(&disps_desc, disps);
+            ompi_coll_args_gatherv(&coll_args, hoststring, strlen(hoststring) + 1, MPI_CHAR,
+                                   &allhoststrings[0][0], lens_desc, disps_desc, MPI_CHAR, 0);
             leader_comm->c_coll->coll_gatherv(
-                hoststring, strlen(hoststring) + 1, MPI_CHAR,
-                &allhoststrings[0][0], lens_desc, disps_desc, MPI_CHAR,
-                0, leader_comm, leader_comm->c_coll->coll_gatherv_module);
+                &coll_args, leader_comm, leader_comm->c_coll->coll_gatherv_module);
         } else {
             // matching above call from rank 0, just &allhoststrings[0][0]
             // isn't legal here, and those args aren't used at non-root anyway
+            ompi_coll_args_gatherv(&coll_args, hoststring, strlen(hoststring) + 1, MPI_CHAR,
+                                   NULL, OMPI_COUNT_ARRAY_NULL, OMPI_DISP_ARRAY_NULL, MPI_CHAR, 0);
             leader_comm->c_coll->coll_gatherv(
-                hoststring, strlen(hoststring) + 1, MPI_CHAR,
-                NULL, 0, 0, MPI_CHAR,
-                0, leader_comm, leader_comm->c_coll->coll_gatherv_module);
+                &coll_args, leader_comm, leader_comm->c_coll->coll_gatherv_module);
         }
         if (myleaderrank == 0) {
             free(lens);
@@ -595,10 +598,10 @@ ompi_report_comm_methods(int called_from_location)
 
         // and a simpler gather for the arrays of communication method indices
         // for all nodes.
+        ompi_coll_args_gather(&coll_args, method, nleaderranks, MPI_INT,
+                              method, nleaderranks, MPI_INT, 0);
         leader_comm->c_coll->coll_gather(
-            method, nleaderranks, MPI_INT,
-            method, nleaderranks, MPI_INT,
-            0, leader_comm, leader_comm->c_coll->coll_gather_module);
+            &coll_args, leader_comm, leader_comm->c_coll->coll_gather_module);
     }
     ompi_comm_free(&local_comm);
     ompi_comm_free(&leader_comm);

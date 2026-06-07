@@ -11,6 +11,7 @@
  *                         reserved.
  * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * Copyright (c) 2018      FUJITSU LIMITED.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -167,10 +168,10 @@ static int nbc_neighbor_alltoall_init(const void *sbuf, size_t scount, MPI_Datat
   return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_ineighbor_alltoall(const void *sbuf, size_t scount, MPI_Datatype stype, void *rbuf,
-                                        size_t rcount, MPI_Datatype rtype, struct ompi_communicator_t *comm,
-                                        ompi_request_t ** request, mca_coll_base_module_t *module) {
-    int res = nbc_neighbor_alltoall_init(sbuf, scount, stype, rbuf, rcount, rtype,
+int ompi_coll_libnbc_ineighbor_alltoall(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_neighbor_alltoall_init(args->src.info.buffer, args->src.info.count,
+                                         args->src.info.datatype, args->dst.info.buffer,
+                                         args->dst.info.count, args->dst.info.datatype,
                                          comm, request, module, false);
     if (OPAL_LIKELY(OMPI_SUCCESS != res)) {
         return res;
@@ -185,10 +186,10 @@ int ompi_coll_libnbc_ineighbor_alltoall(const void *sbuf, size_t scount, MPI_Dat
     return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_neighbor_alltoall_init(const void *sbuf, size_t scount, MPI_Datatype stype, void *rbuf,
-                                            size_t rcount, MPI_Datatype rtype, struct ompi_communicator_t *comm, MPI_Info info,
-                                            ompi_request_t ** request, mca_coll_base_module_t *module) {
-    int res = nbc_neighbor_alltoall_init(sbuf, scount, stype, rbuf, rcount, rtype,
+int ompi_coll_libnbc_neighbor_alltoall_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_neighbor_alltoall_init(args->src.info.buffer, args->src.info.count,
+                                         args->src.info.datatype, args->dst.info.buffer,
+                                         args->dst.info.count, args->dst.info.datatype,
                                          comm, request, module, true);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
         return res;

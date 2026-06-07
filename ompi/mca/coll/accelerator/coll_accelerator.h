@@ -6,6 +6,7 @@
  * Copyright (c) 2014-2024 NVIDIA Corporation.  All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights reserved.
  * Copyright (c) 2024      Advanced Micro Devices, Inc. All Rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -26,6 +27,7 @@
 #include "ompi/constants.h"
 #include "ompi/mca/coll/coll.h"
 #include "ompi/mca/coll/base/base.h"
+#include "ompi/mca/coll/base/coll_base_functions.h"
 #include "ompi/communicator/communicator.h"
 #include "opal/mca/accelerator/accelerator.h"
 #include "opal/mca/accelerator/base/base.h"
@@ -46,72 +48,30 @@ mca_coll_base_module_t
                           int *priority);
 
 int
-mca_coll_accelerator_allreduce(const void *sbuf, void *rbuf, size_t count,
-                        struct ompi_datatype_t *dtype,
-                        struct ompi_op_t *op,
-                        struct ompi_communicator_t *comm,
-                        mca_coll_base_module_t *module);
+mca_coll_accelerator_allreduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_accelerator_reduce_local(const void *sbuf, void *rbuf, size_t count,
-                         struct ompi_datatype_t *dtype,
-                         struct ompi_op_t *op,
-                         mca_coll_base_module_t *module);
+int mca_coll_accelerator_reduce_local(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_accelerator_reduce(const void *sbuf, void *rbuf, size_t count,
-                         struct ompi_datatype_t *dtype,
-                         struct ompi_op_t *op,
-                         int root,
-                         struct ompi_communicator_t *comm,
-                         mca_coll_base_module_t *module);
+int mca_coll_accelerator_reduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_accelerator_exscan(const void *sbuf, void *rbuf, size_t count,
-                         struct ompi_datatype_t *dtype,
-                         struct ompi_op_t *op,
-                         struct ompi_communicator_t *comm,
-                         mca_coll_base_module_t *module);
+int mca_coll_accelerator_exscan(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_accelerator_scan(const void *sbuf, void *rbuf, size_t count,
-                       struct ompi_datatype_t *dtype,
-                       struct ompi_op_t *op,
-                       struct ompi_communicator_t *comm,
-                       mca_coll_base_module_t *module);
+int mca_coll_accelerator_scan(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 int
-mca_coll_accelerator_reduce_scatter_block(const void *sbuf, void *rbuf, size_t rcount,
-                                   struct ompi_datatype_t *dtype,
-                                   struct ompi_op_t *op,
-                                   struct ompi_communicator_t *comm,
-                                   mca_coll_base_module_t *module);
+mca_coll_accelerator_reduce_scatter_block(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 int
-mca_coll_accelerator_reduce_scatter(const void *sbuf, void *rbuf, ompi_count_array_t rcounts,
-                                   struct ompi_datatype_t *dtype,
-                                   struct ompi_op_t *op,
-                                   struct ompi_communicator_t *comm,
-                                   mca_coll_base_module_t *module);
+mca_coll_accelerator_reduce_scatter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 int
-mca_coll_accelerator_allgather(const void *sbuf, size_t scount,
-			       struct ompi_datatype_t *sdtype,
-			       void *rbuf, size_t rcount,
-			       struct ompi_datatype_t *rdtype,
-			       struct ompi_communicator_t *comm,
-			       mca_coll_base_module_t *module);
+mca_coll_accelerator_allgather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 int
-mca_coll_accelerator_alltoall(const void *sbuf, size_t scount,
-			      struct ompi_datatype_t *sdtype,
-			      void *rbuf, size_t rcount,
-			      struct ompi_datatype_t *rdtype,
-			      struct ompi_communicator_t *comm,
-			      mca_coll_base_module_t *module);
+mca_coll_accelerator_alltoall(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 int
-mca_coll_accelerator_bcast(void *buff, size_t count,
-			   struct ompi_datatype_t *datatype,
-			   int root,
-			   struct ompi_communicator_t *comm,
-			   mca_coll_base_module_t *module);
+mca_coll_accelerator_bcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Checks the type of pointer
  *
@@ -164,7 +124,7 @@ OBJ_CLASS_DECLARATION(mca_coll_accelerator_module_t);
 /* Component */
 
 typedef struct mca_coll_accelerator_component_t {
-    mca_coll_base_component_3_0_0_t super;
+    mca_coll_base_component_4_0_0_t super;
 
     int priority; /* Priority of this component */
     int disable_accelerator_coll;  /* Force disable of the accelerator collective component */

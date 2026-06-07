@@ -25,6 +25,7 @@
  * Copyright (c) 2020      Amazon.com, Inc. or its affiliates.
  *                         All Rights reserved.
  * Copyright (c) 2026      Nanook Consulting  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -166,7 +167,9 @@ int ompi_mpi_finalize(void)
         }
         /* do a barrier with closest neighbors in the ring, using doublering as
          * it is synchronous and will help flush all past communications */
-        ret = ompi_coll_base_barrier_intra_doublering(ncomm, ncomm->c_coll->coll_barrier_module);
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_barrier(&coll_args);
+        ret = ompi_coll_base_barrier_intra_doublering(&coll_args, ncomm, ncomm->c_coll->coll_barrier_module);
         if( MPI_SUCCESS != ret ) {
             OMPI_ERROR_LOG(ret);
             goto done;

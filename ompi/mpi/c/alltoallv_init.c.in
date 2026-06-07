@@ -17,6 +17,7 @@
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -124,10 +125,13 @@ PROTOTYPE ERROR_CLASS alltoallv_init(BUFFER sendbuf, COUNT_ARRAY sendcounts, DIS
     OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, recvcounts);
     OMPI_DISP_ARRAY_INIT(&sdispls_desc, sdispls);
     OMPI_DISP_ARRAY_INIT(&rdispls_desc, rdispls);
-    err = comm->c_coll->coll_alltoallv_init(sendbuf, sendcounts_desc, sdispls_desc,
-                                            sendtype, recvbuf, recvcounts_desc, rdispls_desc,
-                                            recvtype, comm, info, request, comm->c_coll->coll_alltoallv_init_module);
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_alltoallv(&coll_args, sendbuf, sendcounts_desc, sdispls_desc,
+                             sendtype, recvbuf, recvcounts_desc, rdispls_desc, recvtype);
+    err = comm->c_coll->coll_alltoallv_init(&coll_args, comm, info, request,
+                                            comm->c_coll->coll_alltoallv_init_module);
     if (OPAL_LIKELY(OMPI_SUCCESS == err)) {
+        ((ompi_coll_base_nbc_request_t *) *request)->args = coll_args;
         ompi_coll_base_retain_datatypes(*request, (MPI_IN_PLACE==sendbuf)?NULL:sendtype, recvtype);
     }
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);

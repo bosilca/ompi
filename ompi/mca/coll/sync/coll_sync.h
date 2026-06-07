@@ -11,6 +11,7 @@
  *                         All rights reserved.
  * Copyright (c) 2008-2009 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -32,6 +33,7 @@
 #include "ompi/constants.h"
 #include "ompi/mca/coll/coll.h"
 #include "ompi/mca/coll/base/base.h"
+#include "ompi/mca/coll/base/coll_base_functions.h"
 #include "ompi/communicator/communicator.h"
 
 BEGIN_C_DECLS
@@ -44,72 +46,25 @@ mca_coll_base_module_t
 *mca_coll_sync_comm_query(struct ompi_communicator_t *comm,
                           int *priority);
 
-int mca_coll_sync_barrier(struct ompi_communicator_t *comm,
-                          mca_coll_base_module_t *module);
+int mca_coll_sync_barrier(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_sync_bcast(void *buff, size_t count,
-                        struct ompi_datatype_t *datatype,
-                        int root,
-                        struct ompi_communicator_t *comm,
-                        mca_coll_base_module_t *module);
+int mca_coll_sync_bcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_sync_exscan(const void *sbuf, void *rbuf, size_t count,
-                         struct ompi_datatype_t *dtype,
-                         struct ompi_op_t *op,
-                         struct ompi_communicator_t *comm,
-                         mca_coll_base_module_t *module);
+int mca_coll_sync_exscan(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_sync_gather(const void *sbuf, size_t scount,
-                         struct ompi_datatype_t *sdtype,
-                         void *rbuf, size_t rcount,
-                         struct ompi_datatype_t *rdtype,
-                         int root,
-                         struct ompi_communicator_t *comm,
-                         mca_coll_base_module_t *module);
+int mca_coll_sync_gather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_sync_gatherv(const void *sbuf, size_t scount,
-                          struct ompi_datatype_t *sdtype,
-                          void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t disps,
-                          struct ompi_datatype_t *rdtype,
-                          int root,
-                          struct ompi_communicator_t *comm,
-                          mca_coll_base_module_t *module);
+int mca_coll_sync_gatherv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_sync_reduce(const void *sbuf, void *rbuf, size_t count,
-                         struct ompi_datatype_t *dtype,
-                         struct ompi_op_t *op,
-                         int root,
-                         struct ompi_communicator_t *comm,
-                         mca_coll_base_module_t *module);
+int mca_coll_sync_reduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_sync_reduce_scatter(const void *sbuf, void *rbuf,
-                                 ompi_count_array_t rcounts,
-                                 struct ompi_datatype_t *dtype,
-                                 struct ompi_op_t *op,
-                                 struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module);
+int mca_coll_sync_reduce_scatter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_sync_scan(const void *sbuf, void *rbuf, size_t count,
-                       struct ompi_datatype_t *dtype,
-                       struct ompi_op_t *op,
-                       struct ompi_communicator_t *comm,
-                       mca_coll_base_module_t *module);
+int mca_coll_sync_scan(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_sync_scatter(const void *sbuf, size_t scount,
-                          struct ompi_datatype_t *sdtype,
-                          void *rbuf, size_t rcount,
-                          struct ompi_datatype_t *rdtype,
-                          int root,
-                          struct ompi_communicator_t *comm,
-                          mca_coll_base_module_t *module);
+int mca_coll_sync_scatter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_sync_scatterv(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t disps,
-                           struct ompi_datatype_t *sdtype,
-                           void *rbuf, size_t rcount,
-                           struct ompi_datatype_t *rdtype,
-                           int root,
-                           struct ompi_communicator_t *comm,
-                           mca_coll_base_module_t *module);
+int mca_coll_sync_scatterv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Types */
 /* Module */
@@ -135,7 +90,7 @@ OBJ_CLASS_DECLARATION(mca_coll_sync_module_t);
 /* Component */
 
 typedef struct mca_coll_sync_component_t {
-    mca_coll_base_component_3_0_0_t super;
+    mca_coll_base_component_4_0_0_t super;
 
     /* Priority of this component */
     int priority;
@@ -156,11 +111,14 @@ OMPI_DECLSPEC extern mca_coll_sync_component_t mca_coll_sync_component;
 #define COLL_SYNC(m, op) \
 do { \
     int err = MPI_SUCCESS; \
+    ompi_coll_args_t _sync_barrier_args;                                        \
+    ompi_coll_args_barrier(&_sync_barrier_args);                                \
     (m)->in_operation = true; \
     if (OPAL_UNLIKELY(++((m)->before_num_operations) ==                         \
                       mca_coll_sync_component.barrier_before_nops)) {           \
         (m)->before_num_operations = 0;                                         \
-        err = (m)->c_coll.coll_barrier(comm, (m)->c_coll.coll_barrier_module);  \
+        err = (m)->c_coll.coll_barrier(&_sync_barrier_args, comm,               \
+                                       (m)->c_coll.coll_barrier_module);        \
     }                                                                           \
     if (OPAL_LIKELY(MPI_SUCCESS == err)) {                                      \
         err = op;                                                               \
@@ -169,7 +127,8 @@ do { \
                       mca_coll_sync_component.barrier_after_nops) &&            \
         OPAL_LIKELY(MPI_SUCCESS == err)) {                                      \
         (m)->after_num_operations = 0;                                          \
-        err = (m)->c_coll.coll_barrier(comm, (m)->c_coll.coll_barrier_module);  \
+        err = (m)->c_coll.coll_barrier(&_sync_barrier_args, comm,               \
+                                       (m)->c_coll.coll_barrier_module);        \
     }                                                                           \
     (m)->in_operation = false;                                                  \
     return err;                                                                 \

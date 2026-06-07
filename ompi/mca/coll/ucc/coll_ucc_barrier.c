@@ -1,6 +1,7 @@
 /**
  * Copyright (c) 2021 Mellanox Technologies. All rights reserved.
  * Copyright (c) 2025      Fujitsu Limited. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -29,11 +30,11 @@ fallback:
     return UCC_ERR_NOT_SUPPORTED;
 }
 
-int mca_coll_ucc_barrier(struct ompi_communicator_t *comm,
-                         mca_coll_base_module_t *module)
+int mca_coll_ucc_barrier(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*)module;
     ucc_coll_req_h         req;
+    (void) args;
 
     UCC_VERBOSE(3, "running ucc barrier");
     COLL_UCC_CHECK(mca_coll_ucc_barrier_init_common(false, ucc_module, &req, NULL));
@@ -42,16 +43,15 @@ int mca_coll_ucc_barrier(struct ompi_communicator_t *comm,
     return OMPI_SUCCESS;
 fallback:
     UCC_VERBOSE(3, "running fallback barrier");
-    return ucc_module->previous_barrier(comm, ucc_module->previous_barrier_module);
+    return ucc_module->previous_barrier(args, comm, ucc_module->previous_barrier_module);
 }
 
-int mca_coll_ucc_ibarrier(struct ompi_communicator_t *comm,
-                          ompi_request_t** request,
-                          mca_coll_base_module_t *module)
+int mca_coll_ucc_ibarrier(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*)module;
     ucc_coll_req_h         req;
     mca_coll_ucc_req_t    *coll_req = NULL;
+    (void) args;
 
     UCC_VERBOSE(3, "running ucc ibarrier");
     COLL_UCC_GET_REQ(coll_req, comm);
@@ -64,16 +64,16 @@ fallback:
     if (coll_req) {
         mca_coll_ucc_req_free((ompi_request_t **)&coll_req);
     }
-    return ucc_module->previous_ibarrier(comm, request,
+    return ucc_module->previous_ibarrier(args, comm, request,
                                          ucc_module->previous_ibarrier_module);
 }
 
-int mca_coll_ucc_barrier_init(struct ompi_communicator_t *comm, struct ompi_info_t *info,
-                              ompi_request_t **request, mca_coll_base_module_t *module)
+int mca_coll_ucc_barrier_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t *) module;
     ucc_coll_req_h req;
     mca_coll_ucc_req_t *coll_req = NULL;
+    (void) args;
 
     COLL_UCC_GET_REQ_PERSISTENT(coll_req, comm);
     UCC_VERBOSE(3, "barrier_init init %p", coll_req);
@@ -85,6 +85,6 @@ fallback:
     if (coll_req) {
         mca_coll_ucc_req_free((ompi_request_t **) &coll_req);
     }
-    return ucc_module->previous_barrier_init(comm, info, request,
+    return ucc_module->previous_barrier_init(args, comm, info, request,
                                              ucc_module->previous_barrier_init_module);
 }

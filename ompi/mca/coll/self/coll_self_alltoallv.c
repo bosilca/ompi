@@ -12,6 +12,7 @@
  * Copyright (c) 2013      FUJITSU LIMITED.  All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -34,30 +35,25 @@
  *	Returns:	- MPI_SUCCESS or an MPI error code
  */
 int
-mca_coll_self_alltoallv_intra(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps,
-                              struct ompi_datatype_t *sdtype,
-                              void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                              struct ompi_datatype_t *rdtype,
-                              struct ompi_communicator_t *comm,
-                              mca_coll_base_module_t *module)
+mca_coll_self_alltoallv_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int err;
     ptrdiff_t lb, rextent, sextent;
 
-    if (MPI_IN_PLACE == sbuf) {
+    if (MPI_IN_PLACE == args->src.info_v.buffer) {
         return MPI_SUCCESS;
     }
 
-    err = ompi_datatype_get_extent(sdtype, &lb, &sextent);
+    err = ompi_datatype_get_extent(args->src.info_v.datatype, &lb, &sextent);
     if (OMPI_SUCCESS != err) {
         return OMPI_ERROR;
     }
-    err = ompi_datatype_get_extent(rdtype, &lb, &rextent);
+    err = ompi_datatype_get_extent(args->dst.info_v.datatype, &lb, &rextent);
     if (OMPI_SUCCESS != err) {
         return OMPI_ERROR;
     }
-    return ompi_datatype_sndrcv(((char *) sbuf) + ompi_disp_array_get(sdisps, 0) * sextent,
-                           ompi_count_array_get(scounts, 0), sdtype,
-                           ((char *) rbuf) + ompi_disp_array_get(rdisps, 0) * rextent,
-                           ompi_count_array_get(rcounts, 0), rdtype);
+    return ompi_datatype_sndrcv(((char *) args->src.info_v.buffer) + ompi_disp_array_get(args->src.info_v.displacements, 0) * sextent,
+                           ompi_count_array_get(args->src.info_v.counts, 0), args->src.info_v.datatype,
+                           ((char *) args->dst.info_v.buffer) + ompi_disp_array_get(args->dst.info_v.displacements, 0) * rextent,
+                           ompi_count_array_get(args->dst.info_v.counts, 0), args->dst.info_v.datatype);
 }

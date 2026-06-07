@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021-2024 Computer Architecture and VLSI Systems (CARV)
  *                         Laboratory, ICS Forth. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -64,18 +65,19 @@ static void xhc_barrier_leader(xhc_comm_t *comms, int comm_count,
  *    the same method. Ranks wait on their comm ack flag, set their
  *    own ack, and exit the collective.
  * ----------------------------------------------------------------- */
-int mca_coll_xhc_barrier(ompi_communicator_t *ompi_comm,
-        mca_coll_base_module_t *ompi_module) {
+int mca_coll_xhc_barrier(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module) {
 
-    xhc_module_t *module = (xhc_module_t *) ompi_module;
+    ompi_communicator_t *ompi_comm = comm;
 
-    if(!module->op_data[XHC_BARRIER].init) {
-        int err = xhc_init_op(module, ompi_comm, XHC_BARRIER);
+    xhc_module_t *xhc_module = (xhc_module_t *) module;
+
+    if(!xhc_module->op_data[XHC_BARRIER].init) {
+        int err = xhc_init_op(xhc_module, ompi_comm, XHC_BARRIER);
         if(OMPI_SUCCESS != err) {goto _fallback_permanent;}
     }
 
-    xhc_peer_info_t *peer_info = module->peer_info;
-    xhc_op_data_t *data = &module->op_data[XHC_BARRIER];
+    xhc_peer_info_t *peer_info = xhc_module->peer_info;
+    xhc_op_data_t *data = &xhc_module->op_data[XHC_BARRIER];
 
     xhc_comm_t *comms = data->comms;
     int comm_count = data->comm_count;
@@ -130,11 +132,11 @@ int mca_coll_xhc_barrier(ompi_communicator_t *ompi_comm,
 
 _fallback_permanent:
 
-    XHC_INSTALL_FALLBACK(module,
+    XHC_INSTALL_FALLBACK(xhc_module,
         ompi_comm, XHC_BARRIER, barrier);
 
 // _fallback:
 
-    return XHC_CALL_FALLBACK(module->prev_colls,
-        XHC_BARRIER, barrier, ompi_comm);
+    return XHC_CALL_FALLBACK(xhc_module->prev_colls,
+        XHC_BARRIER, barrier, args, ompi_comm);
 }

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2015      Sandia National Laboratories. All rights reserved.
  * Copyright (c) 2015      Bull SAS.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -834,11 +835,12 @@ bcast_pipeline_bottom(ompi_coll_portals4_request_t *request)
 
 
 int
-ompi_coll_portals4_bcast_intra(void *buff, size_t count,
-        struct ompi_datatype_t *datatype, int root,
-        struct ompi_communicator_t *comm,
-        mca_coll_base_module_t *module)
+ompi_coll_portals4_bcast_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *buff = args->src.info.buffer;
+    size_t count = args->src.info.count;
+    struct ompi_datatype_t *datatype = args->src.info.datatype;
+    int root = args->root;
     mca_coll_portals4_module_t *portals4_module = (mca_coll_portals4_module_t*) module;
     ompi_coll_portals4_request_t *request;
 
@@ -878,41 +880,41 @@ ompi_coll_portals4_bcast_intra(void *buff, size_t count,
 
 
 int
-ompi_coll_portals4_ibcast_intra(void *buff, size_t count,
-        struct ompi_datatype_t *datatype, int root,
-        struct ompi_communicator_t *comm,
-        ompi_request_t **ompi_request,
-        mca_coll_base_module_t *module)
+ompi_coll_portals4_ibcast_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
-
+    void *buff = args->src.info.buffer;
+    size_t count = args->src.info.count;
+    struct ompi_datatype_t *datatype = args->src.info.datatype;
+    int root = args->root;
+    ompi_request_t **ompi_request = request;
     mca_coll_portals4_module_t *portals4_module = (mca_coll_portals4_module_t*) module;
-    ompi_coll_portals4_request_t *request;
+    ompi_coll_portals4_request_t *p4_request;
 
-    OMPI_COLL_PORTALS4_REQUEST_ALLOC(comm, request);
-    if (NULL == request) {
+    OMPI_COLL_PORTALS4_REQUEST_ALLOC(comm, p4_request);
+    if (NULL == p4_request) {
         opal_output_verbose(1, ompi_coll_base_framework.framework_output,
                 "%s:%d: request alloc failed\n",
                 __FILE__, __LINE__);
         return OMPI_ERR_TEMP_OUT_OF_RESOURCE;
     }
-    *ompi_request = &request->super;
-    request->is_sync = false;
+    *ompi_request = &p4_request->super;
+    p4_request->is_sync = false;
 
-    prepare_bcast_data(comm, buff, count, datatype, root, request);
+    prepare_bcast_data(comm, buff, count, datatype, root, p4_request);
 
-    switch (request->u.bcast.algo) {
+    switch (p4_request->u.bcast.algo) {
     case OMPI_COLL_PORTALS4_BCAST_KARY_TREE_ALGO:
         bcast_kary_tree_top(buff, count, datatype, root,
-                comm, request, portals4_module);
+                comm, p4_request, portals4_module);
         break;
     case OMPI_COLL_PORTALS4_BCAST_PIPELINE_ALGO:
         bcast_pipeline_top(buff, count, datatype, root,
-                comm, request, portals4_module);
+                comm, p4_request, portals4_module);
         break;
     default:
         opal_output_verbose(1, ompi_coll_base_framework.framework_output,
                 "%s:%d: unknown bcast algorithm %d\n",
-                __FILE__, __LINE__, request->u.bcast.algo);
+                __FILE__, __LINE__, p4_request->u.bcast.algo);
         return OMPI_ERROR;
     }
 

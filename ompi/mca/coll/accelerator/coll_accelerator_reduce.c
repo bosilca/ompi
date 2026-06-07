@@ -7,6 +7,7 @@
  * Copyright (c) 2022      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights reserved.
  * Copyright (c) 2024      Advanced Micro Devices, Inc. All Rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -30,13 +31,11 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_accelerator_reduce(const void *sbuf, void *rbuf, size_t count,
-                     struct ompi_datatype_t *dtype,
-                     struct ompi_op_t *op,
-                     int root, struct ompi_communicator_t *comm,
-                     mca_coll_base_module_t *module)
+mca_coll_accelerator_reduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_accelerator_module_t *s = (mca_coll_accelerator_module_t*) module;
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
     int rank = ompi_comm_rank(comm);
     ptrdiff_t gap;
     char *rbuf1 = NULL, *sbuf1 = NULL, *rbuf2 = NULL;
@@ -44,7 +43,7 @@ mca_coll_accelerator_reduce(const void *sbuf, void *rbuf, size_t count,
     size_t bufsize;
     int rc;
 
-    bufsize = opal_datatype_span(&dtype->super, count, &gap);
+    bufsize = opal_datatype_span(&args->dst.info.datatype->super, args->dst.info.count, &gap);
 
     rc = mca_coll_accelerator_check_buf((void *)sbuf, &sbuf_dev);
     if (rc < 0) {
@@ -64,7 +63,7 @@ mca_coll_accelerator_reduce(const void *sbuf, void *rbuf, size_t count,
     if (rc < 0) {
         return rc;
     }
-    if ((rank == root) && (rc > 0)) {
+    if ((rank == args->root) && (rc > 0)) {
         rbuf1 = (char*)malloc(bufsize);
         if (NULL == rbuf1) {
             if (NULL != sbuf1) free(sbuf1);
@@ -75,9 +74,9 @@ mca_coll_accelerator_reduce(const void *sbuf, void *rbuf, size_t count,
         rbuf2 = rbuf; /* save away original buffer */
         rbuf = rbuf1 - gap;
     }
-    rc = s->c_coll.coll_reduce((void *) sbuf, rbuf, count,
-                               dtype, op, root, comm,
-                               s->c_coll.coll_reduce_module);
+    ompi_coll_args_t _fwd;
+    ompi_coll_args_reduce(&_fwd, (void *) sbuf, rbuf, args->dst.info.count, args->dst.info.datatype, args->op, args->root);
+    rc = s->c_coll.coll_reduce(&_fwd, comm, s->c_coll.coll_reduce_module);
 
     if (NULL != sbuf1) {
         free(sbuf1);
@@ -92,18 +91,17 @@ mca_coll_accelerator_reduce(const void *sbuf, void *rbuf, size_t count,
 }
 
 int
-mca_coll_accelerator_reduce_local(const void *sbuf, void *rbuf, size_t count,
-                                  struct ompi_datatype_t *dtype,
-                                  struct ompi_op_t *op,
-                                  mca_coll_base_module_t *module)
+mca_coll_accelerator_reduce_local(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
     ptrdiff_t gap;
     char *rbuf1 = NULL, *sbuf1 = NULL, *rbuf2 = NULL;
     int sbuf_dev, rbuf_dev;
     size_t bufsize;
     int rc;
 
-    bufsize = opal_datatype_span(&dtype->super, count, &gap);
+    bufsize = opal_datatype_span(&args->dst.info.datatype->super, args->dst.info.count, &gap);
 
     rc = mca_coll_accelerator_check_buf((void *)sbuf, &sbuf_dev);
     if (rc < 0) {
@@ -137,7 +135,7 @@ mca_coll_accelerator_reduce_local(const void *sbuf, void *rbuf, size_t count,
         rbuf = rbuf1 - gap;
     }
 
-    ompi_op_reduce(op, (void *)sbuf, rbuf, count, dtype);
+    ompi_op_reduce(args->op, (void *)sbuf, rbuf, args->dst.info.count, args->dst.info.datatype);
     rc = OMPI_SUCCESS;
 
     if (NULL != sbuf1) {

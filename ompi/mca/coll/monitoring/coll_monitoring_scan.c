@@ -2,6 +2,7 @@
  * Copyright (c) 2016-2018 Inria. All rights reserved.
  * Copyright (c) 2019      Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -16,19 +17,15 @@
 #include "ompi/communicator/communicator.h"
 #include "coll_monitoring.h"
 
-int mca_coll_monitoring_scan(const void *sbuf, void *rbuf, size_t count,
-                             struct ompi_datatype_t *dtype,
-                             struct ompi_op_t *op,
-                             struct ompi_communicator_t *comm,
-                             mca_coll_base_module_t *module)
+int mca_coll_monitoring_scan(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     size_t type_size, data_size;
     const int comm_size = ompi_comm_size(comm);
     const int my_rank = ompi_comm_rank(comm);
     int i, rank;
-    ompi_datatype_type_size(dtype, &type_size);
-    data_size = count * type_size;
+    ompi_datatype_type_size(args->src.info.datatype, &type_size);
+    data_size = args->src.info.count * type_size;
     mca_common_monitoring_coll_a2a(data_size * (comm_size - my_rank), monitoring_module->data);
     for( i = my_rank + 1; i < comm_size; ++i ) {
         /**
@@ -39,23 +36,18 @@ int mca_coll_monitoring_scan(const void *sbuf, void *rbuf, size_t count,
             mca_common_monitoring_record_coll(rank, data_size);
         }
     }
-    return monitoring_module->real.coll_scan(sbuf, rbuf, count, dtype, op, comm, monitoring_module->real.coll_scan_module);
+    return monitoring_module->real.coll_scan(args, comm, monitoring_module->real.coll_scan_module);
 }
 
-int mca_coll_monitoring_iscan(const void *sbuf, void *rbuf, size_t count,
-                              struct ompi_datatype_t *dtype,
-                              struct ompi_op_t *op,
-                              struct ompi_communicator_t *comm,
-                              ompi_request_t ** request,
-                              mca_coll_base_module_t *module)
+int mca_coll_monitoring_iscan(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     size_t type_size, data_size;
     const int comm_size = ompi_comm_size(comm);
     const int my_rank = ompi_comm_rank(comm);
     int i, rank;
-    ompi_datatype_type_size(dtype, &type_size);
-    data_size = count * type_size;
+    ompi_datatype_type_size(args->src.info.datatype, &type_size);
+    data_size = args->src.info.count * type_size;
     mca_common_monitoring_coll_a2a(data_size * (comm_size - my_rank), monitoring_module->data);
     for( i = my_rank + 1; i < comm_size; ++i ) {
         /**
@@ -66,5 +58,5 @@ int mca_coll_monitoring_iscan(const void *sbuf, void *rbuf, size_t count,
             mca_common_monitoring_record_coll(rank, data_size);
         }
     }
-    return monitoring_module->real.coll_iscan(sbuf, rbuf, count, dtype, op, comm, request, monitoring_module->real.coll_iscan_module);
+    return monitoring_module->real.coll_iscan(args, comm, request, monitoring_module->real.coll_iscan_module);
 }

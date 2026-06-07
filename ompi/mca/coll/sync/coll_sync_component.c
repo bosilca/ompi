@@ -10,6 +10,7 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2008-2009 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -49,7 +50,7 @@ mca_coll_sync_component_t mca_coll_sync_component = {
          * about the component itself */
 
        .collm_version = {
-            MCA_COLL_BASE_VERSION_3_0_0,
+            MCA_COLL_BASE_VERSION_4_0_0,
 
             /* Component name and version */
             .mca_component_name = "sync",

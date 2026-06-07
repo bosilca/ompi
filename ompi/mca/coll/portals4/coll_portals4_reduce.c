@@ -4,6 +4,7 @@
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2017      IBM Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -305,12 +306,16 @@ reduce_kary_tree_top(const void *sendbuf, void *recvbuf, size_t count,
         }
     }
     else {
+        ompi_coll_args_t fallback_args;
+
         opal_output_verbose(100, ompi_coll_base_framework.framework_output,
                 "rank %d - optimization not supported, falling back to previous handler\n", rank);
 
+        ompi_coll_args_reduce(&fallback_args, sendbuf, recvbuf, count, dtype, op, root);
+
         if (request->is_sync) {
             if ((module->previous_reduce) && (module->previous_reduce_module)) {
-                ret = module->previous_reduce(sendbuf, recvbuf, count, dtype, op, root,
+                ret = module->previous_reduce(&fallback_args,
                         comm, module->previous_reduce_module);
             }
             else {
@@ -321,7 +326,7 @@ reduce_kary_tree_top(const void *sendbuf, void *recvbuf, size_t count,
         }
         else {
             if ((module->previous_ireduce) && (module->previous_ireduce_module)) {
-                ret =  module->previous_ireduce(sendbuf, recvbuf, count, dtype, op, root,
+                ret =  module->previous_ireduce(&fallback_args,
                         comm, request->fallback_request, module->previous_ireduce_module);
             }
             else {
@@ -377,11 +382,7 @@ err_hdlr:
 
 
 int
-ompi_coll_portals4_reduce_intra(const void *sendbuf, void *recvbuf, size_t count,
-        MPI_Datatype dtype, MPI_Op op,
-        int root,
-        struct ompi_communicator_t *comm,
-        mca_coll_base_module_t *module)
+ompi_coll_portals4_reduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int ret;
     mca_coll_portals4_module_t *portals4_module = (mca_coll_portals4_module_t*) module;
@@ -398,8 +399,8 @@ ompi_coll_portals4_reduce_intra(const void *sendbuf, void *recvbuf, size_t count
     request->is_sync = true;
     request->fallback_request = NULL;
 
-    ret = reduce_kary_tree_top(sendbuf, recvbuf, count,
-            dtype, op, root, comm,  request,  portals4_module);
+    ret = reduce_kary_tree_top(args->src.info.buffer, args->dst.info.buffer, args->dst.info.count,
+            args->dst.info.datatype, args->op, args->root, comm,  request,  portals4_module);
     if (OMPI_SUCCESS != ret)
         return ret;
     ret = reduce_kary_tree_bottom(request);
@@ -412,36 +413,32 @@ ompi_coll_portals4_reduce_intra(const void *sendbuf, void *recvbuf, size_t count
 
 
 int
-ompi_coll_portals4_ireduce_intra(const void* sendbuf, void* recvbuf, size_t count,
-        MPI_Datatype dtype, MPI_Op op,
-        int root,
-        struct ompi_communicator_t *comm,
-        ompi_request_t ** ompi_request,
-        mca_coll_base_module_t *module)
+ompi_coll_portals4_ireduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
+    ompi_request_t **ompi_request = request;
     int ret;
     mca_coll_portals4_module_t *portals4_module = (mca_coll_portals4_module_t*) module;
-    ompi_coll_portals4_request_t *request;
+    ompi_coll_portals4_request_t *p4_request;
 
-    OMPI_COLL_PORTALS4_REQUEST_ALLOC(comm, request);
-    if (NULL == request) {
+    OMPI_COLL_PORTALS4_REQUEST_ALLOC(comm, p4_request);
+    if (NULL == p4_request) {
         opal_output_verbose(1, ompi_coll_base_framework.framework_output,
                 "%s:%d: request alloc failed\n",
                 __FILE__, __LINE__);
         return OMPI_ERR_TEMP_OUT_OF_RESOURCE;
     }
 
-    *ompi_request = &request->super;
-    request->fallback_request = ompi_request;
-    request->is_sync = false;
+    *ompi_request = &p4_request->super;
+    p4_request->fallback_request = ompi_request;
+    p4_request->is_sync = false;
 
-    ret = reduce_kary_tree_top(sendbuf, recvbuf, count,
-            dtype, op, root, comm,  request,  portals4_module);
+    ret = reduce_kary_tree_top(args->src.info.buffer, args->dst.info.buffer, args->dst.info.count,
+            args->dst.info.datatype, args->op, args->root, comm,  p4_request,  portals4_module);
     if (OMPI_SUCCESS != ret)
         return ret;
 
-    if (!request->u.reduce.is_optim) {
-        OMPI_COLL_PORTALS4_REQUEST_RETURN(request);
+    if (!p4_request->u.reduce.is_optim) {
+        OMPI_COLL_PORTALS4_REQUEST_RETURN(p4_request);
     }
 
     opal_output_verbose(10, ompi_coll_base_framework.framework_output, "ireduce");

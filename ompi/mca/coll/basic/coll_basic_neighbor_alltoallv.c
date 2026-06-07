@@ -15,6 +15,7 @@
  * Copyright (c) 2014-2015 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -245,11 +246,17 @@ mca_coll_basic_neighbor_alltoallv_dist_graph(const void *sbuf, ompi_count_array_
     return rc;
 }
 
-int mca_coll_basic_neighbor_alltoallv(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps,
-                                      struct ompi_datatype_t *sdtype, void *rbuf, ompi_count_array_t rcounts,
-                                      ompi_disp_array_t rdisps, struct ompi_datatype_t *rdtype,
-                                      struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
+int mca_coll_basic_neighbor_alltoallv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info_v.buffer;
+    ompi_count_array_t scounts = args->src.info_v.counts;
+    ompi_disp_array_t sdisps = args->src.info_v.displacements;
+    struct ompi_datatype_t *sdtype = args->src.info_v.datatype;
+    void *rbuf = args->dst.info_v.buffer;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    ompi_disp_array_t rdisps = args->dst.info_v.displacements;
+    struct ompi_datatype_t *rdtype = args->dst.info_v.datatype;
+
     if (OMPI_COMM_IS_INTER(comm)) {
         return OMPI_ERR_NOT_SUPPORTED;
     }

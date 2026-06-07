@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018      DataDirect Networks. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -51,7 +52,9 @@ int mca_fs_ime_file_open (struct ompi_communicator_t *comm,
         }
     }
 
-    comm->c_coll->coll_bcast (&ret, 1, MPI_INT, OMPIO_ROOT, comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_bcast(&coll_args, &ret, 1, MPI_INT, OMPIO_ROOT);
+    comm->c_coll->coll_bcast (&coll_args, comm,
                               comm->c_coll->coll_bcast_module);
     if ( ret != OMPI_SUCCESS ) {
         fh->fd = -1;

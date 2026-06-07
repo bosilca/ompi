@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021-2024 Computer Architecture and VLSI Systems (CARV)
  *                         Laboratory, ICS Forth. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -186,8 +187,10 @@ static int xhc_hierarchy_create(xhc_module_t *module, ompi_communicator_t *comm,
             int ticket = (NULL == my_def ? rank : (dir_fwd ? comm_size : -1));
             int chosen;
 
-            err = comm->c_coll->coll_allreduce(&ticket, &chosen, 1,
-                MPI_INT, (dir_fwd ? MPI_MIN : MPI_MAX), comm,
+            ompi_coll_args_t _ar;
+            ompi_coll_args_allreduce(&_ar, &ticket, &chosen, 1,
+                MPI_INT, (dir_fwd ? MPI_MIN : MPI_MAX));
+            err = comm->c_coll->coll_allreduce(&_ar, comm,
                 comm->c_coll->coll_allreduce_module);
             if(OMPI_SUCCESS != err) {
                 RETURN_WITH_ERROR(return_code, err, end);
@@ -210,9 +213,11 @@ static int xhc_hierarchy_create(xhc_module_t *module, ompi_communicator_t *comm,
         /* Share which named locality each rank follows; ranks that
          * follow different localities shouldn't be grouped together */ 
         opal_hwloc_locality_t follow_loc = (my_def ? my_def->named_loc : 0);
-        err = comm->c_coll->coll_allgather(&follow_loc, 1,
-            hwloc_locality_type, loc_list, 1, hwloc_locality_type,
-            comm, comm->c_coll->coll_allgather_module);
+        ompi_coll_args_t _ag;
+        ompi_coll_args_allgather(&_ag, &follow_loc, 1,
+            hwloc_locality_type, loc_list, 1, hwloc_locality_type);
+        err = comm->c_coll->coll_allgather(&_ag, comm,
+            comm->c_coll->coll_allgather_module);
         if(OMPI_SUCCESS != err) {
             RETURN_WITH_ERROR(return_code, err, end);
         }

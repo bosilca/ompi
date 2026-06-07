@@ -12,6 +12,7 @@
  * Copyright (c) 2014-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -41,13 +42,13 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_allgather_inter(const void *sbuf, size_t scount,
-                               struct ompi_datatype_t *sdtype,
-                               void *rbuf, size_t rcount,
-                               struct ompi_datatype_t *rdtype,
-                               struct ompi_communicator_t *comm,
-                               mca_coll_base_module_t *module)
+mca_coll_basic_allgather_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     int rank, root = 0, size, rsize, err, i, line;
     char *tmpbuf_free = NULL, *tmpbuf, *ptmp;
     ptrdiff_t rlb, rextent, incr;
@@ -69,7 +70,7 @@ mca_coll_basic_allgather_inter(const void *sbuf, size_t scount,
     /* Step one: gather operations: */
     if (rank != root) {
         /* send your data to root */
-        err = MCA_PML_CALL(send(sbuf, scount, sdtype, root,
+        err = MCA_PML_CALL(send(args->src.info.buffer, scount, sdtype, root,
                                 MCA_COLL_BASE_TAG_ALLGATHER,
                                 MCA_PML_BASE_SEND_STANDARD, comm));
         if (OMPI_SUCCESS != err) { line = __LINE__; goto exit; }
@@ -83,7 +84,7 @@ mca_coll_basic_allgather_inter(const void *sbuf, size_t scount,
         if( NULL == reqs ) { line = __LINE__; err = OMPI_ERR_OUT_OF_RESOURCE; goto exit; }
 
         /* Do a send-recv between the two root procs. to avoid deadlock */
-        err = MCA_PML_CALL(isend(sbuf, scount, sdtype, 0,
+        err = MCA_PML_CALL(isend(args->src.info.buffer, scount, sdtype, 0,
                                  MCA_COLL_BASE_TAG_ALLGATHER,
                                  MCA_PML_BASE_SEND_STANDARD,
                                  comm, &reqs[rsize]));

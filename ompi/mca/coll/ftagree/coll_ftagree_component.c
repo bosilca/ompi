@@ -2,6 +2,7 @@
  * Copyright (c) 2012-2020 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -50,13 +51,13 @@ static int ftagree_close(void);
  * and pointers to our public functions in it
  */
 
-const mca_coll_base_component_3_0_0_t mca_coll_ftagree_component = {
+const mca_coll_base_component_4_0_0_t mca_coll_ftagree_component = {
 
     /* First, the mca_component_t struct containing meta information
      * about the component itself */
 
     {
-     MCA_COLL_BASE_VERSION_3_0_0,
+     MCA_COLL_BASE_VERSION_4_0_0,
 
      /* Component name and version */
      "ftagree",

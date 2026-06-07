@@ -20,6 +20,7 @@
  *                         rights reserved.
  * Copyright (c) 2018      FUJITSU LIMITED.  All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -120,7 +121,7 @@ ompi_coll_libnbc_component_t mca_coll_libnbc_component = {
         /* First, the mca_component_t struct containing meta information
          * about the component itself */
         .collm_version = {
-            MCA_COLL_BASE_VERSION_3_0_0,
+            MCA_COLL_BASE_VERSION_4_0_0,
 
             /* Component name and version */
             .mca_component_name = "libnbc",

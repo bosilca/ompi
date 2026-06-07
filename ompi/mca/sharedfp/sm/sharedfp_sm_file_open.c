@@ -15,6 +15,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2015-2021 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -66,6 +67,7 @@ int mca_sharedfp_sm_file_open (struct ompi_communicator_t *comm,
     int sm_fd;
     int int_pid;
     pid_t my_pid;
+    ompi_coll_args_t coll_args;
 
     /*Memory is allocated here for the sh structure*/
     if ( mca_sharedfp_sm_verbose ) {
@@ -110,7 +112,8 @@ int mca_sharedfp_sm_file_open (struct ompi_communicator_t *comm,
         my_pid = getpid();
         int_pid = (int) my_pid;
     }
-    err = comm->c_coll->coll_bcast (&int_pid, 1, MPI_INT, 0, comm, comm->c_coll->coll_bcast_module );
+    ompi_coll_args_bcast(&coll_args, &int_pid, 1, MPI_INT, 0);
+    err = comm->c_coll->coll_bcast (&coll_args, comm, comm->c_coll->coll_bcast_module );
     if ( OMPI_SUCCESS != err ) {
         opal_output(0,"mca_sharedfp_sm_file_open: Error in bcast operation \n");
         free(filename_basename);
@@ -149,7 +152,8 @@ int mca_sharedfp_sm_file_open (struct ompi_communicator_t *comm,
             return err;
         }
     }
-    err = comm->c_coll->coll_barrier (comm, comm->c_coll->coll_barrier_module );
+    ompi_coll_args_barrier(&coll_args);
+    err = comm->c_coll->coll_barrier (&coll_args, comm, comm->c_coll->coll_barrier_module );
     if ( OMPI_SUCCESS != err ) {
         opal_output(0,"mca_sharedfp_sm_file_open: Error in barrier operation \n");
         free(filename_basename);
@@ -223,7 +227,8 @@ int mca_sharedfp_sm_file_open (struct ompi_communicator_t *comm,
         return OMPI_ERROR;
     }
 
-    err = comm->c_coll->coll_barrier (comm, comm->c_coll->coll_barrier_module );
+    ompi_coll_args_barrier(&coll_args);
+    err = comm->c_coll->coll_barrier (&coll_args, comm, comm->c_coll->coll_barrier_module );
     if ( OMPI_SUCCESS != err ) {
         opal_output(0,"mca_sharedfp_sm_file_open: Error in barrier operation \n");
         free(sm_filename);
@@ -249,6 +254,7 @@ int mca_sharedfp_sm_file_close (ompio_file_t *fh)
     struct mca_sharedfp_base_data_t *sh=NULL;
     /*sharedfp sm module data structure*/
     struct mca_sharedfp_sm_data * file_data=NULL;
+    ompi_coll_args_t coll_args;
 
     if( NULL == fh->f_sharedfp_data ){
         return OMPI_SUCCESS;
@@ -259,7 +265,8 @@ int mca_sharedfp_sm_file_close (ompio_file_t *fh)
      * all processes are ready to release the
      * shared file pointer resources
      */
-    fh->f_comm->c_coll->coll_barrier (fh->f_comm, fh->f_comm->c_coll->coll_barrier_module );
+    ompi_coll_args_barrier(&coll_args);
+    fh->f_comm->c_coll->coll_barrier (&coll_args, fh->f_comm, fh->f_comm->c_coll->coll_barrier_module );
 
     file_data = (sm_data_global*)(sh->selected_module_data);
     if (file_data)  {

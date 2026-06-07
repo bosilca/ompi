@@ -18,6 +18,7 @@
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2026      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -262,7 +263,9 @@ int mca_common_ompio_file_close (ompio_file_t *ompio_fh)
         return OMPI_SUCCESS;
     }
 
-    ret = ompio_fh->f_comm->c_coll->coll_barrier ( ompio_fh->f_comm, ompio_fh->f_comm->c_coll->coll_barrier_module);
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    ret = ompio_fh->f_comm->c_coll->coll_barrier ( &coll_args, ompio_fh->f_comm, ompio_fh->f_comm->c_coll->coll_barrier_module);
     if ( OMPI_SUCCESS != ret ) {
         /* Not sure what to do */
         opal_output (1,"mca_common_ompio_file_close: error in Barrier \n");

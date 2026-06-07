@@ -17,6 +17,7 @@
  * Copyright (c) 2025      Triad National Security, LLC. All rights
  *                         reserved.
  *
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -139,82 +140,191 @@ int ompi_rounddown(int num, int factor)
  * converted from Fortran or elsewhere, and should disappear in same time as the
  * request itself.
  */
-static void
-release_objs_callback(struct ompi_coll_base_nbc_request_t *request)
+static inline ompi_datatype_t **nbc_src_dtype_slot(ompi_coll_args_t *a)
 {
-    if (NULL != request->data.refcounted.objs.objs[0]) {
-        OBJ_RELEASE(request->data.refcounted.objs.objs[0]);
-        request->data.refcounted.objs.objs[0] = NULL;
+    return (a->flags & OMPI_COLL_ARGS_FLAG_SRC_VECTOR) ? &a->src.info_v.datatype
+                                                       : &a->src.info.datatype;
+}
+
+static inline ompi_datatype_t **nbc_dst_dtype_slot(ompi_coll_args_t *a)
+{
+    return (a->flags & OMPI_COLL_ARGS_FLAG_DST_VECTOR) ? &a->dst.info_v.datatype
+                                                       : &a->dst.info.datatype;
+}
+
+/**
+ * Release the resources owned by the coll layer for a non-blocking request.
+ *
+ * The retain_* helpers record into args only the objects that were actually
+ * retained (non-intrinsic op, non-predefined datatypes), leaving NULL where
+ * nothing was retained, so we can release whatever non-NULL slot we find.
+ * The OMPI_COLL_ARGS_FREE_* bits in args.mask mark the input count /
+ * displacement / datatype arrays that the coll layer owns and must free.
+ */
+static void release_args(ompi_coll_base_nbc_request_t *request)
+{
+    ompi_coll_args_t *a = &request->args;
+
+    if (NULL != a->op) {
+        OBJ_RELEASE(a->op);
+        a->op = NULL;
     }
-    if (NULL != request->data.refcounted.objs.objs[1]) {
-        OBJ_RELEASE(request->data.refcounted.objs.objs[1]);
-        request->data.refcounted.objs.objs[1] = NULL;
-    }
-    for(int i = 0; i < OMPI_REQ_NB_RELEASE_ARRAYS; i++ ) {
-        if (NULL == request->data.release_arrays[i]) {
-            break;
+
+    if (a->flags & (OMPI_COLL_ARGS_FLAG_SRC_DTYPE_VEC | OMPI_COLL_ARGS_FLAG_DST_DTYPE_VEC)) {
+        /* per-peer datatype arrays (alltoallw family) */
+        ompi_communicator_t *comm = request->super.req_mpi_object.comm;
+        int scount, rcount;
+        if ((a->flags & OMPI_COLL_ARGS_FLAG_NEIGHBOR) && OMPI_COMM_IS_TOPO(comm)) {
+            (void) mca_topo_base_neighbor_count(comm, &rcount, &scount);
+        } else {
+            scount = rcount = OMPI_COMM_IS_INTER(comm) ? ompi_comm_remote_size(comm)
+                                                       : ompi_comm_size(comm);
         }
-        free(request->data.release_arrays[i]);
-        request->data.release_arrays[i] = NULL;
+        if (a->flags & OMPI_COLL_ARGS_FLAG_SRC_DTYPE_VEC) {
+            ompi_datatype_t * const *types = a->src.info_v.datatypes;
+            for (int i = 0; NULL != types && i < scount; i++) {
+                if (NULL != types[i] && !ompi_datatype_is_predefined(types[i])) {
+                    OMPI_DATATYPE_RELEASE_NO_NULLIFY(types[i]);
+                }
+            }
+        }
+        if (a->flags & OMPI_COLL_ARGS_FLAG_DST_DTYPE_VEC) {
+            ompi_datatype_t * const *types = a->dst.info_v.datatypes;
+            for (int i = 0; NULL != types && i < rcount; i++) {
+                if (NULL != types[i] && !ompi_datatype_is_predefined(types[i])) {
+                    OMPI_DATATYPE_RELEASE_NO_NULLIFY(types[i]);
+                }
+            }
+        }
+    } else {
+        ompi_datatype_t **sslot = nbc_src_dtype_slot(a);
+        ompi_datatype_t **dslot = nbc_dst_dtype_slot(a);
+        if (NULL != *sslot) {
+            OMPI_DATATYPE_RELEASE_NO_NULLIFY(*sslot);
+            *sslot = NULL;
+        }
+        if (NULL != *dslot) {
+            OMPI_DATATYPE_RELEASE_NO_NULLIFY(*dslot);
+            *dslot = NULL;
+        }
     }
+
+    if (a->mask & OMPI_COLL_ARGS_FREE_SRC_COUNTS) {
+        free((void *) ompi_count_array_ptr(a->src.info_v.counts));
+    }
+    if (a->mask & OMPI_COLL_ARGS_FREE_SRC_DISPS) {
+        free((void *) ompi_disp_array_ptr(a->src.info_v.displacements));
+    }
+    if (a->mask & OMPI_COLL_ARGS_FREE_SRC_DTYPES) {
+        free((void *) a->src.info_v.datatypes);
+    }
+    if (a->mask & OMPI_COLL_ARGS_FREE_DST_COUNTS) {
+        free((void *) ompi_count_array_ptr(a->dst.info_v.counts));
+    }
+    if (a->mask & OMPI_COLL_ARGS_FREE_DST_DISPS) {
+        free((void *) ompi_disp_array_ptr(a->dst.info_v.displacements));
+    }
+    if (a->mask & OMPI_COLL_ARGS_FREE_DST_DTYPES) {
+        free((void *) a->dst.info_v.datatypes);
+    }
+    a->mask &= ~(OMPI_COLL_ARGS_FREE_SRC_COUNTS | OMPI_COLL_ARGS_FREE_SRC_DISPS
+                 | OMPI_COLL_ARGS_FREE_SRC_DTYPES | OMPI_COLL_ARGS_FREE_DST_COUNTS
+                 | OMPI_COLL_ARGS_FREE_DST_DISPS | OMPI_COLL_ARGS_FREE_DST_DTYPES);
 }
 
-static int complete_objs_callback(struct ompi_request_t *req) {
-    struct ompi_coll_base_nbc_request_t *request = (ompi_coll_base_nbc_request_t *)req;
+static int nbc_complete_callback(struct ompi_request_t *req)
+{
+    ompi_coll_base_nbc_request_t *request = (ompi_coll_base_nbc_request_t *) req;
     int rc = OMPI_SUCCESS;
-    assert (NULL != request);
-    if (NULL != request->cb.req_complete_cb) {
-        rc = request->cb.req_complete_cb(request->req_complete_cb_data);
+    assert(NULL != request);
+
+    /* Caller-provided completion callback (nonblocking/persistent only). */
+    if ((request->args.mask & OMPI_COLL_ARGS_FIELD_COMPLETE_CB)
+        && NULL != request->args.req_complete_cb) {
+        rc = request->args.req_complete_cb(request->args.req_complete_cb_data);
     }
-    release_objs_callback(request);
+    /* Chained downstream completion callback (preserve the legacy convention
+     * of invoking it with the saved data pointer). */
+    if (NULL != request->saved_complete_cb) {
+        int rc2 = request->saved_complete_cb(request->saved_complete_cb_data);
+        if (OMPI_SUCCESS == rc) {
+            rc = rc2;
+        }
+    }
+    /* One-shot requests release here; persistent ones release on free. */
+    if (!request->super.req_persistent) {
+        release_args(request);
+    }
     return rc;
 }
 
-static int free_objs_callback(struct ompi_request_t **rptr) {
-    struct ompi_coll_base_nbc_request_t *request = *(ompi_coll_base_nbc_request_t **)rptr;
+static int nbc_free_callback(struct ompi_request_t **rptr)
+{
+    ompi_coll_base_nbc_request_t *request = *(ompi_coll_base_nbc_request_t **) rptr;
     int rc = OMPI_SUCCESS;
-    if (NULL != request->cb.req_free) {
-        rc = request->cb.req_free(rptr);
+    if (NULL != request->saved_free_fn) {
+        rc = request->saved_free_fn(rptr);
     }
-    release_objs_callback(request);
+    release_args(request);
     return rc;
+}
+
+/*
+ * Install the coll-layer completion/free callbacks in front of whatever the
+ * request already had. Idempotent: a second call is a no-op for an already
+ * installed callback.
+ */
+static void nbc_install_callbacks(ompi_coll_base_nbc_request_t *request)
+{
+    ompi_request_t *req = &request->super;
+
+    if (req->req_persistent) {
+        if (nbc_free_callback != req->req_free) {
+            request->saved_free_fn = req->req_free;
+            req->req_free = nbc_free_callback;
+        }
+        /* A caller completion callback must fire on every completion cycle, so
+         * it is wired through the completion callback even for persistent. */
+        if ((request->args.mask & OMPI_COLL_ARGS_FIELD_COMPLETE_CB)
+            && nbc_complete_callback != req->req_complete_cb) {
+            request->saved_complete_cb = req->req_complete_cb;
+            request->saved_complete_cb_data = req->req_complete_cb_data;
+            req->req_complete_cb = nbc_complete_callback;
+            req->req_complete_cb_data = request;
+        }
+    } else if (nbc_complete_callback != req->req_complete_cb) {
+        request->saved_complete_cb = req->req_complete_cb;
+        request->saved_complete_cb_data = req->req_complete_cb_data;
+        req->req_complete_cb = nbc_complete_callback;
+        req->req_complete_cb_data = request;
+    }
 }
 
 int ompi_coll_base_retain_op( ompi_request_t *req, ompi_op_t *op,
                               ompi_datatype_t *type) {
     ompi_coll_base_nbc_request_t *request = (ompi_coll_base_nbc_request_t *)req;
+    ompi_datatype_t **sslot, **dslot;
     bool retain = false;
     if (REQUEST_COMPLETE(req)) {
         return OMPI_SUCCESS;
     }
+    sslot = nbc_src_dtype_slot(&request->args);
+    dslot = nbc_dst_dtype_slot(&request->args);
+    request->args.op = NULL;
+    *sslot = NULL;
+    *dslot = NULL;
     if (!ompi_op_is_intrinsic(op)) {
         OBJ_RETAIN(op);
-        request->data.refcounted.op.op = op;
+        request->args.op = op;
         retain = true;
     }
     if (!ompi_datatype_is_predefined(type)) {
         OBJ_RETAIN(type);
-        request->data.refcounted.op.datatype = type;
+        *sslot = type;
         retain = true;
     }
     if (OPAL_UNLIKELY(retain)) {
-        /* We need to consider two cases :
-         * - non blocking collectives:
-         *     the objects can be released when MPI_Wait() completes
-         *     and we use the req_complete_cb callback
-         * - persistent non blocking collectives:
-         *     the objects can only be released when the request is freed
-         *     (e.g. MPI_Request_free() completes) and we use req_free callback
-         */
-        if (req->req_persistent) {
-            request->cb.req_free = req->req_free;
-            req->req_free = free_objs_callback;
-        } else {
-            request->cb.req_complete_cb = req->req_complete_cb;
-            request->req_complete_cb_data = req->req_complete_cb_data;
-            req->req_complete_cb = complete_objs_callback;
-            req->req_complete_cb_data = request;
-        }
+        nbc_install_callbacks(request);
     }
     return OMPI_SUCCESS;
 }
@@ -222,76 +332,29 @@ int ompi_coll_base_retain_op( ompi_request_t *req, ompi_op_t *op,
 int ompi_coll_base_retain_datatypes( ompi_request_t *req, ompi_datatype_t *stype,
                                      ompi_datatype_t *rtype) {
     ompi_coll_base_nbc_request_t *request = (ompi_coll_base_nbc_request_t *)req;
+    ompi_datatype_t **sslot, **dslot;
     bool retain = false;
     if (REQUEST_COMPLETE(req)) {
         return OMPI_SUCCESS;
     }
+    sslot = nbc_src_dtype_slot(&request->args);
+    dslot = nbc_dst_dtype_slot(&request->args);
+    *sslot = NULL;
+    *dslot = NULL;
     if (NULL != stype && !ompi_datatype_is_predefined(stype)) {
         OBJ_RETAIN(stype);
-        request->data.refcounted.types.stype = stype;
+        *sslot = stype;
         retain = true;
     }
     if (NULL != rtype && !ompi_datatype_is_predefined(rtype)) {
         OBJ_RETAIN(rtype);
-        request->data.refcounted.types.rtype = rtype;
+        *dslot = rtype;
         retain = true;
     }
     if (OPAL_UNLIKELY(retain)) {
-        if (req->req_persistent) {
-            request->cb.req_free = req->req_free;
-            req->req_free = free_objs_callback;
-        } else {
-            request->cb.req_complete_cb = req->req_complete_cb;
-            request->req_complete_cb_data = req->req_complete_cb_data;
-            req->req_complete_cb = complete_objs_callback;
-            req->req_complete_cb_data = request;
-        }
+        nbc_install_callbacks(request);
     }
     return OMPI_SUCCESS;
-}
-
-static void release_vecs_callback(ompi_coll_base_nbc_request_t *request)
-{
-    if (NULL != request->data.refcounted.vecs.stypes) {
-        for (int i = 0; i < request->data.refcounted.vecs.scount; i++) {
-            if (NULL != request->data.refcounted.vecs.stypes[i] &&
-                !ompi_datatype_is_predefined(request->data.refcounted.vecs.stypes[i])) {
-                OMPI_DATATYPE_RELEASE_NO_NULLIFY(request->data.refcounted.vecs.stypes[i]);
-            }
-        }
-        request->data.refcounted.vecs.stypes = NULL;
-    }
-    if (NULL != request->data.refcounted.vecs.rtypes) {
-        for (int i = 0; i < request->data.refcounted.vecs.rcount; i++) {
-            if (NULL != request->data.refcounted.vecs.rtypes[i] &&
-                !ompi_datatype_is_predefined(request->data.refcounted.vecs.rtypes[i])) {
-                OMPI_DATATYPE_RELEASE_NO_NULLIFY(request->data.refcounted.vecs.rtypes[i]);
-            }
-        }
-        request->data.refcounted.vecs.rtypes = NULL;
-    }
-    release_objs_callback(request);
-}
-
-static int complete_vecs_callback(struct ompi_request_t *req) {
-    ompi_coll_base_nbc_request_t *request = (ompi_coll_base_nbc_request_t *)req;
-    int rc = OMPI_SUCCESS;
-    assert (NULL != request);
-    if (NULL != request->cb.req_complete_cb) {
-        rc = request->cb.req_complete_cb(request->req_complete_cb_data);
-    }
-    release_vecs_callback(request);
-    return rc;
-}
-
-static int free_vecs_callback(struct ompi_request_t **rptr) {
-    struct ompi_coll_base_nbc_request_t *request = *(ompi_coll_base_nbc_request_t **)rptr;
-    int rc = OMPI_SUCCESS;
-    if (NULL != request->cb.req_free) {
-        rc = request->cb.req_free(rptr);
-    }
-    release_vecs_callback(request);
-    return rc;
 }
 
 int ompi_coll_base_retain_datatypes_w( ompi_request_t *req,
@@ -302,6 +365,7 @@ int ompi_coll_base_retain_datatypes_w( ompi_request_t *req,
     ompi_coll_base_nbc_request_t *request = (ompi_coll_base_nbc_request_t *)req;
     ompi_communicator_t *comm = request->super.req_mpi_object.comm;
     int scount, rcount;
+    bool retain = false;
 
     if (REQUEST_COMPLETE(req)) {
         return OMPI_SUCCESS;
@@ -313,38 +377,31 @@ int ompi_coll_base_retain_datatypes_w( ompi_request_t *req,
         scount = rcount = OMPI_COMM_IS_INTER(comm)?ompi_comm_remote_size(comm):ompi_comm_size(comm);
     }
 
-    request->data.refcounted.vecs.scount = 0;  /* default value */
+    request->args.src.info_v.datatypes = NULL;
+    request->args.dst.info_v.datatypes = NULL;
+    request->args.flags &= ~(OMPI_COLL_ARGS_FLAG_SRC_DTYPE_VEC | OMPI_COLL_ARGS_FLAG_DST_DTYPE_VEC);
     if (NULL != stypes) {
         for (int i = 0; i < scount; i++) {
             if (NULL != stypes[i] && !ompi_datatype_is_predefined(stypes[i])) {
                 OBJ_RETAIN(stypes[i]);
-                request->data.refcounted.vecs.scount = i;  /* last valid type */
+                retain = true;
             }
         }
+        request->args.src.info_v.datatypes = stypes;
+        request->args.flags |= OMPI_COLL_ARGS_FLAG_SRC_DTYPE_VEC;
     }
-    request->data.refcounted.vecs.rcount = 0;  /* default value */
     if (NULL != rtypes) {
         for (int i = 0; i < rcount; i++) {
             if (NULL != rtypes[i] && !ompi_datatype_is_predefined(rtypes[i])) {
                 OBJ_RETAIN(rtypes[i]);
-                request->data.refcounted.vecs.rcount = i;  /* last valid type */
+                retain = true;
             }
         }
+        request->args.dst.info_v.datatypes = rtypes;
+        request->args.flags |= OMPI_COLL_ARGS_FLAG_DST_DTYPE_VEC;
     }
-    if (OPAL_LIKELY(request->data.refcounted.vecs.scount | request->data.refcounted.vecs.rcount) ) {
-        request->data.refcounted.vecs.stypes = (ompi_datatype_t **) stypes;
-        request->data.refcounted.vecs.rtypes = (ompi_datatype_t **) rtypes;
-        request->data.refcounted.vecs.scount = scount;
-        request->data.refcounted.vecs.rcount = rcount;
-        if (req->req_persistent) {
-            request->cb.req_free = req->req_free;
-            req->req_free = free_vecs_callback;
-        } else {
-            request->cb.req_complete_cb = req->req_complete_cb;
-            request->req_complete_cb_data = req->req_complete_cb_data;
-            req->req_complete_cb = complete_vecs_callback;
-            req->req_complete_cb_data = request;
-        }
+    if (OPAL_LIKELY(retain)) {
+        nbc_install_callbacks(request);
     }
     return OMPI_SUCCESS;
 }
@@ -355,27 +412,16 @@ int ompi_coll_base_add_release_arrays_cb(ompi_request_t *req)
 
     assert(NULL != request);
 
-    if (req->req_persistent && (NULL == req->req_free)) {
-        request->cb.req_free = req->req_free;
-        req->req_free = free_objs_callback;
-    } else if(NULL == req->req_complete_cb) {
-        request->cb.req_complete_cb = req->req_complete_cb;
-        request->req_complete_cb_data = req->req_complete_cb_data;
-        req->req_complete_cb = complete_objs_callback;
-        req->req_complete_cb_data = request;
-    }
+    nbc_install_callbacks(request);
     return OMPI_SUCCESS;
 }
 
 static void nbc_req_constructor(ompi_coll_base_nbc_request_t *req)
 {
-    req->cb.req_complete_cb = NULL;
-    req->req_complete_cb_data = NULL;
-    req->data.refcounted.objs.objs[0] = NULL;
-    req->data.refcounted.objs.objs[1] = NULL;
-    for (int i = 0; i < OMPI_REQ_NB_RELEASE_ARRAYS; i++ ) {
-        req->data.release_arrays[i] = NULL;
-    }
+    req->saved_complete_cb = NULL;
+    req->saved_complete_cb_data = NULL;
+    req->saved_free_fn = NULL;
+    req->args = (ompi_coll_args_t) { 0 };
 }
 
 OBJ_CLASS_INSTANCE(ompi_coll_base_nbc_request_t, ompi_request_t, nbc_req_constructor, NULL);

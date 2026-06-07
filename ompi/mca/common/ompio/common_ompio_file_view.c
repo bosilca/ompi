@@ -15,6 +15,7 @@
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * Copyright (c) 2023      Advanced Micro Devices, Inc. All rights reserved.
  * Copyright (c) 2026      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -401,11 +402,9 @@ OMPI_MPI_OFFSET_TYPE get_contiguous_chunk_size (ompio_file_t *fh, int flag)
         avg[1] = (OMPI_MPI_OFFSET_TYPE) fh->f_fview.f_iov_count;
         avg[2] = (OMPI_MPI_OFFSET_TYPE) fh->f_fview.f_view_size;
         
-        fh->f_comm->c_coll->coll_allreduce (avg,
-                                            global_avg,
-                                            3,
-                                            OMPI_OFFSET_DATATYPE,
-                                            MPI_SUM,
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_allreduce(&coll_args, avg, global_avg, 3, OMPI_OFFSET_DATATYPE, MPI_SUM);
+        fh->f_comm->c_coll->coll_allreduce (&coll_args,
                                             fh->f_comm,
                                             fh->f_comm->c_coll->coll_allreduce_module);
         global_avg[0] = global_avg[0]/fh->f_size;

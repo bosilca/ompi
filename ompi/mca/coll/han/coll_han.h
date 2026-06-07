@@ -9,6 +9,7 @@
  * Copyright (c) 2023      Computer Architecture and VLSI Systems (CARV)
  *                         Laboratory, ICS Forth. All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -282,7 +283,7 @@ typedef struct mca_coll_han_op_module_name_t {
  */
 typedef struct mca_coll_han_component_t {
     /** Base coll component */
-    mca_coll_base_component_3_0_0_t super;
+    mca_coll_base_component_4_0_0_t super;
 
     /** MCA parameter: Priority of this component */
     int han_priority;
@@ -385,18 +386,18 @@ typedef struct mca_coll_han_single_collective_fallback_s
 {
     union
     {
-        mca_coll_base_module_alltoall_fn_t alltoall;
-        mca_coll_base_module_alltoallv_fn_t alltoallv;
-        mca_coll_base_module_allgather_fn_t allgather;
-        mca_coll_base_module_allgatherv_fn_t allgatherv;
-        mca_coll_base_module_allreduce_fn_t allreduce;
-        mca_coll_base_module_barrier_fn_t barrier;
-        mca_coll_base_module_bcast_fn_t bcast;
-        mca_coll_base_module_gather_fn_t gather;
-        mca_coll_base_module_gatherv_fn_t gatherv;
-        mca_coll_base_module_reduce_fn_t reduce;
-        mca_coll_base_module_scatter_fn_t scatter;
-        mca_coll_base_module_scatterv_fn_t scatterv;
+        mca_coll_base_module_coll_fn_t alltoall;
+        mca_coll_base_module_coll_fn_t alltoallv;
+        mca_coll_base_module_coll_fn_t allgather;
+        mca_coll_base_module_coll_fn_t allgatherv;
+        mca_coll_base_module_coll_fn_t allreduce;
+        mca_coll_base_module_coll_fn_t barrier;
+        mca_coll_base_module_coll_fn_t bcast;
+        mca_coll_base_module_coll_fn_t gather;
+        mca_coll_base_module_coll_fn_t gatherv;
+        mca_coll_base_module_coll_fn_t reduce;
+        mca_coll_base_module_coll_fn_t scatter;
+        mca_coll_base_module_coll_fn_t scatterv;
     };
     mca_coll_base_module_t* module;
 } mca_coll_han_single_collective_fallback_t;
@@ -444,9 +445,9 @@ typedef struct mca_coll_han_module_t {
     mca_coll_han_collectives_fallback_t fallback;
 
     /* To be able to fallback on reproducible algorithm */
-    mca_coll_base_module_reduce_fn_t reproducible_reduce;
+    mca_coll_base_module_coll_fn_t reproducible_reduce;
     mca_coll_base_module_t *reproducible_reduce_module;
-    mca_coll_base_module_allreduce_fn_t reproducible_allreduce;
+    mca_coll_base_module_coll_fn_t reproducible_allreduce;
     mca_coll_base_module_t *reproducible_allreduce_module;
 
     /* Topological level of this communicator */
@@ -639,47 +640,46 @@ mca_coll_han_get_all_coll_modules(struct ompi_communicator_t *comm,
                                   mca_coll_han_module_t *han_module);
 
 int
-mca_coll_han_alltoall_intra_dynamic(ALLTOALL_BASE_ARGS,
+mca_coll_han_alltoall_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                     mca_coll_base_module_t *module);
 int
-mca_coll_han_alltoallv_intra_dynamic(ALLTOALLV_BASE_ARGS,
+mca_coll_han_alltoallv_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                     mca_coll_base_module_t *module);
 int
-mca_coll_han_allgather_intra_dynamic(ALLGATHER_BASE_ARGS,
+mca_coll_han_allgather_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                      mca_coll_base_module_t *module);
 int
-mca_coll_han_allgatherv_intra_dynamic(ALLGATHERV_BASE_ARGS,
+mca_coll_han_allgatherv_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                       mca_coll_base_module_t *module);
 int
-mca_coll_han_allreduce_intra_dynamic(ALLREDUCE_BASE_ARGS,
+mca_coll_han_allreduce_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                      mca_coll_base_module_t *module);
 int
-mca_coll_han_barrier_intra_dynamic(BARRIER_BASE_ARGS,
+mca_coll_han_barrier_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                  mca_coll_base_module_t *module);
 int
-mca_coll_han_bcast_intra_dynamic(BCAST_BASE_ARGS,
+mca_coll_han_bcast_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                  mca_coll_base_module_t *module);
 int
-mca_coll_han_gather_intra_dynamic(GATHER_BASE_ARGS,
+mca_coll_han_gather_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                   mca_coll_base_module_t *module);
 int
-mca_coll_han_gatherv_intra_dynamic(GATHERV_BASE_ARGS,
+mca_coll_han_gatherv_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                    mca_coll_base_module_t *module);
 int
-mca_coll_han_reduce_intra_dynamic(REDUCE_BASE_ARGS,
+mca_coll_han_reduce_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                   mca_coll_base_module_t *module);
 int
-mca_coll_han_scatter_intra_dynamic(SCATTER_BASE_ARGS,
+mca_coll_han_scatter_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                    mca_coll_base_module_t *module);
 int
-mca_coll_han_scatterv_intra_dynamic(SCATTERV_BASE_ARGS,
+mca_coll_han_scatterv_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm,
                                     mca_coll_base_module_t *module);
 int
 mca_coll_han_revoke_local(struct ompi_communicator_t *comm,
                           mca_coll_base_module_t *module);
 
-int mca_coll_han_barrier_intra_simple(struct ompi_communicator_t *comm,
-                                      mca_coll_base_module_t *module);
+int mca_coll_han_barrier_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* reordering after gather, for unordered ranks */
 void

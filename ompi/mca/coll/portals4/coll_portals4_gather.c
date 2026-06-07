@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015      Sandia National Laboratories. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  * 
  * Additional copyrights may follow
@@ -1212,11 +1213,7 @@ err_hdlr:
 }
 
 int
-ompi_coll_portals4_gather_intra(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                                void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                                int root,
-                                struct ompi_communicator_t *comm,
-                                mca_coll_base_module_t *module)
+ompi_coll_portals4_gather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int ret, line;
 
@@ -1241,9 +1238,9 @@ ompi_coll_portals4_gather_intra(const void *sbuf, size_t scount, struct ompi_dat
      *  will be called to wait for completion.
      */
     if (1 == mca_coll_portals4_component.use_binomial_gather_algorithm) {
-        ret = ompi_coll_portals4_gather_intra_binomial_top(sbuf, scount, sdtype,
-                                                           rbuf, rcount, rdtype,
-                                                           root,
+        ret = ompi_coll_portals4_gather_intra_binomial_top(args->src.info.buffer, args->src.info.count, args->src.info.datatype,
+                                                           args->dst.info.buffer, args->dst.info.count, args->dst.info.datatype,
+                                                           args->root,
                                                            comm,
                                                            request,
                                                            module);
@@ -1252,9 +1249,9 @@ ompi_coll_portals4_gather_intra(const void *sbuf, size_t scount, struct ompi_dat
         ret = ompi_coll_portals4_gather_intra_binomial_bottom(comm, request);
         if (MPI_SUCCESS != ret) { line = __LINE__; goto err_hdlr; }
     } else {
-        ret = ompi_coll_portals4_gather_intra_linear_top(sbuf, scount, sdtype,
-                                                         rbuf, rcount, rdtype,
-                                                         root,
+        ret = ompi_coll_portals4_gather_intra_linear_top(args->src.info.buffer, args->src.info.count, args->src.info.datatype,
+                                                         args->dst.info.buffer, args->dst.info.count, args->dst.info.datatype,
+                                                         args->root,
                                                          comm,
                                                          request,
                                                          module);
@@ -1284,16 +1281,12 @@ err_hdlr:
 
 
 int
-ompi_coll_portals4_igather_intra(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                                 void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                                 int root,
-                                 struct ompi_communicator_t *comm,
-                                 ompi_request_t **ompi_request,
-                                 mca_coll_base_module_t *module)
+ompi_coll_portals4_igather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
+    ompi_request_t **ompi_request = request;
     int ret, line;
 
-    ompi_coll_portals4_request_t *request;
+    ompi_coll_portals4_request_t *p4_request;
 
     OPAL_OUTPUT_VERBOSE((10, ompi_coll_base_framework.framework_output,
                  "coll:portals4:igather_intra enter rank %d", ompi_comm_rank(comm)));
@@ -1301,12 +1294,12 @@ ompi_coll_portals4_igather_intra(const void *sbuf, size_t scount, struct ompi_da
     /*
      *  allocate a portals4 request
      */
-    OMPI_COLL_PORTALS4_REQUEST_ALLOC(comm, request);
-    if (NULL == request) {
+    OMPI_COLL_PORTALS4_REQUEST_ALLOC(comm, p4_request);
+    if (NULL == p4_request) {
         ret = OMPI_ERR_TEMP_OUT_OF_RESOURCE; line = __LINE__; goto err_hdlr;
     }
-    *ompi_request = &request->super;
-    request->u.gather.is_sync = 0;
+    *ompi_request = &p4_request->super;
+    p4_request->u.gather.is_sync = 0;
 
     /*
      *  initiate the gather
@@ -1315,32 +1308,32 @@ ompi_coll_portals4_igather_intra(const void *sbuf, size_t scount, struct ompi_da
      *  portals4_progress() will handle completion.
      */
     if (1 == mca_coll_portals4_component.use_binomial_gather_algorithm) {
-        ret = ompi_coll_portals4_gather_intra_binomial_top(sbuf, scount, sdtype,
-                                                           rbuf, rcount, rdtype,
-                                                           root,
+        ret = ompi_coll_portals4_gather_intra_binomial_top(args->src.info.buffer, args->src.info.count, args->src.info.datatype,
+                                                           args->dst.info.buffer, args->dst.info.count, args->dst.info.datatype,
+                                                           args->root,
                                                            comm,
-                                                           request,
+                                                           p4_request,
                                                            module);
         if (MPI_SUCCESS != ret) { line = __LINE__; goto err_hdlr; }
     } else {
-        ret = ompi_coll_portals4_gather_intra_linear_top(sbuf, scount, sdtype,
-                                                         rbuf, rcount, rdtype,
-                                                         root,
+        ret = ompi_coll_portals4_gather_intra_linear_top(args->src.info.buffer, args->src.info.count, args->src.info.datatype,
+                                                         args->dst.info.buffer, args->dst.info.count, args->dst.info.datatype,
+                                                         args->root,
                                                          comm,
-                                                         request,
+                                                         p4_request,
                                                          module);
         if (MPI_SUCCESS != ret) { line = __LINE__; goto err_hdlr; }
     }
 
     OPAL_OUTPUT_VERBOSE((10, ompi_coll_base_framework.framework_output,
-                 "coll:portals4:igather_intra exit rank %d", request->u.gather.my_rank));
+                 "coll:portals4:igather_intra exit rank %d", p4_request->u.gather.my_rank));
 
     return OMPI_SUCCESS;
 
 err_hdlr:
     opal_output(ompi_coll_base_framework.framework_output,
             "%s:%4d:%4d\tError occurred ret=%d, rank %2d",
-            __FILE__, __LINE__, line, ret, request->u.gather.my_rank);
+            __FILE__, __LINE__, line, ret, p4_request->u.gather.my_rank);
 
     return ret;
 }

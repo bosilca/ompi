@@ -13,6 +13,7 @@
  * Copyright (c) 2016      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -41,11 +42,9 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_bcast_log_intra(void *buff, size_t count,
-                               struct ompi_datatype_t *datatype, int root,
-                               struct ompi_communicator_t *comm,
-                               mca_coll_base_module_t *module)
+mca_coll_basic_bcast_log_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    int root = args->root;
     int i;
     int size;
     int rank;
@@ -72,7 +71,8 @@ mca_coll_basic_bcast_log_intra(void *buff, size_t count,
         assert(hibit >= 0);
         peer = ((vrank & ~(1 << hibit)) + root) % size;
 
-        err = MCA_PML_CALL(recv(buff, count, datatype, peer,
+        err = MCA_PML_CALL(recv(args->src.info.buffer, args->src.info.count,
+                                args->src.info.datatype, peer,
                                 MCA_COLL_BASE_TAG_BCAST,
                                 comm, MPI_STATUS_IGNORE));
         if (MPI_SUCCESS != err) {
@@ -94,7 +94,8 @@ mca_coll_basic_bcast_log_intra(void *buff, size_t count,
             peer = (peer + root) % size;
             ++nreqs;
 
-            err = MCA_PML_CALL(isend(buff, count, datatype, peer,
+            err = MCA_PML_CALL(isend(args->src.info.buffer, args->src.info.count,
+                                     args->src.info.datatype, peer,
                                      MCA_COLL_BASE_TAG_BCAST,
                                      MCA_PML_BASE_SEND_STANDARD,
                                      comm, preq++));
@@ -136,11 +137,9 @@ mca_coll_basic_bcast_log_intra(void *buff, size_t count,
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_bcast_lin_inter(void *buff, size_t count,
-                               struct ompi_datatype_t *datatype, int root,
-                               struct ompi_communicator_t *comm,
-                               mca_coll_base_module_t *module)
+mca_coll_basic_bcast_lin_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    int root = args->root;
     int i;
     int rsize;
     int err;
@@ -153,7 +152,8 @@ mca_coll_basic_bcast_lin_inter(void *buff, size_t count,
         err = OMPI_SUCCESS;
     } else if (MPI_ROOT != root) {
         /* Non-root receive the data. */
-        err = MCA_PML_CALL(recv(buff, count, datatype, root,
+        err = MCA_PML_CALL(recv(args->src.info.buffer, args->src.info.count,
+                                args->src.info.datatype, root,
                                 MCA_COLL_BASE_TAG_BCAST, comm,
                                 MPI_STATUS_IGNORE));
     } else {
@@ -162,7 +162,8 @@ mca_coll_basic_bcast_lin_inter(void *buff, size_t count,
 
         /* root section */
         for (i = 0; i < rsize; i++) {
-            err = MCA_PML_CALL(isend(buff, count, datatype, i,
+            err = MCA_PML_CALL(isend(args->src.info.buffer, args->src.info.count,
+                                     args->src.info.datatype, i,
                                      MCA_COLL_BASE_TAG_BCAST,
                                      MCA_PML_BASE_SEND_STANDARD,
                                      comm, &(reqs[i])));

@@ -14,6 +14,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -43,13 +44,13 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_inter_allgather_inter(const void *sbuf, size_t scount,
-                               struct ompi_datatype_t *sdtype,
-                               void *rbuf, size_t rcount,
-                               struct ompi_datatype_t *rdtype,
-                               struct ompi_communicator_t *comm,
-                               mca_coll_base_module_t *module)
+mca_coll_inter_allgather_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     int rank, root = 0, size, rsize, err = OMPI_SUCCESS, i;
     char *ptmp_free = NULL, *ptmp = NULL;
     ptrdiff_t gap, span;
@@ -68,9 +69,9 @@ mca_coll_inter_allgather_inter(const void *sbuf, size_t scount,
 	    }
         ptmp = ptmp_free - gap;
 
-	    err = comm->c_local_comm->c_coll->coll_gather(sbuf, scount, sdtype,
-						     ptmp, scount, sdtype,
-						     0, comm->c_local_comm,
+	    ompi_coll_args_t _g;
+	    ompi_coll_args_gather(&_g, args->src.info.buffer, scount, sdtype, ptmp, scount, sdtype, 0);
+	    err = comm->c_local_comm->c_coll->coll_gather(&_g, comm->c_local_comm,
 						     comm->c_local_comm->c_coll->coll_gather_module);
 	    if (OMPI_SUCCESS != err) {
 	        goto exit;
@@ -97,16 +98,18 @@ mca_coll_inter_allgather_inter(const void *sbuf, size_t scount,
             span = opal_datatype_span(&rdtype->super, rcount, &gap);
             for( i = 0; i < rsize; ++i) {
                 rbuf_ptr = (char*)rbuf + span * (size_t)i;
-                err = comm->c_local_comm->c_coll->coll_bcast(rbuf_ptr, rcount, rdtype,
-                                                             root, comm->c_local_comm,
+                ompi_coll_args_t _b;
+                ompi_coll_args_bcast(&_b, rbuf_ptr, rcount, rdtype, root);
+                err = comm->c_local_comm->c_coll->coll_bcast(&_b, comm->c_local_comm,
                                                              comm->c_local_comm->c_coll->coll_bcast_module);
                 if (OMPI_SUCCESS != err) {
                     goto exit;
                 }
             }
         } else {
-            err = comm->c_local_comm->c_coll->coll_bcast(rbuf, rcount*rsize, rdtype,
-                                                         root, comm->c_local_comm,
+            ompi_coll_args_t _b;
+            ompi_coll_args_bcast(&_b, rbuf, rcount*rsize, rdtype, root);
+            err = comm->c_local_comm->c_coll->coll_bcast(&_b, comm->c_local_comm,
                                                          comm->c_local_comm->c_coll->coll_bcast_module);
             if (OMPI_SUCCESS != err) {
                 goto exit;

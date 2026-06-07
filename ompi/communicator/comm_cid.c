@@ -1101,8 +1101,10 @@ static int ompi_comm_allreduce_intra_nb (int *inbuf, int *outbuf, int count, str
                                          ompi_comm_cid_context_t *context, ompi_request_t **req)
 {
     ompi_communicator_t *comm = context->comm;
+    ompi_coll_args_t coll_args;
 
-    return comm->c_coll->coll_iallreduce (inbuf, outbuf, count, MPI_INT, op, comm,
+    ompi_coll_args_allreduce(&coll_args, inbuf, outbuf, count, MPI_INT, op);
+    return comm->c_coll->coll_iallreduce (&coll_args, comm,
                                          req, comm->c_coll->coll_iallreduce_module);
 }
 
@@ -1121,6 +1123,7 @@ static int ompi_comm_allreduce_inter_nb (int *inbuf, int *outbuf,
     ompi_comm_request_t *request;
     ompi_request_t *subreq;
     int local_rank, rc;
+    ompi_coll_args_t coll_args;
 
     if (!OMPI_COMM_IS_INTER (cid_context->comm)) {
         return MPI_ERR_COMM;
@@ -1152,7 +1155,8 @@ static int ompi_comm_allreduce_inter_nb (int *inbuf, int *outbuf,
 
     /* Execute the inter-allreduce: the result from the local will be in the buffer of the remote group
      * and vise-versa. */
-    rc = intercomm->c_local_comm->c_coll->coll_ireduce (inbuf, context->tmpbuf, count, MPI_INT, op, 0,
+    ompi_coll_args_reduce (&coll_args, inbuf, context->tmpbuf, count, MPI_INT, op, 0);
+    rc = intercomm->c_local_comm->c_coll->coll_ireduce (&coll_args,
                                                        intercomm->c_local_comm, &subreq,
                                                        intercomm->c_local_comm->c_coll->coll_ireduce_module);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
@@ -1213,9 +1217,11 @@ static int ompi_comm_allreduce_inter_bcast (ompi_comm_request_t *request)
     ompi_communicator_t *comm = context->cid_context->comm->c_local_comm;
     ompi_request_t *subreq;
     int rc;
+    ompi_coll_args_t coll_args;
 
     /* both roots have the same result. broadcast to the local group */
-    rc = comm->c_coll->coll_ibcast (context->outbuf, context->count, MPI_INT, 0, comm,
+    ompi_coll_args_bcast (&coll_args, context->outbuf, context->count, MPI_INT, 0);
+    rc = comm->c_coll->coll_ibcast (&coll_args, comm,
                                    &subreq, comm->c_coll->coll_ibcast_module);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
         return rc;
@@ -1230,9 +1236,11 @@ static int ompi_comm_allreduce_bridged_schedule_bcast (ompi_comm_request_t *requ
     ompi_communicator_t *comm = context->cid_context->comm;
     ompi_request_t *subreq;
     int rc;
+    ompi_coll_args_t coll_args;
 
-    rc = comm->c_coll->coll_ibcast (context->outbuf, context->count, MPI_INT,
-                                   context->cid_context->local_leader, comm,
+    ompi_coll_args_bcast (&coll_args, context->outbuf, context->count, MPI_INT,
+                          context->cid_context->local_leader);
+    rc = comm->c_coll->coll_ibcast (&coll_args, comm,
                                    &subreq, comm->c_coll->coll_ibcast_module);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
         return rc;
@@ -1287,6 +1295,7 @@ static int ompi_comm_allreduce_intra_bridge_nb (int *inbuf, int *outbuf,
     ompi_comm_request_t *request;
     ompi_request_t *subreq;
     int rc;
+    ompi_coll_args_t coll_args;
 
     context = ompi_comm_allreduce_context_alloc (inbuf, outbuf, count, op, cid_context);
     if (OPAL_UNLIKELY(NULL == context)) {
@@ -1314,8 +1323,9 @@ static int ompi_comm_allreduce_intra_bridge_nb (int *inbuf, int *outbuf,
     }
 
     /* step 1: reduce to the local leader */
-    rc = comm->c_coll->coll_ireduce (inbuf, context->tmpbuf, count, MPI_INT, op,
-                                    cid_context->local_leader, comm, &subreq,
+    ompi_coll_args_reduce (&coll_args, inbuf, context->tmpbuf, count, MPI_INT, op,
+                           cid_context->local_leader);
+    rc = comm->c_coll->coll_ireduce (&coll_args, comm, &subreq,
                                     comm->c_coll->coll_ireduce_module);
     if ( OMPI_SUCCESS != rc ) {
         ompi_comm_request_return (request);
@@ -1446,6 +1456,7 @@ static int ompi_comm_allreduce_intra_pmix_nb (int *inbuf, int *outbuf,
     ompi_comm_request_t *request;
     ompi_request_t *subreq;
     int rc;
+    ompi_coll_args_t coll_args;
 
     context = ompi_comm_allreduce_context_alloc (inbuf, outbuf, count, op, cid_context);
     if (OPAL_UNLIKELY(NULL == context)) {
@@ -1469,8 +1480,9 @@ static int ompi_comm_allreduce_intra_pmix_nb (int *inbuf, int *outbuf,
     request->context = &context->super;
 
     /* comm is an intra-communicator */
-    rc = comm->c_coll->coll_ireduce (inbuf, context->tmpbuf, count, MPI_INT, op,
-                                    cid_context->local_leader, comm,
+    ompi_coll_args_reduce (&coll_args, inbuf, context->tmpbuf, count, MPI_INT, op,
+                           cid_context->local_leader);
+    rc = comm->c_coll->coll_ireduce (&coll_args, comm,
                                     &subreq, comm->c_coll->coll_ireduce_module);
     if ( OMPI_SUCCESS != rc ) {
         ompi_comm_request_return (request);
@@ -1637,9 +1649,11 @@ static int ompi_comm_ft_allreduce_agree_completion(ompi_comm_request_t* request)
     if(OPAL_UNLIKELY( MPI_ERR_PROC_FAILED == rc )) {
         ompi_communicator_t *comm = context->cid_context->comm;
         ompi_request_t *subreq;
+        ompi_coll_args_t coll_args;
         OPAL_OUTPUT_VERBOSE((2, ompi_ftmpi_output_handle, "ft_allreduce found a dead process during previous round; redo"));
-        rc = comm->c_coll->coll_iagree(context->outbuf, context->count, &ompi_mpi_int.dt, context->op,
-                                       failed_group, true,
+        ompi_coll_args_agree(&coll_args, context->outbuf, context->count, &ompi_mpi_int.dt,
+                             context->op, failed_group, true);
+        rc = comm->c_coll->coll_iagree(&coll_args,
                                        comm, &subreq, comm->c_coll->coll_iagree_module);
         if( OPAL_LIKELY(OMPI_SUCCESS == rc) ) {
             request->super.req_status.MPI_ERROR = MPI_SUCCESS;
@@ -1658,6 +1672,7 @@ static int ompi_comm_ft_allreduce_intra_nb(int *inbuf, int *outbuf, int count,
     ompi_comm_request_t *request;
     ompi_request_t *subreq;
     ompi_communicator_t *comm = cid_context->comm;
+    ompi_coll_args_t coll_args;
 
     context = ompi_comm_allreduce_context_alloc(inbuf, outbuf, count, op, cid_context);
     if(OPAL_UNLIKELY( NULL == context )) {
@@ -1685,8 +1700,9 @@ static int ompi_comm_ft_allreduce_intra_nb(int *inbuf, int *outbuf, int count,
     ompi_group_intersection(comm->c_remote_group, ompi_group_all_failed_procs, failed_group);
     opal_mutex_unlock(&ompi_group_afp_mutex);
 
-    rc = comm->c_coll->coll_iagree(context->outbuf, context->count, &ompi_mpi_int.dt, context->op,
-                                   failed_group, true,
+    ompi_coll_args_agree(&coll_args, context->outbuf, context->count, &ompi_mpi_int.dt,
+                         context->op, failed_group, true);
+    rc = comm->c_coll->coll_iagree(&coll_args,
                                    comm, &subreq, comm->c_coll->coll_iagree_module);
     if( OPAL_UNLIKELY(OMPI_SUCCESS != rc) ) {
         OBJ_RELEASE(*failed_group);

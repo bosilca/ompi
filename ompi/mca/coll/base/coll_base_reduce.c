@@ -19,6 +19,7 @@
  *                         and Information Science. All rights reserved.
  * Copyright (c) 2022      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2024      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -41,12 +42,11 @@
 #include "coll_base_topo.h"
 #include "coll_base_util.h"
 
-int mca_coll_base_reduce_local(const void *inbuf, void *inoutbuf, size_t count,
-                               struct ompi_datatype_t * dtype, struct ompi_op_t * op,
-                               mca_coll_base_module_t *module)
+int mca_coll_base_reduce_local(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     /* XXX -- CONST -- do not cast away const -- update ompi/op/op.h */
-    ompi_op_reduce(op, (void *)inbuf, inoutbuf, count, dtype);
+    ompi_op_reduce(args->op, (void *) args->src.info.buffer, args->dst.info.buffer,
+                   args->dst.info.count, args->dst.info.datatype);
     return OMPI_SUCCESS;
 }
 
@@ -61,13 +61,14 @@ int mca_coll_base_reduce_local(const void *inbuf, void *inoutbuf, size_t count,
  * for the first block: thus we must copy sendbuf to accumbuf on intermediate
  * to keep the optimized loop happy.
  */
-int ompi_coll_base_reduce_generic( const void* sendbuf, void* recvbuf, size_t original_count,
-                                    ompi_datatype_t* datatype, ompi_op_t* op,
-                                    int root, ompi_communicator_t* comm,
-                                    mca_coll_base_module_t *module,
+int ompi_coll_base_reduce_generic( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                     ompi_coll_tree_t* tree, size_t count_by_segment,
                                     int max_outstanding_reqs )
 {
+    const void* sendbuf = (const void *) args->src.info.buffer;
+    size_t original_count = args->dst.info.count;
+    ompi_datatype_t* datatype = args->dst.info.datatype;
+    ompi_op_t* op = args->op;
     char *inbuf[2] = {NULL, NULL}, *inbuf_free[2] = {NULL, NULL};
     char *accumbuf = NULL, *accumbuf_free = NULL;
     char *local_op_buffer = NULL, *sendtmpbuf = NULL;
@@ -86,7 +87,7 @@ int ompi_coll_base_reduce_generic( const void* sendbuf, void* recvbuf, size_t or
 
     sendtmpbuf = (char*) sendbuf;
     if( sendbuf == MPI_IN_PLACE ) {
-        sendtmpbuf = (char *)recvbuf;
+        sendtmpbuf = (char *)args->dst.info.buffer;
     }
 
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output, "coll:base:reduce_generic count %zu, msg size %ld, segsize %ld, max_requests %d",
@@ -102,8 +103,8 @@ int ompi_coll_base_reduce_generic( const void* sendbuf, void* recvbuf, size_t or
 
         /* handle non existent recv buffer (i.e. its NULL) and
            protect the recv buffer on non-root nodes */
-        accumbuf = (char*)recvbuf;
-        if( (NULL == accumbuf) || (root != rank) ) {
+        accumbuf = (char*)args->dst.info.buffer;
+        if( (NULL == accumbuf) || (args->root != rank) ) {
             /* Allocate temporary accumulator buffer. */
             size = opal_datatype_span(&datatype->super, original_count, &gap);
             accumbuf_free = (char*)malloc(size);
@@ -382,45 +383,36 @@ int ompi_coll_base_reduce_generic( const void* sendbuf, void* recvbuf, size_t or
      meaning that at least one datatype must fit in the segment !
 */
 
-int ompi_coll_base_reduce_intra_chain( const void *sendbuf, void *recvbuf, size_t count,
-                                        ompi_datatype_t* datatype,
-                                        ompi_op_t* op, int root,
-                                        ompi_communicator_t* comm,
-                                        mca_coll_base_module_t *module,
+int ompi_coll_base_reduce_intra_chain( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                         uint32_t segsize, int fanout,
                                         int max_outstanding_reqs )
 {
-    size_t segcount = count;
+    size_t segcount = args->dst.info.count;
     size_t typelng;
     mca_coll_base_module_t *base_module = (mca_coll_base_module_t*) module;
     mca_coll_base_comm_t *data = base_module->base_data;
 
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"coll:base:reduce_intra_chain rank %d fo %d ss %5d", ompi_comm_rank(comm), fanout, segsize));
 
-    COLL_BASE_UPDATE_CHAIN( comm, base_module, root, fanout );
+    COLL_BASE_UPDATE_CHAIN( comm, base_module, args->root, fanout );
     /**
      * Determine number of segments and number of elements
      * sent per operation
      */
-    ompi_datatype_type_size( datatype, &typelng );
+    ompi_datatype_type_size( args->dst.info.datatype, &typelng );
     COLL_BASE_COMPUTED_SEGCOUNT( segsize, typelng, segcount );
 
-    return ompi_coll_base_reduce_generic( sendbuf, recvbuf, count, datatype,
-                                           op, root, comm, module,
+    return ompi_coll_base_reduce_generic( args, comm, module,
                                            data->cached_chain,
                                            segcount, max_outstanding_reqs );
 }
 
 
-int ompi_coll_base_reduce_intra_pipeline( const void *sendbuf, void *recvbuf,
-                                           size_t count, ompi_datatype_t* datatype,
-                                           ompi_op_t* op, int root,
-                                           ompi_communicator_t* comm,
-                                           mca_coll_base_module_t *module,
+int ompi_coll_base_reduce_intra_pipeline( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                            uint32_t segsize,
                                            int max_outstanding_reqs  )
 {
-    size_t segcount = count;
+    size_t segcount = args->dst.info.count;
     size_t typelng;
     mca_coll_base_module_t *base_module = (mca_coll_base_module_t*) module;
     mca_coll_base_comm_t *data = base_module->base_data;
@@ -428,30 +420,25 @@ int ompi_coll_base_reduce_intra_pipeline( const void *sendbuf, void *recvbuf,
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"coll:base:reduce_intra_pipeline rank %d ss %5d",
                  ompi_comm_rank(comm), segsize));
 
-    COLL_BASE_UPDATE_PIPELINE( comm, base_module, root );
+    COLL_BASE_UPDATE_PIPELINE( comm, base_module, args->root );
 
     /**
      * Determine number of segments and number of elements
      * sent per operation
      */
-    ompi_datatype_type_size( datatype, &typelng );
+    ompi_datatype_type_size( args->dst.info.datatype, &typelng );
     COLL_BASE_COMPUTED_SEGCOUNT( segsize, typelng, segcount );
 
-    return ompi_coll_base_reduce_generic( sendbuf, recvbuf, count, datatype,
-                                           op, root, comm, module,
+    return ompi_coll_base_reduce_generic( args, comm, module,
                                            data->cached_pipeline,
                                            segcount, max_outstanding_reqs );
 }
 
-int ompi_coll_base_reduce_intra_binary( const void *sendbuf, void *recvbuf,
-                                         size_t count, ompi_datatype_t* datatype,
-                                         ompi_op_t* op, int root,
-                                         ompi_communicator_t* comm,
-                                         mca_coll_base_module_t *module,
+int ompi_coll_base_reduce_intra_binary( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                          uint32_t segsize,
                                          int max_outstanding_reqs  )
 {
-    size_t segcount = count;
+    size_t segcount = args->dst.info.count;
     size_t typelng;
     mca_coll_base_module_t *base_module = (mca_coll_base_module_t*) module;
     mca_coll_base_comm_t *data = base_module->base_data;
@@ -459,30 +446,25 @@ int ompi_coll_base_reduce_intra_binary( const void *sendbuf, void *recvbuf,
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"coll:base:reduce_intra_binary rank %d ss %5d",
                  ompi_comm_rank(comm), segsize));
 
-    COLL_BASE_UPDATE_BINTREE( comm, base_module, root );
+    COLL_BASE_UPDATE_BINTREE( comm, base_module, args->root );
 
     /**
      * Determine number of segments and number of elements
      * sent per operation
      */
-    ompi_datatype_type_size( datatype, &typelng );
+    ompi_datatype_type_size( args->dst.info.datatype, &typelng );
     COLL_BASE_COMPUTED_SEGCOUNT( segsize, typelng, segcount );
 
-    return ompi_coll_base_reduce_generic( sendbuf, recvbuf, count, datatype,
-                                           op, root, comm, module,
+    return ompi_coll_base_reduce_generic( args, comm, module,
                                            data->cached_bintree,
                                            segcount, max_outstanding_reqs );
 }
 
-int ompi_coll_base_reduce_intra_binomial( const void *sendbuf, void *recvbuf,
-                                           size_t count, ompi_datatype_t* datatype,
-                                           ompi_op_t* op, int root,
-                                           ompi_communicator_t* comm,
-                                           mca_coll_base_module_t *module,
+int ompi_coll_base_reduce_intra_binomial( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                            uint32_t segsize,
                                            int max_outstanding_reqs  )
 {
-    size_t segcount = count;
+    size_t segcount = args->dst.info.count;
     size_t typelng;
     mca_coll_base_module_t *base_module = (mca_coll_base_module_t*) module;
     mca_coll_base_comm_t *data = base_module->base_data;
@@ -490,17 +472,16 @@ int ompi_coll_base_reduce_intra_binomial( const void *sendbuf, void *recvbuf,
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"coll:base:reduce_intra_binomial rank %d ss %5d",
                  ompi_comm_rank(comm), segsize));
 
-    COLL_BASE_UPDATE_IN_ORDER_BMTREE( comm, base_module, root );
+    COLL_BASE_UPDATE_IN_ORDER_BMTREE( comm, base_module, args->root );
 
     /**
      * Determine number of segments and number of elements
      * sent per operation
      */
-    ompi_datatype_type_size( datatype, &typelng );
+    ompi_datatype_type_size( args->dst.info.datatype, &typelng );
     COLL_BASE_COMPUTED_SEGCOUNT( segsize, typelng, segcount );
 
-    return ompi_coll_base_reduce_generic( sendbuf, recvbuf, count, datatype,
-                                           op, root, comm, module,
+    return ompi_coll_base_reduce_generic( args, comm, module,
                                            data->cached_in_order_bmtree,
                                            segcount, max_outstanding_reqs );
 }
@@ -512,15 +493,14 @@ int ompi_coll_base_reduce_intra_binomial( const void *sendbuf, void *recvbuf,
  * Acecpts:       same as MPI_Reduce()
  * Returns:       MPI_SUCCESS or error code
  */
-int ompi_coll_base_reduce_intra_in_order_binary( const void *sendbuf, void *recvbuf,
-                                                  size_t count,
-                                                  ompi_datatype_t* datatype,
-                                                  ompi_op_t* op, int root,
-                                                  ompi_communicator_t* comm,
-                                                  mca_coll_base_module_t *module,
+int ompi_coll_base_reduce_intra_in_order_binary( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                                   uint32_t segsize,
                                                   int max_outstanding_reqs  )
 {
+    void *recvbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *datatype = args->dst.info.datatype;
+    int root = args->root;
     int ret, rank, size, io_root, segcount = count;
     void *use_this_sendbuf = NULL;
     void *use_this_recvbuf = NULL;
@@ -551,7 +531,7 @@ int ompi_coll_base_reduce_intra_in_order_binary( const void *sendbuf, void *recv
        operations for non-commutative ops.
     */
     io_root = size - 1;
-    use_this_sendbuf = (void *)sendbuf;
+    use_this_sendbuf = (void *) args->src.info.buffer;
     use_this_recvbuf = recvbuf;
     if (io_root != root) {
         ptrdiff_t dsize, gap = 0;
@@ -559,7 +539,7 @@ int ompi_coll_base_reduce_intra_in_order_binary( const void *sendbuf, void *recv
 
         dsize = opal_datatype_span(&datatype->super, count, &gap);
 
-        if ((root == rank) && (MPI_IN_PLACE == sendbuf)) {
+        if ((root == rank) && (MPI_IN_PLACE == args->src.info.buffer)) {
             tmpbuf_free = (char *) malloc(dsize);
             if (NULL == tmpbuf_free) {
                 return MPI_ERR_INTERN;
@@ -579,9 +559,13 @@ int ompi_coll_base_reduce_intra_in_order_binary( const void *sendbuf, void *recv
         }
     }
 
-    /* Use generic reduce with in-order binary tree topology and io_root */
-    ret = ompi_coll_base_reduce_generic( use_this_sendbuf, use_this_recvbuf, count, datatype,
-                                          op, io_root, comm, module,
+    /* Use generic reduce with in-order binary tree topology and io_root.
+       The buffers and root differ from this call's descriptor, so build a
+       fresh reduce descriptor for the forward. */
+    ompi_coll_args_t io_args;
+    ompi_coll_args_reduce(&io_args, use_this_sendbuf, use_this_recvbuf, count,
+                          datatype, args->op, io_root);
+    ret = ompi_coll_base_reduce_generic( &io_args, comm, module,
                                           data->cached_in_order_bintree,
                                           segcount, max_outstanding_reqs );
     if (MPI_SUCCESS != ret) {
@@ -639,13 +623,12 @@ int ompi_coll_base_reduce_intra_in_order_binary( const void *sendbuf, void *recv
  *  Returns:    - MPI_SUCCESS or error code
  */
 int
-ompi_coll_base_reduce_intra_basic_linear(const void *sbuf, void *rbuf, size_t count,
-                                         struct ompi_datatype_t *dtype,
-                                         struct ompi_op_t *op,
-                                         int root,
-                                         struct ompi_communicator_t *comm,
-                                         mca_coll_base_module_t *module)
+ompi_coll_base_reduce_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
     int i, rank, err, size;
     ptrdiff_t extent, dsize, gap = 0;
     char *free_buffer = NULL;
@@ -660,8 +643,8 @@ ompi_coll_base_reduce_intra_basic_linear(const void *sbuf, void *rbuf, size_t co
 
     /* If not root, send data to the root. */
 
-    if (rank != root) {
-        err = MCA_PML_CALL(send(sbuf, count, dtype, root,
+    if (rank != args->root) {
+        err = MCA_PML_CALL(send(sbuf, count, dtype, args->root,
                                 MCA_COLL_BASE_TAG_REDUCE,
                                 MCA_PML_BASE_SEND_STANDARD, comm));
         return err;
@@ -733,7 +716,7 @@ ompi_coll_base_reduce_intra_basic_linear(const void *sbuf, void *rbuf, size_t co
 
         /* Perform the reduction */
 
-        ompi_op_reduce(op, inbuf, rbuf, count, dtype);
+        ompi_op_reduce(args->op, inbuf, rbuf, count, dtype);
     }
 
     if (NULL != inplace_temp_free) {
@@ -810,10 +793,13 @@ ompi_coll_base_reduce_intra_basic_linear(const void *sbuf, void *rbuf, size_t co
  *                  in the root process.
  */
 int ompi_coll_base_reduce_intra_redscat_gather(
-    const void *sbuf, void *rbuf, size_t count, struct ompi_datatype_t *dtype,
-    struct ompi_op_t *op, int root, struct ompi_communicator_t *comm,
-    mca_coll_base_module_t *module)
+    ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
+    int root = args->root;
     int comm_size = ompi_comm_size(comm);
     int rank = ompi_comm_rank(comm);
 
@@ -832,8 +818,7 @@ int ompi_coll_base_reduce_intra_redscat_gather(
         OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
                      "coll:base:reduce_intra_redscat_gather: rank %d/%d count %zu"
                      "switching to basic linear reduce", rank, comm_size, count));
-        return ompi_coll_base_reduce_intra_basic_linear(sbuf, rbuf, count, dtype,
-                                                        op, root, comm, module);
+        return ompi_coll_base_reduce_intra_basic_linear(args, comm, module);
     }
 
     int err = MPI_SUCCESS;
@@ -860,9 +845,9 @@ int ompi_coll_base_reduce_intra_redscat_gather(
         rbuf = rbuf_raw - gap;
     }
 
-    if ((rank != root) || (sbuf != MPI_IN_PLACE)) {
+    if ((rank != root) || (args->src.info.buffer != MPI_IN_PLACE)) {
         err = ompi_datatype_copy_content_same_ddt(dtype, count, rbuf,
-                                                  (char *)sbuf);
+                                                  (char *)args->src.info.buffer);
         if (MPI_SUCCESS != err) { goto cleanup_and_return; }
     }
 
@@ -1164,14 +1149,13 @@ int ompi_coll_base_reduce_intra_redscat_gather(
  *     |
  *     7
  */
-int ompi_coll_base_reduce_intra_knomial( const void *sendbuf, void *recvbuf,
-                                           size_t count, ompi_datatype_t* datatype,
-                                           ompi_op_t* op, int root,
-                                           ompi_communicator_t* comm,
-                                           mca_coll_base_module_t *module,
+int ompi_coll_base_reduce_intra_knomial( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                            uint32_t segsize,
                                            int max_outstanding_reqs, int radix)
 {
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *datatype = args->dst.info.datatype;
+    int root = args->root;
     int err = OMPI_SUCCESS, rank, line;
     ptrdiff_t extent, lb;
     size_t dtype_size;
@@ -1210,9 +1194,9 @@ int ompi_coll_base_reduce_intra_knomial( const void *sendbuf, void *recvbuf,
     ompi_datatype_get_extent(datatype, &lb, &extent);
     ompi_datatype_type_size(datatype, &dtype_size);
 
-    sendtmpbuf = (char*) sendbuf;
-    if( sendbuf == MPI_IN_PLACE ) {
-        sendtmpbuf = (char *)recvbuf;
+    sendtmpbuf = (char*) args->src.info.buffer;
+    if( args->src.info.buffer == MPI_IN_PLACE ) {
+        sendtmpbuf = (char *) args->dst.info.buffer;
     }
     buf_size = opal_datatype_span(&datatype->super, (int64_t)count, &gap);
     reduce_buf = (char *)malloc(buf_size);
@@ -1250,7 +1234,7 @@ int ompi_coll_base_reduce_intra_knomial( const void *sendbuf, void *recvbuf,
     }
 
     for (int i = 0; i < num_children; i++) {
-        ompi_op_reduce(op,
+        ompi_op_reduce(args->op,
                        child_buf_start + (ptrdiff_t)i * count * extent,
                        reduce_buf,
                        count,
@@ -1270,7 +1254,7 @@ int ompi_coll_base_reduce_intra_knomial( const void *sendbuf, void *recvbuf,
 
     if (rank == root) {
         err = ompi_datatype_copy_content_same_ddt(datatype, count,
-                                                  (char*)recvbuf,
+                                                  (char*)args->dst.info.buffer,
                                                   (char*)reduce_buf_start);
         if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
     }

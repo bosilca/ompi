@@ -2,6 +2,7 @@
 /**
  * Copyright (c) 2021 Mellanox Technologies. All rights reserved.
  * Copyright (c) 2025      Fujitsu Limited. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -68,38 +69,25 @@ fallback:
     return UCC_ERR_NOT_SUPPORTED;
 }
 
-int mca_coll_ucc_alltoallv(const void *sbuf, ompi_count_array_t scounts,
-                           ompi_disp_array_t sdisps, struct ompi_datatype_t *sdtype,
-                           void* rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                           struct ompi_datatype_t *rdtype,
-                           struct ompi_communicator_t *comm,
-                           mca_coll_base_module_t *module)
+int mca_coll_ucc_alltoallv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*)module;
     ucc_coll_req_h         req;
 
     UCC_VERBOSE(3, "running ucc alltoallv");
 
-    COLL_UCC_CHECK(mca_coll_ucc_alltoallv_init_common(sbuf, scounts, sdisps, sdtype,
-                                                      rbuf, rcounts, rdisps, rdtype,
+    COLL_UCC_CHECK(mca_coll_ucc_alltoallv_init_common(args->src.info_v.buffer, args->src.info_v.counts, args->src.info_v.displacements, args->src.info_v.datatype,
+                                                      args->dst.info_v.buffer, args->dst.info_v.counts, args->dst.info_v.displacements, args->dst.info_v.datatype,
                                                       false, ucc_module, &req, NULL));
     COLL_UCC_POST_AND_CHECK(req);
     COLL_UCC_CHECK(coll_ucc_req_wait(req));
     return OMPI_SUCCESS;
 fallback:
     UCC_VERBOSE(3, "running fallback alltoallv");
-    return ucc_module->previous_alltoallv(sbuf, scounts, sdisps, sdtype,
-                                          rbuf, rcounts, rdisps, rdtype,
-                                          comm, ucc_module->previous_alltoallv_module);
+    return ucc_module->previous_alltoallv(args, comm, ucc_module->previous_alltoallv_module);
 }
 
-int mca_coll_ucc_ialltoallv(const void *sbuf, ompi_count_array_t scounts,
-                            ompi_disp_array_t sdisps, struct ompi_datatype_t *sdtype,
-                            void* rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                            struct ompi_datatype_t *rdtype,
-                            struct ompi_communicator_t *comm,
-                            ompi_request_t** request,
-                            mca_coll_base_module_t *module)
+int mca_coll_ucc_ialltoallv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*)module;
     ucc_coll_req_h         req;
@@ -107,8 +95,8 @@ int mca_coll_ucc_ialltoallv(const void *sbuf, ompi_count_array_t scounts,
 
     UCC_VERBOSE(3, "running ucc ialltoallv");
     COLL_UCC_GET_REQ(coll_req, comm);
-    COLL_UCC_CHECK(mca_coll_ucc_alltoallv_init_common(sbuf, scounts, sdisps, sdtype,
-                                                      rbuf, rcounts, rdisps, rdtype,
+    COLL_UCC_CHECK(mca_coll_ucc_alltoallv_init_common(args->src.info_v.buffer, args->src.info_v.counts, args->src.info_v.displacements, args->src.info_v.datatype,
+                                                      args->dst.info_v.buffer, args->dst.info_v.counts, args->dst.info_v.displacements, args->dst.info_v.datatype,
                                                       false, ucc_module, &req, coll_req));
     COLL_UCC_POST_AND_CHECK(req);
     *request = &coll_req->super;
@@ -118,17 +106,11 @@ fallback:
     if (coll_req) {
         mca_coll_ucc_req_free((ompi_request_t **)&coll_req);
     }
-    return ucc_module->previous_ialltoallv(sbuf, scounts, sdisps, sdtype,
-                                           rbuf, rcounts, rdisps, rdtype,
-                                           comm, request, ucc_module->previous_ialltoallv_module);
+    return ucc_module->previous_ialltoallv(args, comm, request,
+                                           ucc_module->previous_ialltoallv_module);
 }
 
-int mca_coll_ucc_alltoallv_init(const void *sbuf, ompi_count_array_t scounts,
-                                ompi_disp_array_t sdisps, struct ompi_datatype_t *sdtype,
-                                void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                                struct ompi_datatype_t *rdtype, struct ompi_communicator_t *comm,
-                                struct ompi_info_t *info, ompi_request_t **request,
-                                mca_coll_base_module_t *module)
+int mca_coll_ucc_alltoallv_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t *) module;
     ucc_coll_req_h req;
@@ -136,8 +118,8 @@ int mca_coll_ucc_alltoallv_init(const void *sbuf, ompi_count_array_t scounts,
 
     COLL_UCC_GET_REQ_PERSISTENT(coll_req, comm);
     UCC_VERBOSE(3, "alltoallv_init init %p", coll_req);
-    COLL_UCC_CHECK(mca_coll_ucc_alltoallv_init_common(sbuf, scounts, sdisps, sdtype,
-                                                      rbuf, rcounts, rdisps, rdtype,
+    COLL_UCC_CHECK(mca_coll_ucc_alltoallv_init_common(args->src.info_v.buffer, args->src.info_v.counts, args->src.info_v.displacements, args->src.info_v.datatype,
+                                                      args->dst.info_v.buffer, args->dst.info_v.counts, args->dst.info_v.displacements, args->dst.info_v.datatype,
                                                       true, ucc_module, &req, coll_req));
     *request = &coll_req->super;
     return OMPI_SUCCESS;
@@ -146,7 +128,6 @@ fallback:
     if (coll_req) {
         mca_coll_ucc_req_free((ompi_request_t **) &coll_req);
     }
-    return ucc_module->previous_alltoallv_init(sbuf, scounts, sdisps, sdtype, rbuf, rcounts, rdisps,
-                                               rdtype, comm, info, request,
+    return ucc_module->previous_alltoallv_init(args, comm, info, request,
                                                ucc_module->previous_alltoallv_init_module);
 }

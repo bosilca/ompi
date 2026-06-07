@@ -14,6 +14,7 @@
  * Copyright (c) 2018      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  *
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -158,13 +159,10 @@ int mca_common_ompio_print_time_info( struct mca_common_ompio_print_queue *q,
 	}
     }
 
-    ret = fh->f_comm->c_coll->coll_gather(time_details,
-                                         4,
-                                         MPI_DOUBLE,
-                                         final_time_details,
-                                         4,
-                                         MPI_DOUBLE,
-                                         0,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_gather(&coll_args, time_details, 4, MPI_DOUBLE,
+                          final_time_details, 4, MPI_DOUBLE, 0);
+    ret = fh->f_comm->c_coll->coll_gather(&coll_args,
                                          fh->f_comm,
                                          fh->f_comm->c_coll->coll_gather_module);
     

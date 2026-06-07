@@ -17,6 +17,7 @@
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -199,9 +200,11 @@ PROTOTYPE ERROR_CLASS scatterv_init(BUFFER sendbuf, COUNT_ARRAY sendcounts, DISP
     /* Invoke the coll component to perform the back-end operation */
     OMPI_COUNT_ARRAY_INIT(&sendcounts_desc, sendcounts);
     OMPI_DISP_ARRAY_INIT(&displs_desc, displs);
-    err = comm->c_coll->coll_scatterv_init(updated_sendbuf, sendcounts_desc, displs_desc,
-                                           sendtype, updated_recvbuf, recvcount, recvtype, root, comm,
-                                           info, request, comm->c_coll->coll_scatterv_init_module);
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_scatterv(&coll_args, updated_sendbuf, sendcounts_desc, displs_desc,
+                            sendtype, updated_recvbuf, recvcount, recvtype, root);
+    err = comm->c_coll->coll_scatterv_init(&coll_args, comm, info, request,
+                                           comm->c_coll->coll_scatterv_init_module);
     if (OPAL_LIKELY(OMPI_SUCCESS == err)) {
         if (OMPI_COMM_IS_INTRA(comm)) {
             if (MPI_IN_PLACE == recvbuf) {
@@ -219,6 +222,7 @@ PROTOTYPE ERROR_CLASS scatterv_init(BUFFER sendbuf, COUNT_ARRAY sendcounts, DISP
                 sendtype = NULL;
             }
         }
+        ((ompi_coll_base_nbc_request_t *) *request)->args = coll_args;
         ompi_coll_base_retain_datatypes(*request, sendtype, recvtype);
     }
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);

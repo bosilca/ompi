@@ -6,6 +6,7 @@
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
  * Copyright (c) 2026      Amazon.com, Inc. or its affiliates.
  *                         All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -121,13 +122,11 @@ mca_coll_han_set_scatter_args(mca_coll_han_scatter_args_t * args,
  * after data reordring, calls us task, a scatter on up communicator
  */
 int
-mca_coll_han_scatter_intra(const void *sbuf, size_t scount,
-                           struct ompi_datatype_t *sdtype,
-                           void *rbuf, size_t rcount,
-                           struct ompi_datatype_t *rdtype,
-                           int root,
-                           struct ompi_communicator_t *comm, mca_coll_base_module_t * module)
+mca_coll_han_scatter_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    int root = args->root;
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
     int w_rank, w_size;
     w_rank = ompi_comm_rank(comm);
@@ -139,8 +138,7 @@ mca_coll_han_scatter_intra(const void *sbuf, size_t scount,
                              "han cannot handle scatter with this communicator. Fall back on another component\n"));
         /* HAN cannot work with this communicator so fallback on all collectives */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
-        return han_module->previous_scatter(sbuf, scount, sdtype, rbuf, rcount, rdtype, root,
-                                            comm, han_module->previous_scatter_module);
+        return han_module->previous_scatter(args, comm, han_module->previous_scatter_module);
     }
 
     /* Topo must be initialized to know rank distribution which then is used to
@@ -153,8 +151,7 @@ mca_coll_han_scatter_intra(const void *sbuf, size_t scount,
          * future calls will then be automatically redirected.
          */
         HAN_UNINSTALL_COLL_API(comm, han_module, scatter);
-        return han_module->previous_scatter(sbuf, scount, sdtype, rbuf, rcount, rdtype, root,
-                                            comm, han_module->previous_scatter_module);
+        return han_module->previous_scatter(args, comm, han_module->previous_scatter_module);
     }
 
     ompi_communicator_t *low_comm =
@@ -197,7 +194,7 @@ mca_coll_han_scatter_intra(const void *sbuf, size_t scount,
         if (han_module->is_mapbycore) {
             OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                                  "[%d]: Han Scatter is_bycore: ", w_rank));
-            reorder_sbuf = (char *) sbuf;
+            reorder_sbuf = (char *) args->src.info.buffer;
         } else {
             ptrdiff_t ssize, sgap = 0, sextent;
             ompi_datatype_type_extent(sdtype, &sextent);
@@ -226,7 +223,7 @@ mca_coll_han_scatter_intra(const void *sbuf, size_t scount,
                                                         reorder_sbuf + sextent * (i * low_size +
                                                                                   j) *
                                                         (ptrdiff_t) scount,
-                                                        (char *) sbuf +
+                                                        (char *) args->src.info.buffer +
                                                         sextent *
                                                         (ptrdiff_t) topo[(i * low_size + j) * 2 +
                                                                          1] * (ptrdiff_t) scount);
@@ -240,7 +237,7 @@ mca_coll_han_scatter_intra(const void *sbuf, size_t scount,
     /* Setup us task arguments */
     mca_coll_han_scatter_args_t *us_args = malloc(sizeof(mca_coll_han_scatter_args_t));
     mca_coll_han_set_scatter_args(us_args, us, reorder_sbuf, NULL, reorder_buf, scount, sdtype,
-                                  (char *) rbuf, rcount, rdtype, root, root_up_rank, root_low_rank,
+                                  (char *) args->dst.info.buffer, args->dst.info.count, args->dst.info.datatype, root, root_up_rank, root_low_rank,
                                   up_comm, low_comm, w_rank, low_rank != root_low_rank,
                                   temp_request, han_module);
     us_args->reorder_fl_item = reorder_fl_item;
@@ -289,9 +286,11 @@ int mca_coll_han_scatter_us_task(void *task_args)
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                              "[%d] Han Scatter:  us scatter\n", t->w_rank));
         /* Inter node scatter */
-        t->up_comm->c_coll->coll_scatter((char *) t->sbuf, t->scount * low_size, t->sdtype,
-                                         tmp_rbuf, count * low_size, dtype, t->root_up_rank,
-                                         t->up_comm, t->up_comm->c_coll->coll_scatter_module);
+        ompi_coll_args_t _us;
+        ompi_coll_args_scatter(&_us, (char *) t->sbuf, t->scount * low_size, t->sdtype,
+                               tmp_rbuf, count * low_size, dtype, t->root_up_rank);
+        t->up_comm->c_coll->coll_scatter(&_us, t->up_comm,
+                                         t->up_comm->c_coll->coll_scatter_module);
         t->sbuf = tmp_rbuf;
         t->sbuf_inter_free = tmp_buf;
         t->sdtype = dtype;
@@ -329,8 +328,10 @@ int mca_coll_han_scatter_ls_task(void *task_args)
                          t->w_rank));
     OBJ_RELEASE(t->cur_task);
 
-    t->low_comm->c_coll->coll_scatter((char *) t->sbuf, t->scount, t->sdtype, (char *) t->rbuf,
-                                      t->rcount, t->rdtype, t->root_low_rank, t->low_comm,
+    ompi_coll_args_t _ls;
+    ompi_coll_args_scatter(&_ls, (char *) t->sbuf, t->scount, t->sdtype, (char *) t->rbuf,
+                           t->rcount, t->rdtype, t->root_low_rank);
+    t->low_comm->c_coll->coll_scatter(&_ls, t->low_comm,
                                       t->low_comm->c_coll->coll_scatter_module);
 
     /* Free inter-node buffer when not using persist buffers */
@@ -350,14 +351,9 @@ int mca_coll_han_scatter_ls_task(void *task_args)
 
 
 int
-mca_coll_han_scatter_intra_simple(const void *sbuf, size_t scount,
-                                  struct ompi_datatype_t *sdtype,
-                                  void *rbuf, size_t rcount,
-                                  struct ompi_datatype_t *rdtype,
-                                  int root,
-                                  struct ompi_communicator_t *comm,
-                                  mca_coll_base_module_t * module)
+mca_coll_han_scatter_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    int root = args->root;
     int w_rank, w_size;
     struct ompi_datatype_t * dtype;
     int count;
@@ -373,8 +369,7 @@ mca_coll_han_scatter_intra_simple(const void *sbuf, size_t scount,
                              " Fall back on another component\n"));
         /* HAN cannot work with this communicator so fallback on all collectives */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
-        return han_module->previous_scatter(sbuf, scount, sdtype, rbuf, rcount, rdtype, root,
-                                            comm, han_module->previous_scatter_module);
+        return han_module->previous_scatter(args, comm, han_module->previous_scatter_module);
     }
     /* Topo must be initialized to know rank distribution which then is used to
      * determine if han can be used */
@@ -383,8 +378,7 @@ mca_coll_han_scatter_intra_simple(const void *sbuf, size_t scount,
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                              "han cannot handle scatter with this communicator. It needs to fall back on another component\n"));
         HAN_UNINSTALL_COLL_API(comm, han_module, scatter);
-        return han_module->previous_scatter(sbuf, scount, sdtype, rbuf, rcount, rdtype, root,
-                                            comm, han_module->previous_scatter_module);
+        return han_module->previous_scatter(args, comm, han_module->previous_scatter_module);
     }
     ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
     ompi_communicator_t *up_comm = han_module->sub_comm[INTER_NODE];
@@ -399,11 +393,11 @@ mca_coll_han_scatter_intra_simple(const void *sbuf, size_t scount,
     mca_coll_han_get_ranks(vranks, root, low_size, &root_low_rank, &root_up_rank);
 
     if (w_rank == root) {
-        dtype = sdtype;
-        count = scount;
+        dtype = args->src.info.datatype;
+        count = args->src.info.count;
     } else {
-        dtype = rdtype;
-        count = rcount;
+        dtype = args->dst.info.datatype;
+        count = args->dst.info.count;
     }
 
     /* allocate buffer to store unordered result on root
@@ -424,7 +418,7 @@ mca_coll_han_scatter_intra_simple(const void *sbuf, size_t scount,
             /* The copy of the data is avoided */
             OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                                  "[%d]: Han scatter: no need to reorder: ", w_rank));
-            reorder_buf = (char *)sbuf;
+            reorder_buf = (char *)args->src.info.buffer;
             reorder_is_sbuf = true;
         } else {
             /* Data must be copied, let's be efficient packing it */
@@ -443,7 +437,7 @@ mca_coll_han_scatter_intra_simple(const void *sbuf, size_t scount,
             block_extent = extent * (ptrdiff_t)count;
 
             for(int i = 0 ; i < w_size ; ++i){
-                ompi_datatype_sndrcv((char*)sbuf + block_extent*topo[2*i+1], count, dtype,
+                ompi_datatype_sndrcv((char*)args->src.info.buffer + block_extent*topo[2*i+1], count, dtype,
                                      reorder_buf + block_size*i, block_size, MPI_BYTE);
             }
             dtype = MPI_BYTE;
@@ -489,18 +483,17 @@ mca_coll_han_scatter_intra_simple(const void *sbuf, size_t scount,
             if (NULL == tmp_buf) return OMPI_ERR_OUT_OF_RESOURCE;
         }
 
-        up_comm->c_coll->coll_scatter((char *)reorder_buf,
-                    count * low_size, dtype,
-                    tmp_buf,
-                    block_size * low_size, MPI_BYTE,
-                    root_up_rank, up_comm,
+        ompi_coll_args_t _us;
+        ompi_coll_args_scatter(&_us, (char *)reorder_buf, count * low_size, dtype,
+                    tmp_buf, block_size * low_size, MPI_BYTE, root_up_rank);
+        up_comm->c_coll->coll_scatter(&_us, up_comm,
                     up_comm->c_coll->coll_scatter_module);
     }
 
-    low_comm->c_coll->coll_scatter(tmp_buf,
-                     block_size, MPI_BYTE,
-                     (char *)rbuf, rcount, rdtype,
-                     root_low_rank, low_comm,
+    ompi_coll_args_t _ls;
+    ompi_coll_args_scatter(&_ls, tmp_buf, block_size, MPI_BYTE,
+                     (char *)args->dst.info.buffer, args->dst.info.count, args->dst.info.datatype, root_low_rank);
+    low_comm->c_coll->coll_scatter(&_ls, low_comm,
                      low_comm->c_coll->coll_scatter_module);
 
     if (low_rank == root_low_rank) {

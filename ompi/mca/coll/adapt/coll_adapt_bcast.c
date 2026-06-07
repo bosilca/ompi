@@ -2,6 +2,7 @@
  * Copyright (c) 2014-2020 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  * 
  * Additional copyrights may follow
@@ -12,11 +13,10 @@
 #include "coll_adapt.h"
 #include "coll_adapt_algorithms.h"
 
-int ompi_coll_adapt_bcast(void *buff, size_t count, struct ompi_datatype_t *datatype, int root,
-                         struct ompi_communicator_t *comm, mca_coll_base_module_t * module)
+int ompi_coll_adapt_bcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     ompi_request_t *request = NULL;
-    int err = ompi_coll_adapt_ibcast(buff, count, datatype, root, comm, &request, module);
+    int err = ompi_coll_adapt_ibcast(args, comm, &request, module);
     if( MPI_SUCCESS != err ) {
         if( NULL == request )
             return err;

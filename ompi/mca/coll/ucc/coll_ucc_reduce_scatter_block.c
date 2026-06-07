@@ -2,6 +2,7 @@
  * Copyright (c) 2021 Mellanox Technologies. All rights reserved.
  * Copyright (c) 2022 NVIDIA Corporation. All rights reserved.
  * Copyright (c) 2025      Fujitsu Limited. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -70,35 +71,25 @@ fallback:
     return UCC_ERR_NOT_SUPPORTED;
 }
 
-int mca_coll_ucc_reduce_scatter_block(const void *sbuf, void *rbuf, size_t rcount,
-                                      struct ompi_datatype_t *dtype,
-                                      struct ompi_op_t *op,
-                                      struct ompi_communicator_t *comm,
-                                      mca_coll_base_module_t *module)
+int mca_coll_ucc_reduce_scatter_block(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*)module;
     ucc_coll_req_h         req;
 
     UCC_VERBOSE(3, "running ucc reduce scatter block");
-    COLL_UCC_CHECK(mca_coll_ucc_reduce_scatter_block_init_common(sbuf, rbuf, rcount,
-                                                                 dtype, op, false, ucc_module,
+    COLL_UCC_CHECK(mca_coll_ucc_reduce_scatter_block_init_common(args->src.info.buffer, args->dst.info.buffer, args->dst.info.count,
+                                                                 args->dst.info.datatype, args->op, false, ucc_module,
                                                                  &req, NULL));
     COLL_UCC_POST_AND_CHECK(req);
     COLL_UCC_CHECK(coll_ucc_req_wait(req));
     return OMPI_SUCCESS;
 fallback:
     UCC_VERBOSE(3, "running fallback reduce_scatter_block");
-    return ucc_module->previous_reduce_scatter_block(sbuf, rbuf, rcount, dtype,
-                                                     op, comm,
+    return ucc_module->previous_reduce_scatter_block(args, comm,
                                                      ucc_module->previous_reduce_scatter_block_module);
 }
 
-int mca_coll_ucc_ireduce_scatter_block(const void *sbuf, void *rbuf, size_t rcount,
-                                       struct ompi_datatype_t *dtype,
-                                       struct ompi_op_t *op,
-                                       struct ompi_communicator_t *comm,
-                                       ompi_request_t** request,
-                                       mca_coll_base_module_t *module)
+int mca_coll_ucc_ireduce_scatter_block(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*)module;
     ucc_coll_req_h         req;
@@ -106,8 +97,8 @@ int mca_coll_ucc_ireduce_scatter_block(const void *sbuf, void *rbuf, size_t rcou
 
     UCC_VERBOSE(3, "running ucc ireduce_scatter_block");
     COLL_UCC_GET_REQ(coll_req, comm);
-    COLL_UCC_CHECK(mca_coll_ucc_reduce_scatter_block_init_common(sbuf, rbuf, rcount,
-                                                                 dtype, op, false, ucc_module,
+    COLL_UCC_CHECK(mca_coll_ucc_reduce_scatter_block_init_common(args->src.info.buffer, args->dst.info.buffer, args->dst.info.count,
+                                                                 args->dst.info.datatype, args->op, false, ucc_module,
                                                                  &req, coll_req));
     COLL_UCC_POST_AND_CHECK(req);
     *request = &coll_req->super;
@@ -117,16 +108,11 @@ fallback:
     if (coll_req) {
         mca_coll_ucc_req_free((ompi_request_t **)&coll_req);
     }
-    return ucc_module->previous_ireduce_scatter_block(sbuf, rbuf, rcount, dtype,
-                                                      op, comm, request,
+    return ucc_module->previous_ireduce_scatter_block(args, comm, request,
                                                       ucc_module->previous_ireduce_scatter_block_module);
 }
 
-int mca_coll_ucc_reduce_scatter_block_init(const void *sbuf, void *rbuf, size_t rcount,
-                                           struct ompi_datatype_t *dtype, struct ompi_op_t *op,
-                                           struct ompi_communicator_t *comm,
-                                           struct ompi_info_t *info, ompi_request_t **request,
-                                           mca_coll_base_module_t *module)
+int mca_coll_ucc_reduce_scatter_block_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t *) module;
     ucc_coll_req_h req;
@@ -134,8 +120,8 @@ int mca_coll_ucc_reduce_scatter_block_init(const void *sbuf, void *rbuf, size_t 
 
     COLL_UCC_GET_REQ_PERSISTENT(coll_req, comm);
     UCC_VERBOSE(3, "reduce_scatter_block_init init %p", coll_req);
-    COLL_UCC_CHECK(mca_coll_ucc_reduce_scatter_block_init_common(sbuf, rbuf, rcount,
-                                                                 dtype, op, true, ucc_module,
+    COLL_UCC_CHECK(mca_coll_ucc_reduce_scatter_block_init_common(args->src.info.buffer, args->dst.info.buffer, args->dst.info.count,
+                                                                 args->dst.info.datatype, args->op, true, ucc_module,
                                                                  &req, coll_req));
     *request = &coll_req->super;
     return OMPI_SUCCESS;
@@ -145,6 +131,6 @@ fallback:
         mca_coll_ucc_req_free((ompi_request_t **) &coll_req);
     }
     return ucc_module
-        ->previous_reduce_scatter_block_init(sbuf, rbuf, rcount, dtype, op, comm, info, request,
+        ->previous_reduce_scatter_block_init(args, comm, info, request,
                                              ucc_module->previous_reduce_scatter_block_init_module);
 }

@@ -16,6 +16,7 @@
  * Copyright (c) 2014-2023 Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2017      IBM Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -148,11 +149,13 @@ int MPI_Neighbor_alltoallw_init(const void *sendbuf, const int sendcounts[], con
     OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, recvcounts);
     OMPI_DISP_ARRAY_INIT(&sdispls_desc, sdispls);
     OMPI_DISP_ARRAY_INIT(&rdispls_desc, rdispls);
-    err = comm->c_coll->coll_neighbor_alltoallw_init(sendbuf, sendcounts_desc, sdispls_desc, sendtypes,
-                                                     recvbuf, recvcounts_desc, rdispls_desc, recvtypes, comm,
-                                                     info, request,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_neighbor_alltoallw(&coll_args, sendbuf, sendcounts_desc, sdispls_desc, sendtypes,
+                                      recvbuf, recvcounts_desc, rdispls_desc, recvtypes);
+    err = comm->c_coll->coll_neighbor_alltoallw_init(&coll_args, comm, info, request,
                                                      comm->c_coll->coll_neighbor_alltoallw_init_module);
     if (OPAL_LIKELY(OMPI_SUCCESS == err)) {
+        ((ompi_coll_base_nbc_request_t *) *request)->args = coll_args;
         ompi_coll_base_retain_datatypes_w(*request, sendtypes, recvtypes, true);
     }
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);

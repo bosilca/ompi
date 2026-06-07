@@ -16,6 +16,7 @@
  *                         reserved.
  * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -44,13 +45,12 @@
  * This function just calls a reduce to rank 0, followed by an
  * appropriate scatterv call.
  */
-int ompi_coll_base_reduce_scatter_intra_nonoverlapping(const void *sbuf, void *rbuf,
-                                                        ompi_count_array_t rcounts,
-                                                        struct ompi_datatype_t *dtype,
-                                                        struct ompi_op_t *op,
-                                                        struct ompi_communicator_t *comm,
-                                                        mca_coll_base_module_t *module)
+int ompi_coll_base_reduce_scatter_intra_nonoverlapping(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    struct ompi_datatype_t *dtype = args->dst.info_v.datatype;
+    struct ompi_op_t *op = args->op;
     int err, i, rank, size, total_count;
     ptrdiff_t *displs = NULL;
     ompi_disp_array_t displs_arg;
@@ -65,15 +65,17 @@ int ompi_coll_base_reduce_scatter_intra_nonoverlapping(const void *sbuf, void *r
     for (i = 0, total_count = 0; i < size; i++) { total_count += ompi_count_array_get(rcounts, i); }
 
     /* Reduce to rank 0 (root) and scatterv */
-    tmprbuf = (char*) rbuf;
+    tmprbuf = (char*) args->dst.info_v.buffer;
     if (MPI_IN_PLACE == sbuf) {
         /* rbuf on root (0) is big enough to hold whole data */
         if (root == rank) {
-            err = comm->c_coll->coll_reduce (MPI_IN_PLACE, tmprbuf, total_count,
-                                            dtype, op, root, comm, comm->c_coll->coll_reduce_module);
+            ompi_coll_args_t _r;
+            ompi_coll_args_reduce(&_r, MPI_IN_PLACE, tmprbuf, total_count, dtype, op, root);
+            err = comm->c_coll->coll_reduce(&_r, comm, comm->c_coll->coll_reduce_module);
         } else {
-            err = comm->c_coll->coll_reduce(tmprbuf, NULL, total_count,
-                                           dtype, op, root, comm, comm->c_coll->coll_reduce_module);
+            ompi_coll_args_t _r;
+            ompi_coll_args_reduce(&_r, tmprbuf, NULL, total_count, dtype, op, root);
+            err = comm->c_coll->coll_reduce(&_r, comm, comm->c_coll->coll_reduce_module);
         }
     } else {
         if (root == rank) {
@@ -85,8 +87,9 @@ int ompi_coll_base_reduce_scatter_intra_nonoverlapping(const void *sbuf, void *r
             tmprbuf_free = (char*) malloc(dsize);
             tmprbuf = tmprbuf_free - gap;
         }
-        err = comm->c_coll->coll_reduce (sbuf, tmprbuf, total_count,
-                                        dtype, op, root, comm, comm->c_coll->coll_reduce_module);
+        ompi_coll_args_t _r;
+        ompi_coll_args_reduce(&_r, sbuf, tmprbuf, total_count, dtype, op, root);
+        err = comm->c_coll->coll_reduce(&_r, comm, comm->c_coll->coll_reduce_module);
     }
     if (MPI_SUCCESS != err) {
         if (NULL != tmprbuf_free) free(tmprbuf_free);
@@ -100,13 +103,15 @@ int ompi_coll_base_reduce_scatter_intra_nonoverlapping(const void *sbuf, void *r
     }
     OMPI_DISP_ARRAY_INIT(&displs_arg, displs);
     if (MPI_IN_PLACE == sbuf && root == rank) {
-        err =  comm->c_coll->coll_scatterv (tmprbuf, rcounts, displs_arg, dtype,
-                                           MPI_IN_PLACE, 0, MPI_DATATYPE_NULL,
-                                           root, comm, comm->c_coll->coll_scatterv_module);
+        ompi_coll_args_t _sv;
+        ompi_coll_args_scatterv(&_sv, tmprbuf, rcounts, displs_arg, dtype,
+                                MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, root);
+        err = comm->c_coll->coll_scatterv(&_sv, comm, comm->c_coll->coll_scatterv_module);
     } else {
-        err =  comm->c_coll->coll_scatterv (tmprbuf, rcounts, displs_arg, dtype,
-                                           rbuf, ompi_count_array_get(rcounts, rank), dtype,
-                                           root, comm, comm->c_coll->coll_scatterv_module);
+        ompi_coll_args_t _sv;
+        ompi_coll_args_scatterv(&_sv, tmprbuf, rcounts, displs_arg, dtype,
+                                args->dst.info_v.buffer, ompi_count_array_get(rcounts, rank), dtype, root);
+        err = comm->c_coll->coll_scatterv(&_sv, comm, comm->c_coll->coll_scatterv_module);
     }
     free(displs);
     if (NULL != tmprbuf_free) free(tmprbuf_free);
@@ -132,14 +137,12 @@ int ompi_coll_base_reduce_scatter_intra_nonoverlapping(const void *sbuf, void *r
  *  Limitation: - Works only for commutative operations.
  */
 int
-ompi_coll_base_reduce_scatter_intra_basic_recursivehalving( const void *sbuf,
-                                                            void *rbuf,
-                                                            ompi_count_array_t rcounts,
-                                                            struct ompi_datatype_t *dtype,
-                                                            struct ompi_op_t *op,
-                                                            struct ompi_communicator_t *comm,
-                                                            mca_coll_base_module_t *module)
+ompi_coll_base_reduce_scatter_intra_basic_recursivehalving(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info_v.buffer;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    struct ompi_datatype_t *dtype = args->dst.info_v.datatype;
     int i, rank, size, err = OMPI_SUCCESS;
     int tmp_size, remain = 0, tmp_rank;
     size_t count;
@@ -221,7 +224,7 @@ ompi_coll_base_reduce_scatter_intra_basic_recursivehalving( const void *sbuf,
                                     comm, MPI_STATUS_IGNORE));
 
             /* integrate their results into our temp results */
-            ompi_op_reduce(op, recv_buf, result_buf, count, dtype);
+            ompi_op_reduce(args->op, recv_buf, result_buf, count, dtype);
 
             /* adjust rank to be the bottom "remain" ranks */
             tmp_rank = rank / 2;
@@ -339,7 +342,7 @@ ompi_coll_base_reduce_scatter_intra_basic_recursivehalving( const void *sbuf,
                     goto cleanup;
                 }
 
-                ompi_op_reduce(op,
+                ompi_op_reduce(args->op,
                                recv_buf + tmp_disps[recv_index] * extent,
                                result_buf + tmp_disps[recv_index] * extent,
                                recv_count, dtype);
@@ -460,12 +463,12 @@ ompi_coll_base_reduce_scatter_intra_basic_recursivehalving( const void *sbuf,
  *
  */
 int
-ompi_coll_base_reduce_scatter_intra_ring( const void *sbuf, void *rbuf, ompi_count_array_t rcounts,
-                                          struct ompi_datatype_t *dtype,
-                                          struct ompi_op_t *op,
-                                          struct ompi_communicator_t *comm,
-                                          mca_coll_base_module_t *module)
+ompi_coll_base_reduce_scatter_intra_ring(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info_v.buffer;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    struct ompi_datatype_t *dtype = args->dst.info_v.datatype;
     int ret, line, rank, size, i, k, recv_from, send_to;
     int inbi;
     size_t total_count, max_block_count;
@@ -591,7 +594,7 @@ ompi_coll_base_reduce_scatter_intra_ring( const void *sbuf, void *rbuf, ompi_cou
            rbuf[prevblock] = inbuf[inbi ^ 0x1] (op) rbuf[prevblock]
         */
         tmprecv = accumbuf + displs[prevblock] * extent;
-        ompi_op_reduce(op, inbuf[inbi ^ 0x1], tmprecv, ompi_count_array_get(rcounts, prevblock), dtype);
+        ompi_op_reduce(args->op, inbuf[inbi ^ 0x1], tmprecv, ompi_count_array_get(rcounts, prevblock), dtype);
 
         /* send previous block to send_to */
         ret = MCA_PML_CALL(send(tmprecv, ompi_count_array_get(rcounts, prevblock), dtype, send_to,
@@ -607,7 +610,7 @@ ompi_coll_base_reduce_scatter_intra_ring( const void *sbuf, void *rbuf, ompi_cou
     /* Apply operation on the last block (my block)
        rbuf[rank] = inbuf[inbi] (op) rbuf[rank] */
     tmprecv = accumbuf + displs[rank] * extent;
-    ompi_op_reduce(op, inbuf[inbi], tmprecv, ompi_count_array_get(rcounts, rank), dtype);
+    ompi_op_reduce(args->op, inbuf[inbi], tmprecv, ompi_count_array_get(rcounts, rank), dtype);
 
     /* Copy result from tmprecv to rbuf */
     ret = ompi_datatype_copy_content_same_ddt(dtype, ompi_count_array_get(rcounts, rank),
@@ -698,11 +701,12 @@ static size_t ompi_sum_counts(ompi_count_array_t counts, ptrdiff_t *displs, int 
  * 5: vrank  3 [**|**|*|30]: copy "30" to rbuf (mperm(3)=3)
  */
 int
-ompi_coll_base_reduce_scatter_intra_butterfly(
-    const void *sbuf, void *rbuf, ompi_count_array_t rcounts, struct ompi_datatype_t *dtype,
-    struct ompi_op_t *op, struct ompi_communicator_t *comm,
-    mca_coll_base_module_t *module)
+ompi_coll_base_reduce_scatter_intra_butterfly(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *rbuf = args->dst.info_v.buffer;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    struct ompi_datatype_t *dtype = args->dst.info_v.datatype;
+    struct ompi_op_t *op = args->op;
     char *tmpbuf[2] = {NULL, NULL}, *psend, *precv;
     ptrdiff_t *displs = NULL, index;
     ptrdiff_t span, gap, totalcount, extent;
@@ -738,8 +742,8 @@ ompi_coll_base_reduce_scatter_intra_butterfly(
     psend = tmpbuf[0] - gap;
     precv = tmpbuf[1] - gap;
 
-    if (sbuf != MPI_IN_PLACE) {
-        err = ompi_datatype_copy_content_same_ddt(dtype, totalcount, psend, (char *)sbuf);
+    if (args->src.info.buffer != MPI_IN_PLACE) {
+        err = ompi_datatype_copy_content_same_ddt(dtype, totalcount, psend, (char *)args->src.info.buffer);
         if (MPI_SUCCESS != err) { goto cleanup_and_return; }
     } else {
         err = ompi_datatype_copy_content_same_ddt(dtype, totalcount, psend, rbuf);

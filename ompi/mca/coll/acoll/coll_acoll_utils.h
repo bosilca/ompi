@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode:nil -*- */
 /*
  * Copyright (c) 2024 - 2025 Advanced Micro Devices, Inc. All rights reserved.
- * Copyright (c) 2026        NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -397,9 +397,9 @@ static inline int mca_coll_acoll_derive_r2r_latency
         distance = DIST_NODE; /* map-by node distance. */
     }
 
-    error = (comm)->c_coll->coll_allgather(&distance, 1, MPI_INT,
-                                           workbuf, 1, MPI_INT,
-                                           comm, &acoll_module->super);
+    ompi_coll_args_t _ag;
+    ompi_coll_args_allgather(&_ag, &distance, 1, MPI_INT, workbuf, 1, MPI_INT);
+    error = (comm)->c_coll->coll_allgather(&_ag, comm, &acoll_module->super);
     if (MPI_SUCCESS != error) { goto error_handler; }
 
     int dist_count_array[DIST_END] = {0};
@@ -485,8 +485,9 @@ static inline int mca_coll_acoll_comm_split_init(ompi_communicator_t *comm,
             int local_size = ompi_comm_size(subc->local_comm);
             /* Perform allgather so that all ranks know the sizes of the nodes
                to which all other ranks belong */
-            err = (comm)->c_coll->coll_allgather(&local_size, 1, MPI_INT, size_list_buf, 1, MPI_INT,
-                                                 comm, &acoll_module->super);
+            ompi_coll_args_t _ag;
+            ompi_coll_args_allgather(&_ag, &local_size, 1, MPI_INT, size_list_buf, 1, MPI_INT);
+            err = (comm)->c_coll->coll_allgather(&_ag, comm, &acoll_module->super);
             if (MPI_SUCCESS != err) {
                 free(size_list_buf);
                 return err;
@@ -959,9 +960,10 @@ static inline int coll_acoll_init(mca_coll_base_module_t *module, ompi_communica
         goto error_hndl;
     }
 
-    ret = comm->c_coll->coll_allgather(&seg_ds, sizeof(opal_shmem_ds_t), MPI_BYTE,
-                                       data->allshmseg_id, sizeof(opal_shmem_ds_t), MPI_BYTE, comm,
-                                       comm->c_coll->coll_allgather_module);
+    ompi_coll_args_t _ag;
+    ompi_coll_args_allgather(&_ag, &seg_ds, sizeof(opal_shmem_ds_t), MPI_BYTE,
+                             data->allshmseg_id, sizeof(opal_shmem_ds_t), MPI_BYTE);
+    ret = comm->c_coll->coll_allgather(&_ag, comm, comm->c_coll->coll_allgather_module);
 
     if (data->l1_gp[0] != rank) {
         data->allshmmmap_sbuf[data->l1_gp[0]] = opal_shmem_segment_attach(
@@ -996,7 +998,9 @@ static inline int coll_acoll_init(mca_coll_base_module_t *module, ompi_communica
 
     subc->initialized_data = true;
     subc->data = data;
-    ompi_coll_base_barrier_intra_tree(comm, module);
+    ompi_coll_args_t _bar;
+    ompi_coll_args_barrier(&_bar);
+    ompi_coll_base_barrier_intra_tree(&_bar, comm, module);
 
     return MPI_SUCCESS;
 error_hndl:

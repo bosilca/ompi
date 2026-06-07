@@ -11,6 +11,7 @@
  *                         All rights reserved.
  * Copyright (c) 2006-2007 University of Houston. All rights reserved.
  * Copyright (c) 2013 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -37,11 +38,12 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_inter_bcast_inter(void *buff, size_t count,
-                           struct ompi_datatype_t *datatype, int root,
-                           struct ompi_communicator_t *comm,
-                           mca_coll_base_module_t *module)
+mca_coll_inter_bcast_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *buff = args->src.info.buffer;
+    size_t count = args->src.info.count;
+    struct ompi_datatype_t *datatype = args->src.info.datatype;
+    int root = args->root;
     int rank;
     int err;
 
@@ -60,8 +62,9 @@ mca_coll_inter_bcast_inter(void *buff, size_t count,
                 return err;
             }
 	}
-	err = comm->c_local_comm->c_coll->coll_bcast(buff, count, datatype, 0,
-                                                    comm->c_local_comm,
+	ompi_coll_args_t _b;
+	ompi_coll_args_bcast(&_b, buff, count, datatype, 0);
+	err = comm->c_local_comm->c_coll->coll_bcast(&_b, comm->c_local_comm,
                                                     comm->c_local_comm->c_coll->coll_bcast_module);
     } else {
         /* root section, send to the first process of the remote group */

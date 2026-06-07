@@ -20,6 +20,7 @@
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
  * Copyright (c) 2023      Jeffrey M. Squyres.  All rights reserved.
  * Copyright (c) 2026      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -55,12 +56,12 @@
  *     up at some point)
  */
 int
-ompi_coll_base_reduce_scatter_block_basic_linear(const void *sbuf, void *rbuf, size_t rcount,
-                                                 struct ompi_datatype_t *dtype,
-                                                 struct ompi_op_t *op,
-                                                 struct ompi_communicator_t *comm,
-                                                 mca_coll_base_module_t *module)
+ompi_coll_base_reduce_scatter_block_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
     int rank, size, err = OMPI_SUCCESS;
     size_t count;
     ptrdiff_t gap, span;
@@ -114,9 +115,9 @@ ompi_coll_base_reduce_scatter_block_basic_linear(const void *sbuf, void *rbuf, s
             sbuf_ptr = (char*)sbuf     + span * (size_t)i;
 
             /* Reduction for this peer */
-            err = comm->c_coll->coll_reduce(sbuf_ptr, recv_buf, rcount,
-                                            dtype, op, 0, comm,
-                                            comm->c_coll->coll_reduce_module);
+            ompi_coll_args_t _r;
+            ompi_coll_args_reduce(&_r, sbuf_ptr, recv_buf, rcount, dtype, args->op, 0);
+            err = comm->c_coll->coll_reduce(&_r, comm, comm->c_coll->coll_reduce_module);
             if (MPI_SUCCESS != err) {
                 goto cleanup;
             }
@@ -160,17 +161,17 @@ ompi_coll_base_reduce_scatter_block_basic_linear(const void *sbuf, void *rbuf, s
         }
 
         /* reduction */
-        err =
-            comm->c_coll->coll_reduce(sbuf, recv_buf, (int)count, dtype, op, 0,
-                                      comm, comm->c_coll->coll_reduce_module);
+        ompi_coll_args_t _r;
+        ompi_coll_args_reduce(&_r, sbuf, recv_buf, (int)count, dtype, args->op, 0);
+        err = comm->c_coll->coll_reduce(&_r, comm, comm->c_coll->coll_reduce_module);
         if (MPI_SUCCESS != err) {
             goto cleanup;
         }
 
         /* scatter */
-        err = comm->c_coll->coll_scatter(recv_buf, rcount, dtype,
-                                         rbuf, rcount, dtype, 0,
-                                         comm, comm->c_coll->coll_scatter_module);
+        ompi_coll_args_t _sc;
+        ompi_coll_args_scatter(&_sc, recv_buf, rcount, dtype, rbuf, rcount, dtype, 0);
+        err = comm->c_coll->coll_scatter(&_sc, comm, comm->c_coll->coll_scatter_module);
     }
 
  cleanup:
@@ -195,11 +196,13 @@ ompi_coll_base_reduce_scatter_block_basic_linear(const void *sbuf, void *rbuf, s
  * Memory requirements (per process): 2 * rcount * comm_size * typesize
  */
 int
-ompi_coll_base_reduce_scatter_block_intra_recursivedoubling(
-    const void *sbuf, void *rbuf, size_t rcount, struct ompi_datatype_t *dtype,
-    struct ompi_op_t *op, struct ompi_communicator_t *comm,
-    mca_coll_base_module_t *module)
+ompi_coll_base_reduce_scatter_block_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
     struct ompi_datatype_t *dtypesend = NULL, *dtyperecv = NULL;
     char *tmprecv_raw = NULL, *tmpbuf_raw = NULL, *tmprecv, *tmpbuf;
     ptrdiff_t span, gap, totalcount, extent;
@@ -225,7 +228,7 @@ ompi_coll_base_reduce_scatter_block_intra_recursivedoubling(
          * will overflow an int data type.
          * Fallback to the linear algorithm.
          */
-        return ompi_coll_base_reduce_scatter_block_basic_linear(sbuf, rbuf, rcount, dtype, op, comm, module);
+        return ompi_coll_base_reduce_scatter_block_basic_linear(args, comm, module);
     }
     ompi_datatype_type_extent(dtype, &extent);
     span = opal_datatype_span(&dtype->super, totalcount, &gap);
@@ -403,11 +406,13 @@ static int ompi_range_sum(int a, int b, int r)
  * Memory requirements (per process): 2 * rcount * comm_size * typesize
  */
 int
-ompi_coll_base_reduce_scatter_block_intra_recursivehalving(
-    const void *sbuf, void *rbuf, size_t rcount, struct ompi_datatype_t *dtype,
-    struct ompi_op_t *op, struct ompi_communicator_t *comm,
-    mca_coll_base_module_t *module)
+ompi_coll_base_reduce_scatter_block_intra_recursivehalving(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
     char *tmprecv_raw = NULL, *tmpbuf_raw = NULL, *tmprecv, *tmpbuf;
     ptrdiff_t span, gap, totalcount, extent;
     int err = MPI_SUCCESS;
@@ -424,8 +429,7 @@ ompi_coll_base_reduce_scatter_block_intra_recursivehalving(
         OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
                      "coll:base:reduce_scatter_block_intra_recursivehalving: rank %d/%d "
                      "switching to basic reduce_scatter_block", rank, comm_size));
-        return ompi_coll_base_reduce_scatter_block_basic_linear(sbuf, rbuf, rcount, dtype,
-                                                                op, comm, module);
+        return ompi_coll_base_reduce_scatter_block_basic_linear(args, comm, module);
     }
 
     totalcount = comm_size * (size_t)rcount;
@@ -645,11 +649,13 @@ static int ompi_coll_base_reduce_scatter_block_intra_butterfly_pof2(
  * 5: vrank  3 [**|**|*|30]: copy "30" to rbuf (mperm(3)=3)
  */
 int
-ompi_coll_base_reduce_scatter_block_intra_butterfly(
-    const void *sbuf, void *rbuf, size_t rcount, struct ompi_datatype_t *dtype,
-    struct ompi_op_t *op, struct ompi_communicator_t *comm,
-    mca_coll_base_module_t *module)
+ompi_coll_base_reduce_scatter_block_intra_butterfly(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
     char *tmpbuf[2] = {NULL, NULL}, *psend, *precv;
     ptrdiff_t span, gap, totalcount, extent;
     int err = MPI_SUCCESS;

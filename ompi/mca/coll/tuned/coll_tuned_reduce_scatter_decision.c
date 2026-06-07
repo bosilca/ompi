@@ -7,6 +7,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2025      Amazon.com, Inc. or its affiliates.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -124,12 +125,7 @@ int ompi_coll_tuned_reduce_scatter_intra_check_forced_init (coll_tuned_force_alg
     return (MPI_SUCCESS);
 }
 
-int ompi_coll_tuned_reduce_scatter_intra_do_this(const void *sbuf, void* rbuf,
-                                                 ompi_count_array_t rcounts,
-                                                 struct ompi_datatype_t *dtype,
-                                                 struct ompi_op_t *op,
-                                                 struct ompi_communicator_t *comm,
-                                                 mca_coll_base_module_t *module,
+int ompi_coll_tuned_reduce_scatter_intra_do_this(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                                  int algorithm, int faninout, int segsize)
 {
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
@@ -137,16 +133,11 @@ int ompi_coll_tuned_reduce_scatter_intra_do_this(const void *sbuf, void* rbuf,
         algorithm, faninout, segsize));
 
     switch (algorithm) {
-    case (0): return ompi_coll_tuned_reduce_scatter_intra_dec_fixed(sbuf, rbuf, rcounts,
-                                                                    dtype, op, comm, module);
-    case (1): return ompi_coll_base_reduce_scatter_intra_nonoverlapping(sbuf, rbuf, rcounts,
-                                                                        dtype, op, comm, module);
-    case (2): return ompi_coll_base_reduce_scatter_intra_basic_recursivehalving(sbuf, rbuf, rcounts,
-                                                                                dtype, op, comm, module);
-    case (3): return ompi_coll_base_reduce_scatter_intra_ring(sbuf, rbuf, rcounts,
-                                                              dtype, op, comm, module);
-    case (4): return ompi_coll_base_reduce_scatter_intra_butterfly(sbuf, rbuf, rcounts,
-                                                                   dtype, op, comm, module);
+    case (0): return ompi_coll_tuned_reduce_scatter_intra_dec_fixed(args, comm, module);
+    case (1): return ompi_coll_base_reduce_scatter_intra_nonoverlapping(args, comm, module);
+    case (2): return ompi_coll_base_reduce_scatter_intra_basic_recursivehalving(args, comm, module);
+    case (3): return ompi_coll_base_reduce_scatter_intra_ring(args, comm, module);
+    case (4): return ompi_coll_base_reduce_scatter_intra_butterfly(args, comm, module);
     } /* switch */
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
         "coll:tuned:reduce_scatter_intra_do_this attempt to select algorithm %d when only 0-%d is valid?",

@@ -13,6 +13,7 @@
  * Copyright (c) 2013      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -40,12 +41,11 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_inter_reduce_inter(const void *sbuf, void *rbuf, size_t count,
-                            struct ompi_datatype_t *dtype,
-                            struct ompi_op_t *op,
-                            int root, struct ompi_communicator_t *comm,
-                            mca_coll_base_module_t *module)
+mca_coll_inter_reduce_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    int root = args->root;
     int rank, err;
 
     /* Initialize */
@@ -68,8 +68,9 @@ mca_coll_inter_reduce_inter(const void *sbuf, void *rbuf, size_t count,
 	}
 	pml_buffer = free_buffer - gap;
 
-	err = comm->c_local_comm->c_coll->coll_reduce(sbuf, pml_buffer, count,
-						     dtype, op, 0, comm->c_local_comm,
+	ompi_coll_args_t _r;
+	ompi_coll_args_reduce(&_r, args->src.info.buffer, pml_buffer, count, dtype, args->op, 0);
+	err = comm->c_local_comm->c_coll->coll_reduce(&_r, comm->c_local_comm,
                                                      comm->c_local_comm->c_coll->coll_reduce_module);
 	if (0 == rank) {
 	    /* First process sends the result to the root */
@@ -86,7 +87,7 @@ mca_coll_inter_reduce_inter(const void *sbuf, void *rbuf, size_t count,
 	}
     } else {
         /* Root receives the reduced message from the first process  */
-	err = MCA_PML_CALL(recv(rbuf, count, dtype, 0,
+	err = MCA_PML_CALL(recv(args->dst.info.buffer, count, dtype, 0,
 				MCA_COLL_BASE_TAG_REDUCE, comm,
 				MPI_STATUS_IGNORE));
 	if (OMPI_SUCCESS != err) {

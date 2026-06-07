@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018      DataDirect Networks. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -27,8 +28,10 @@
 int mca_fs_ime_file_close (ompio_file_t *fh)
 {
     int ret;
+    ompi_coll_args_t coll_args;
 
-    fh->f_comm->c_coll->coll_barrier (fh->f_comm,
+    ompi_coll_args_barrier(&coll_args);
+    fh->f_comm->c_coll->coll_barrier (&coll_args, fh->f_comm,
                                      fh->f_comm->c_coll->coll_barrier_module);
     /* reset errno */
     errno = 0;

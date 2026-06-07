@@ -19,6 +19,7 @@
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -170,8 +171,10 @@ PROTOTYPE ERROR_CLASS igather(BUFFER sendbuf, COUNT sendcount, DATATYPE sendtype
     }
 
     /* Invoke the coll component to perform the back-end operation */
-    err = comm->c_coll->coll_igather(sendbuf, sendcount, sendtype, updated_recvbuf,
-                                    recvcount, recvtype, root, comm, request,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_gather(&coll_args, sendbuf, sendcount, sendtype, updated_recvbuf,
+                          recvcount, recvtype, root);
+    err = comm->c_coll->coll_igather(&coll_args, comm, request,
                                     comm->c_coll->coll_igather_module);
     if (OPAL_LIKELY(OMPI_SUCCESS == err)) {
         if (OMPI_COMM_IS_INTRA(comm)) {
@@ -190,6 +193,7 @@ PROTOTYPE ERROR_CLASS igather(BUFFER sendbuf, COUNT sendcount, DATATYPE sendtype
                 recvtype = NULL;
             }
         }
+        ((ompi_coll_base_nbc_request_t *) *request)->args = coll_args;
         ompi_coll_base_retain_datatypes(*request, sendtype, recvtype);
     }
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);

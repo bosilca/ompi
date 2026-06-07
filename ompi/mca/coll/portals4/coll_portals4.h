@@ -7,6 +7,7 @@
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2017      IBM Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -27,6 +28,7 @@
 #include "ompi/datatype/ompi_datatype_internal.h"
 #include "ompi/mca/mca.h"
 #include "ompi/mca/coll/base/base.h"
+#include "ompi/mca/coll/base/coll_base_functions.h"
 #include "ompi/mca/coll/coll.h"
 #include "ompi/op/op.h"
 #include "ompi/request/request.h"
@@ -200,72 +202,29 @@ do {                                                                            
 } while (0)
 
 
-int ompi_coll_portals4_barrier_intra(struct ompi_communicator_t *comm,
-        mca_coll_base_module_t *module);
-int ompi_coll_portals4_ibarrier_intra(struct ompi_communicator_t *comm,
-        ompi_request_t ** request,
-        mca_coll_base_module_t *module);
+int ompi_coll_portals4_barrier_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_portals4_ibarrier_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module);
 int ompi_coll_portals4_ibarrier_intra_fini(struct ompi_coll_portals4_request_t *request);
 
-int ompi_coll_portals4_bcast_intra(void *buff, size_t count,
-        struct ompi_datatype_t *datatype, int root,
-        struct ompi_communicator_t *comm,mca_coll_base_module_t *module);
-int ompi_coll_portals4_ibcast_intra(void *buff, size_t count,
-        struct ompi_datatype_t *datatype, int root,
-        struct ompi_communicator_t *comm,
-        ompi_request_t **request,
-        mca_coll_base_module_t *module);
+int ompi_coll_portals4_bcast_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_portals4_ibcast_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module);
 int ompi_coll_portals4_ibcast_intra_fini(struct ompi_coll_portals4_request_t *request);
 
-int ompi_coll_portals4_reduce_intra(const void *sbuf, void *rbuf, size_t count,
-        MPI_Datatype dtype, MPI_Op op,
-        int root,
-        struct ompi_communicator_t *comm,
-        mca_coll_base_module_t *module);
-int ompi_coll_portals4_ireduce_intra(const void* sendbuf, void* recvbuf, size_t count,
-        MPI_Datatype dype, MPI_Op op,
-        int root,
-        struct ompi_communicator_t *comm,
-        ompi_request_t ** ompi_request,
-        mca_coll_base_module_t *module);
+int ompi_coll_portals4_reduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_portals4_ireduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module);
 int ompi_coll_portals4_ireduce_intra_fini(struct ompi_coll_portals4_request_t *request);
 
-int ompi_coll_portals4_allreduce_intra(const void* sendbuf, void* recvbuf, size_t count,
-        MPI_Datatype dtype, MPI_Op op,
-        struct ompi_communicator_t *comm,
-        mca_coll_base_module_t *module);
-int ompi_coll_portals4_iallreduce_intra(const void* sendbuf, void* recvbuf, size_t count,
-        MPI_Datatype dtype, MPI_Op op,
-        struct ompi_communicator_t *comm,
-        ompi_request_t ** ompi_request,
-        mca_coll_base_module_t *module);
+int ompi_coll_portals4_allreduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_portals4_iallreduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module);
 int
 ompi_coll_portals4_iallreduce_intra_fini(struct ompi_coll_portals4_request_t *request);
 
-int ompi_coll_portals4_gather_intra(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                                    void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                                    int root,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module);
-int ompi_coll_portals4_igather_intra(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                                     void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                                     int root,
-                                     struct ompi_communicator_t *comm,
-                                     ompi_request_t **request,
-                                     mca_coll_base_module_t *module);
+int ompi_coll_portals4_gather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_portals4_igather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module);
 int ompi_coll_portals4_igather_intra_fini(struct ompi_coll_portals4_request_t *request);
 
-int ompi_coll_portals4_scatter_intra(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                                     void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                                     int root,
-                                     struct ompi_communicator_t *comm,
-                                     mca_coll_base_module_t *module);
-int ompi_coll_portals4_iscatter_intra(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                                      void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                                      int root,
-                                      struct ompi_communicator_t *comm,
-                                      ompi_request_t **request,
-                                      mca_coll_base_module_t *module);
+int ompi_coll_portals4_scatter_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_portals4_iscatter_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module);
 int ompi_coll_portals4_iscatter_intra_fini(struct ompi_coll_portals4_request_t *request);
 
 

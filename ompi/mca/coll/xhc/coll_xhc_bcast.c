@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021-2024 Computer Architecture and VLSI Systems (CARV)
  *                         Laboratory, ICS Forth. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -388,10 +389,14 @@ void mca_coll_xhc_bcast_fini(xhc_bcast_ctx_t *ctx) {
 
 // ------------------------------------------------
 
-int mca_coll_xhc_bcast(void *buf, size_t count, ompi_datatype_t *datatype, int root,
-        ompi_communicator_t *ompi_comm, mca_coll_base_module_t *ompi_module) {
+int mca_coll_xhc_bcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module) {
 
-    xhc_module_t *module = (xhc_module_t *) ompi_module;
+    ompi_communicator_t *ompi_comm = comm;
+
+    ompi_datatype_t *datatype = args->src.info.datatype;
+    int root = args->root;
+
+    xhc_module_t *xhc_module = (xhc_module_t *) module;
 
     // ---
 
@@ -401,10 +406,10 @@ int mca_coll_xhc_bcast(void *buf, size_t count, ompi_datatype_t *datatype, int r
         goto _fallback;
     }
 
-    if(!module->zcopy_support) {
+    if(!xhc_module->zcopy_support) {
         size_t dtype_size; ompi_datatype_type_size(datatype, &dtype_size);
-        size_t cico_size = module->op_config[XHC_BCAST].cico_max;
-        if(count * dtype_size > cico_size) {
+        size_t cico_size = xhc_module->op_config[XHC_BCAST].cico_max;
+        if(args->src.info.count * dtype_size > cico_size) {
             WARN_ONCE("coll:xhc: Warning: No smsc support; utilizing fallback "
                 "component for bcast greater than %zu bytes", cico_size);
             goto _fallback;
@@ -416,13 +421,13 @@ int mca_coll_xhc_bcast(void *buf, size_t count, ompi_datatype_t *datatype, int r
     xhc_bcast_ctx_t ctx;
     int err;
 
-    if(!module->op_data[XHC_BCAST].init) {
-        err = xhc_init_op(module, ompi_comm, XHC_BCAST);
+    if(!xhc_module->op_data[XHC_BCAST].init) {
+        err = xhc_init_op(xhc_module, ompi_comm, XHC_BCAST);
         if(OMPI_SUCCESS != err) {goto _fallback_permanent;}
     }
 
-    err = xhc_bcast_init(buf, count, datatype,
-        root, ompi_comm, module, &ctx);
+    err = xhc_bcast_init(args->src.info.buffer, args->src.info.count, datatype,
+        root, ompi_comm, xhc_module, &ctx);
     if(OMPI_SUCCESS != err) {return err;}
 
     /* Safe to alter the CICO buffer without checking any flags,
@@ -458,11 +463,11 @@ int mca_coll_xhc_bcast(void *buf, size_t count, ompi_datatype_t *datatype, int r
 
 _fallback_permanent:
 
-    XHC_INSTALL_FALLBACK(module,
+    XHC_INSTALL_FALLBACK(xhc_module,
         ompi_comm, XHC_BCAST, bcast);
 
 _fallback:
 
-    return XHC_CALL_FALLBACK(module->prev_colls, XHC_BCAST,
-        bcast, buf, count, datatype, root, ompi_comm);
+    return XHC_CALL_FALLBACK(xhc_module->prev_colls, XHC_BCAST,
+        bcast, args, ompi_comm);
 }

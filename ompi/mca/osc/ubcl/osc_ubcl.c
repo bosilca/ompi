@@ -2,6 +2,7 @@
 /*
  * Copyright (c) 2025-2026 Bull SAS.  All rights reserved.
  *
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -440,7 +441,9 @@ static int win_free(struct ompi_win_t *win)
         return ret;
     }
 
-    module->comm->c_coll->coll_barrier(module->comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    module->comm->c_coll->coll_barrier(&coll_args, module->comm,
                                        module->comm->c_coll->coll_barrier_module);
 
     wid = module->wid;

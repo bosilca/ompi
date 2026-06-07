@@ -6,6 +6,7 @@
  * Copyright (c) 2022      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights reserved.
  * Copyright (c) 2024      Advanced Micro Devices, Inc. All Rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -27,14 +28,11 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_accelerator_allgather(const void *sbuf, size_t scount,
-                       struct ompi_datatype_t *sdtype,
-                       void *rbuf, size_t rcount,
-                       struct ompi_datatype_t *rdtype,
-                       struct ompi_communicator_t *comm,
-                       mca_coll_base_module_t *module)
+mca_coll_accelerator_allgather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_accelerator_module_t *s = (mca_coll_accelerator_module_t*) module;
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
     ptrdiff_t sgap, rgap;
     char *rbuf1 = NULL, *sbuf1 = NULL, *rbuf2 = NULL;
     int sbuf_dev, rbuf_dev;
@@ -42,7 +40,7 @@ mca_coll_accelerator_allgather(const void *sbuf, size_t scount,
     int rc;
     int comm_size = ompi_comm_size(comm);
     
-    sbufsize = opal_datatype_span(&sdtype->super, scount, &sgap);
+    sbufsize = opal_datatype_span(&args->src.info.datatype->super, args->src.info.count, &sgap);
     rc = mca_coll_accelerator_check_buf((void *)sbuf, &sbuf_dev);
     if (rc < 0) {
         return rc;
@@ -58,7 +56,7 @@ mca_coll_accelerator_allgather(const void *sbuf, size_t scount,
         sbuf = sbuf1 - sgap;
     }
 
-    rbufsize = opal_datatype_span(&rdtype->super, rcount, &rgap);
+    rbufsize = opal_datatype_span(&args->dst.info.datatype->super, args->dst.info.count, &rgap);
     rc = mca_coll_accelerator_check_buf(rbuf, &rbuf_dev);
     if (rc < 0) {
         goto exit;
@@ -77,8 +75,9 @@ mca_coll_accelerator_allgather(const void *sbuf, size_t scount,
         rbuf2 = rbuf; /* save original buffer */
         rbuf = rbuf1 - rgap;
     }
-    rc = s->c_coll.coll_allgather(sbuf, scount, sdtype, rbuf, rcount, rdtype,
-                                  comm, s->c_coll.coll_allgather_module);
+    ompi_coll_args_t _fwd;
+    ompi_coll_args_allgather(&_fwd, sbuf, args->src.info.count, args->src.info.datatype, rbuf, args->dst.info.count, args->dst.info.datatype);
+    rc = s->c_coll.coll_allgather(&_fwd, comm, s->c_coll.coll_allgather_module);
     if (rc < 0) {
         goto exit;
     }

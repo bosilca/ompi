@@ -13,6 +13,7 @@
  * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -38,13 +39,11 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_inter_scatter_inter(const void *sbuf, size_t scount,
-                             struct ompi_datatype_t *sdtype,
-                             void *rbuf, size_t rcount,
-                             struct ompi_datatype_t *rdtype,
-                             int root, struct ompi_communicator_t *comm,
-                             mca_coll_base_module_t *module)
+mca_coll_inter_scatter_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
+    int root = args->root;
     int rank, size, err;
 
     /* Initialize */
@@ -78,16 +77,16 @@ mca_coll_inter_scatter_inter(const void *sbuf, size_t scount,
             }
 	}
 	/* Perform the scatter locally with the first process as root */
-	err = comm->c_local_comm->c_coll->coll_scatter(ptmp, rcount, rdtype,
-						      rbuf, rcount, rdtype,
-						      0, comm->c_local_comm,
+	ompi_coll_args_t _s;
+	ompi_coll_args_scatter(&_s, ptmp, rcount, rdtype, args->dst.info.buffer, rcount, rdtype, 0);
+	err = comm->c_local_comm->c_coll->coll_scatter(&_s, comm->c_local_comm,
                                                       comm->c_local_comm->c_coll->coll_scatter_module);
 	if (NULL != ptmp_free) {
 	    free(ptmp_free);
 	}
     } else {
 	/* Root sends data to the first process in the remote group */
-	err = MCA_PML_CALL(send(sbuf, scount*(size_t)size, sdtype, 0,
+	err = MCA_PML_CALL(send(args->src.info.buffer, args->src.info.count*(size_t)size, args->src.info.datatype, 0,
 				MCA_COLL_BASE_TAG_SCATTER,
 				MCA_PML_BASE_SEND_STANDARD, comm));
 	if (OMPI_SUCCESS != err) {

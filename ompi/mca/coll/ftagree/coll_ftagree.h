@@ -4,6 +4,7 @@
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -22,6 +23,7 @@
 #include "opal/class/opal_free_list.h"
 
 #include "ompi/mca/coll/coll.h"
+#include "ompi/mca/coll/base/coll_base_functions.h"
 #include "ompi/mca/coll/base/coll_tags.h"
 #include "ompi/request/request.h"
 #include "ompi/group/group.h"
@@ -33,7 +35,7 @@ BEGIN_C_DECLS
 
 /* Globally exported variables */
 
-OMPI_DECLSPEC extern const mca_coll_base_component_3_0_0_t
+OMPI_DECLSPEC extern const mca_coll_base_component_4_0_0_t
 mca_coll_ftagree_component;
 extern int mca_coll_ftagree_priority;
 
@@ -105,37 +107,13 @@ mca_coll_base_module_t
 
 /* Early termination algorithm */
 int
-mca_coll_ftagree_eta_intra(     void* contrib,
-                                size_t dt_count,
-                                ompi_datatype_t *dt,
-                                ompi_op_t *op,
-                                ompi_group_t **group, bool grp_update,
-                                ompi_communicator_t* comm,
-                                mca_coll_base_module_t *module);
+mca_coll_ftagree_eta_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 /* Early returning algorithm */
 int
-mca_coll_ftagree_era_intra(     void* contrib,
-                                size_t dt_count,
-                                ompi_datatype_t *dt,
-                                ompi_op_t *op,
-                                ompi_group_t **group, bool grp_update,
-                                ompi_communicator_t* comm,
+mca_coll_ftagree_era_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int mca_coll_ftagree_iera_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request,
                                 mca_coll_base_module_t *module);
-int mca_coll_ftagree_iera_intra(void* contrib,
-                                size_t dt_count,
-                                ompi_datatype_t *dt,
-                                ompi_op_t *op,
-                                ompi_group_t **group, bool grp_update,
-                                ompi_communicator_t* comm,
-                                ompi_request_t **request,
-                                mca_coll_base_module_t *module);
-int mca_coll_ftagree_era_inter( void* contrib,
-                                size_t dt_count,
-                                ompi_datatype_t *dt,
-                                ompi_op_t *op,
-                                ompi_group_t **group, bool grp_update,
-                                ompi_communicator_t* comm,
-                                mca_coll_base_module_t *module);
+int mca_coll_ftagree_era_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /*
  * Utility functions

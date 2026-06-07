@@ -14,6 +14,7 @@
  * Copyright (c) 2024      NVIDIA CORPORATION. All rights reserved.
  * Copyright (c) 2025      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -32,51 +33,31 @@
 #include "ompi/request/request.h"
 #include "ompi/communicator/communicator.h"
 #include "ompi/mca/coll/base/coll_tags.h"
+#include "ompi/mca/coll/coll_args.h"
 #include "ompi/op/op.h"
 #include "ompi/mca/pml/pml.h"
 
 BEGIN_C_DECLS
 
 /**
- * The largest array we need to track collective temporary memory. Right now
- * the record is for ialltoallw, for the array of send and receive types,
- * count and displacements.
- */
-#define OMPI_REQ_NB_RELEASE_ARRAYS 7
-
-/**
  * Request structure to be returned by non-blocking
  * collective operations.
+ *
+ * The operation payload is carried in the embedded ompi_coll_args_t. On
+ * completion (for a one-shot request) or on free (for a persistent one)
+ * the resources owned by the coll layer are released: any retained op /
+ * datatypes recorded in args, and any input count/displacement/datatype
+ * arrays whose OMPI_COLL_ARGS_FREE_* bit is set in args.mask.
  */
 struct ompi_coll_base_nbc_request_t {
     ompi_request_t super;
-    union {
-        ompi_request_complete_fn_t req_complete_cb;
-        ompi_request_free_fn_t req_free;
-    } cb;
-    void *req_complete_cb_data;
-    struct {
-        union {
-            struct {
-                ompi_op_t *op;
-                ompi_datatype_t *datatype;
-            } op;
-            struct {
-                ompi_datatype_t *stype;
-                ompi_datatype_t *rtype;
-            } types;
-            struct {
-                opal_object_t *objs[2];
-            } objs;
-            struct {
-                ompi_datatype_t * const *stypes;
-                ompi_datatype_t * const *rtypes;
-                int scount;
-                int rcount;
-            } vecs;
-        } refcounted;
-        void* release_arrays[OMPI_REQ_NB_RELEASE_ARRAYS];
-    } data;
+    /* Downstream callbacks that the coll layer chains in front of: the
+     * completion callback (one-shot/per-cycle) and the free callback
+     * (persistent teardown) are saved separately so both can be honored. */
+    ompi_request_complete_fn_t saved_complete_cb;
+    void *saved_complete_cb_data;
+    ompi_request_free_fn_t saved_free_fn;
+    ompi_coll_args_t args;
 };
 
 OMPI_DECLSPEC OBJ_CLASS_DECLARATION(ompi_coll_base_nbc_request_t);
@@ -95,42 +76,6 @@ ompi_coll_base_nbc_reserve_tags(ompi_communicator_t* comm, int32_t reserve)
         goto reread_tag;
     }
     return tag;
-}
-
-/**
- * Append an array to a request object to be freed upon completion
- * of the associated operation.
- * The request object must be of type ompi_coll_base_nbc_request_t.
- */
-__opal_attribute_always_inline__ static inline int
-ompi_coll_base_append_array_to_release(struct ompi_request_t *req, void *array_ptr)
-{
-    int i, ret = OMPI_SUCCESS;
-    struct ompi_coll_base_nbc_request_t *request = (struct ompi_coll_base_nbc_request_t *)req;
-
-    /*
-     * important sanity check - doing steps below on a non-libnbc request can lead
-     * to difficult to debug memory corruption problems
-     */
-    assert(request->super.req_type == OMPI_REQUEST_COLL);
-
-    for(i = 0; i < OMPI_REQ_NB_RELEASE_ARRAYS; i++ ) {
-        if (NULL == request->data.release_arrays[i]) {
-            break;
-        }
-    }
-
-    if (OMPI_REQ_NB_RELEASE_ARRAYS > i) {
-        request->data.release_arrays[i] = array_ptr;
-        ++i;
-        if (OMPI_REQ_NB_RELEASE_ARRAYS > i) {
-            request->data.release_arrays[i] = NULL;
-        }
-    } else {
-        ret = OMPI_ERR_OUT_OF_RESOURCE;
-    }
-
-    return ret;
 }
 
 typedef struct ompi_coll_base_nbc_request_t ompi_coll_base_nbc_request_t;

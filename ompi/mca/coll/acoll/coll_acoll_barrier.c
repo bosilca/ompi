@@ -1,6 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode:nil -*- */
 /*
  * Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -242,7 +243,7 @@ int mca_coll_acoll_barrier_shm_f(struct ompi_communicator_t *comm, mca_coll_base
  * Memory:      No additional memory requirements beyond user-supplied buffers.
  *
  */
-int mca_coll_acoll_barrier_intra(struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
+int mca_coll_acoll_barrier_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int size, ssize, bsize;
     int err = MPI_SUCCESS;
@@ -257,7 +258,7 @@ int mca_coll_acoll_barrier_intra(struct ompi_communicator_t *comm, mca_coll_base
 
     /* Fallback to linear if subcomms structure is not obtained */
     if (NULL == subc) {
-        return ompi_coll_base_barrier_intra_basic_linear(comm, module);
+        return ompi_coll_base_barrier_intra_basic_linear(args, comm, module);
     }
 
     size = ompi_comm_size(comm);

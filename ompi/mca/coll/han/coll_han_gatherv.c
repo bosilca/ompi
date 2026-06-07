@@ -8,6 +8,7 @@
  * Copyright (c)           Amazon.com, Inc. or its affiliates.
  *                         All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -59,11 +60,16 @@
  * 2. No **gap** exists between data from the same node, other than the root's node, in the output
  *    buffer - it is ok if data from different nodes has gap.
  */
-int mca_coll_han_gatherv_intra(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                               void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t displs,
-                               struct ompi_datatype_t *rdtype, int root,
-                               struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
+int mca_coll_han_gatherv_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info_v.buffer;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    ompi_disp_array_t displs = args->dst.info_v.displacements;
+    struct ompi_datatype_t *rdtype = args->dst.info_v.datatype;
+    int root = args->root;
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
     int w_rank, w_size;              /* information about the global communicator */
     int root_low_rank, root_up_rank; /* root ranks for both sub-communicators */
@@ -81,8 +87,7 @@ int mca_coll_han_gatherv_intra(const void *sbuf, size_t scount, struct ompi_data
              "han cannot handle gatherv with this communicator. Fall back on another component\n"));
         /* HAN cannot work with this communicator so fallback on all collectives */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
-        return han_module->previous_gatherv(sbuf, scount, sdtype, rbuf, rcounts, displs, rdtype,
-                                            root, comm, han_module->previous_gatherv_module);
+        return han_module->previous_gatherv(args, comm, han_module->previous_gatherv_module);
     }
 
     /* Topo must be initialized to know rank distribution which then is used to determine if han can
@@ -96,8 +101,7 @@ int mca_coll_han_gatherv_intra(const void *sbuf, size_t scount, struct ompi_data
          * future calls will then be automatically redirected.
          */
         HAN_UNINSTALL_COLL_API(comm, han_module, gatherv);
-        return han_module->previous_gatherv(sbuf, scount, sdtype, rbuf, rcounts, displs, rdtype,
-                                            root, comm, han_module->previous_gatherv_module);
+        return han_module->previous_gatherv(args, comm, han_module->previous_gatherv_module);
     }
 
     w_rank = ompi_comm_rank(comm);
@@ -155,8 +159,10 @@ int mca_coll_han_gatherv_intra(const void *sbuf, size_t scount, struct ompi_data
         /* Low Gatherv */
         OMPI_COUNT_ARRAY_INIT(&low_rcounts_desc, low_rcounts);
         OMPI_DISP_ARRAY_INIT(&low_displs_desc, low_displs);
-        low_comm->c_coll->coll_gatherv(sbuf, scount, sdtype, rbuf, low_rcounts_desc,
-                                       low_displs_desc, rdtype, root_low_rank, low_comm,
+        ompi_coll_args_t _lgv;
+        ompi_coll_args_gatherv(&_lgv, sbuf, scount, sdtype, rbuf, low_rcounts_desc,
+                               low_displs_desc, rdtype, root_low_rank);
+        low_comm->c_coll->coll_gatherv(&_lgv, low_comm,
                                        low_comm->c_coll->coll_gatherv_module);
 
         char *tmp_rbuf = rbuf;
@@ -240,8 +246,10 @@ int mca_coll_han_gatherv_intra(const void *sbuf, size_t scount, struct ompi_data
         /* Up Gatherv */
         OMPI_COUNT_ARRAY_INIT(&up_rcounts_desc, up_rcounts);
         OMPI_DISP_ARRAY_INIT(&up_displs_desc, up_displs);
-        up_comm->c_coll->coll_gatherv(sbuf, 0, sdtype, tmp_rbuf, up_rcounts_desc, up_displs_desc, rdtype,
-                                      root_up_rank, up_comm, up_comm->c_coll->coll_gatherv_module);
+        ompi_coll_args_t _ugv;
+        ompi_coll_args_gatherv(&_ugv, sbuf, 0, sdtype, tmp_rbuf, up_rcounts_desc, up_displs_desc,
+                               rdtype, root_up_rank);
+        up_comm->c_coll->coll_gatherv(&_ugv, up_comm, up_comm->c_coll->coll_gatherv_module);
 
         /* Use a temp buffer to reorder the output buffer if needed */
         if (need_bounce_buf) {
@@ -289,8 +297,11 @@ int mca_coll_han_gatherv_intra(const void *sbuf, size_t scount, struct ompi_data
     /* #################### Root's local peers ########################### */
     if (root_up_rank == up_rank) {
         /* Low Gatherv */
-        low_comm->c_coll->coll_gatherv(sbuf, scount, sdtype, NULL, 0, 0, NULL, root_low_rank,
-                                       low_comm, low_comm->c_coll->coll_gatherv_module);
+        ompi_coll_args_t _lgv;
+        ompi_coll_args_gatherv(&_lgv, sbuf, scount, sdtype, NULL, OMPI_COUNT_ARRAY_NULL,
+                               OMPI_DISP_ARRAY_NULL, NULL, root_low_rank);
+        low_comm->c_coll->coll_gatherv(&_lgv, low_comm,
+                                       low_comm->c_coll->coll_gatherv_module);
         return OMPI_SUCCESS;
     }
 
@@ -303,12 +314,17 @@ int mca_coll_han_gatherv_intra(const void *sbuf, size_t scount, struct ompi_data
     /* #################### Other node followers ########################### */
     if (root_low_rank != low_rank) {
         /* Low Gather - Gather each local peer's send data size */
-        low_comm->c_coll->coll_gather((const void *) &send_size, sizeof(size_t), MPI_BYTE, NULL,
-                                      sizeof(size_t), MPI_BYTE, root_low_rank, low_comm,
+        ompi_coll_args_t _lg;
+        ompi_coll_args_gather(&_lg, (const void *) &send_size, sizeof(size_t), MPI_BYTE, NULL,
+                              sizeof(size_t), MPI_BYTE, root_low_rank);
+        low_comm->c_coll->coll_gather(&_lg, low_comm,
                                       low_comm->c_coll->coll_gather_module);
         /* Low Gatherv */
-        low_comm->c_coll->coll_gatherv(sbuf, scount, sdtype, NULL, 0, 0, NULL, root_low_rank,
-                                       low_comm, low_comm->c_coll->coll_gatherv_module);
+        ompi_coll_args_t _lgv;
+        ompi_coll_args_gatherv(&_lgv, sbuf, scount, sdtype, NULL, OMPI_COUNT_ARRAY_NULL,
+                               OMPI_DISP_ARRAY_NULL, NULL, root_low_rank);
+        low_comm->c_coll->coll_gatherv(&_lgv, low_comm,
+                                       low_comm->c_coll->coll_gatherv_module);
         return OMPI_SUCCESS;
     }
 
@@ -325,8 +341,10 @@ int mca_coll_han_gatherv_intra(const void *sbuf, size_t scount, struct ompi_data
     }
 
     /* Low Gather -  Gather local peers' send data sizes */
-    low_comm->c_coll->coll_gather((const void *) &send_size, sizeof(size_t), MPI_BYTE,
-                                  (void *) low_rcounts, sizeof(size_t), MPI_BYTE, root_low_rank, low_comm,
+    ompi_coll_args_t _lg;
+    ompi_coll_args_gather(&_lg, (const void *) &send_size, sizeof(size_t), MPI_BYTE,
+                          (void *) low_rcounts, sizeof(size_t), MPI_BYTE, root_low_rank);
+    low_comm->c_coll->coll_gather(&_lg, low_comm,
                                   low_comm->c_coll->coll_gather_module);
 
     low_displs = malloc(low_size * sizeof(ptrdiff_t));
@@ -353,14 +371,18 @@ int mca_coll_han_gatherv_intra(const void *sbuf, size_t scount, struct ompi_data
     /* Low Gatherv */
     OMPI_COUNT_ARRAY_INIT(&low_rcounts_desc, low_rcounts);
     OMPI_DISP_ARRAY_INIT(&low_displs_desc, low_displs);
-    low_comm->c_coll->coll_gatherv(sbuf, scount, sdtype, (void *) tmp_buf,
-                                   low_rcounts_desc, low_displs_desc,
-                                   MPI_BYTE, root_low_rank, low_comm,
+    ompi_coll_args_t _lgv;
+    ompi_coll_args_gatherv(&_lgv, sbuf, scount, sdtype, (void *) tmp_buf,
+                           low_rcounts_desc, low_displs_desc,
+                           MPI_BYTE, root_low_rank);
+    low_comm->c_coll->coll_gatherv(&_lgv, low_comm,
                                    low_comm->c_coll->coll_gatherv_module);
 
     /* Up Gatherv */
-    up_comm->c_coll->coll_gatherv(tmp_buf, total_rsize, MPI_BYTE, NULL, 0, 0, NULL,
-                                  root_up_rank, up_comm, up_comm->c_coll->coll_gatherv_module);
+    ompi_coll_args_t _ugv;
+    ompi_coll_args_gatherv(&_ugv, tmp_buf, total_rsize, MPI_BYTE, NULL, OMPI_COUNT_ARRAY_NULL,
+                           OMPI_DISP_ARRAY_NULL, NULL, root_up_rank);
+    up_comm->c_coll->coll_gatherv(&_ugv, up_comm, up_comm->c_coll->coll_gatherv_module);
 
 node_leader_out:
     if (low_rcounts) {

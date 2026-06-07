@@ -7,6 +7,7 @@
  * Copyright (c) 2021      FUJITSU LIMITED.  All rights reserved.
  * Copyright (c) 2025      Amazon.com, Inc. or its affiliates.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -127,12 +128,7 @@ ompi_coll_tuned_allgather_intra_check_forced_init(coll_tuned_force_algorithm_mca
     return (MPI_SUCCESS);
 }
 
-int ompi_coll_tuned_allgather_intra_do_this(const void *sbuf, size_t scount,
-                                            struct ompi_datatype_t *sdtype,
-                                            void* rbuf, size_t rcount,
-                                            struct ompi_datatype_t *rdtype,
-                                            struct ompi_communicator_t *comm,
-                                            mca_coll_base_module_t *module,
+int ompi_coll_tuned_allgather_intra_do_this(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                             int algorithm, int faninout, int segsize)
 {
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
@@ -140,41 +136,23 @@ int ompi_coll_tuned_allgather_intra_do_this(const void *sbuf, size_t scount,
                  algorithm, faninout, segsize));
     switch (algorithm) {
     case (0):
-        return ompi_coll_tuned_allgather_intra_dec_fixed(sbuf, scount, sdtype,
-                                                         rbuf, rcount, rdtype,
-                                                         comm, module);
+        return ompi_coll_tuned_allgather_intra_dec_fixed(args, comm, module);
     case (1):
-        return ompi_coll_base_allgather_intra_basic_linear(sbuf, scount, sdtype,
-                                                           rbuf, rcount, rdtype,
-                                                           comm, module);
+        return ompi_coll_base_allgather_intra_basic_linear(args, comm, module);
     case (2):
-        return ompi_coll_base_allgather_intra_k_bruck(sbuf, scount, sdtype,
-                                                      rbuf, rcount, rdtype,
-                                                      comm, module, faninout);
+        return ompi_coll_base_allgather_intra_k_bruck(args, comm, module, faninout);
     case (3):
-        return ompi_coll_base_allgather_intra_recursivedoubling(sbuf, scount, sdtype,
-                                                                rbuf, rcount, rdtype,
-                                                                comm, module);
+        return ompi_coll_base_allgather_intra_recursivedoubling(args, comm, module);
     case (4):
-        return ompi_coll_base_allgather_intra_ring(sbuf, scount, sdtype,
-                                                   rbuf, rcount, rdtype,
-                                                   comm, module);
+        return ompi_coll_base_allgather_intra_ring(args, comm, module);
     case (5):
-        return ompi_coll_base_allgather_intra_neighborexchange(sbuf, scount, sdtype,
-                                                               rbuf, rcount, rdtype,
-                                                               comm, module);
+        return ompi_coll_base_allgather_intra_neighborexchange(args, comm, module);
     case (6):
-        return ompi_coll_base_allgather_intra_two_procs(sbuf, scount, sdtype,
-                                                        rbuf, rcount, rdtype,
-                                                        comm, module);
+        return ompi_coll_base_allgather_intra_two_procs(args, comm, module);
     case (7):
-        return ompi_coll_base_allgather_intra_sparbit(sbuf, scount, sdtype,
-                                                        rbuf, rcount, rdtype,
-                                                        comm, module);
+        return ompi_coll_base_allgather_intra_sparbit(args, comm, module);
     case (8):
-        return ompi_coll_base_allgather_direct_messaging(sbuf, scount, sdtype,
-                                                         rbuf, rcount, rdtype,
-                                                         comm, module);
+        return ompi_coll_base_allgather_direct_messaging(args, comm, module);
     } /* switch */
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
                  "coll:tuned:allgather_intra_do_this attempt to select algorithm %d when only 0-%d is valid?",

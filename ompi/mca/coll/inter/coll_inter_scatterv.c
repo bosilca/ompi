@@ -14,6 +14,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
  * Copyright (c) 2026      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -40,13 +41,10 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_inter_scatterv_inter(const void *sbuf, ompi_count_array_t scounts,
-                              ompi_disp_array_t disps, struct ompi_datatype_t *sdtype,
-                              void *rbuf, size_t rcount,
-                              struct ompi_datatype_t *rdtype, int root,
-                              struct ompi_communicator_t *comm,
-                              mca_coll_base_module_t *module)
+mca_coll_inter_scatterv_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
+    int root = args->root;
     int i, rank, size, err, size_local;
     size_t total = 0;
     size_t *counts=NULL;
@@ -104,9 +102,10 @@ mca_coll_inter_scatterv_inter(const void *sbuf, ompi_count_array_t scounts,
 	OMPI_COUNT_ARRAY_INIT(&counts_arg, counts);
 	OMPI_DISP_ARRAY_INIT(&displace_arg, displace);
 	/* perform the scatterv locally */
-	err = comm->c_local_comm->c_coll->coll_scatterv(ptmp, counts_arg, displace_arg,
-						       rdtype, rbuf, rcount,
-						       rdtype, 0, comm->c_local_comm,
+	ompi_coll_args_t _sv;
+	ompi_coll_args_scatterv(&_sv, ptmp, counts_arg, displace_arg, rdtype,
+				args->dst.info.buffer, args->dst.info.count, rdtype, 0);
+	err = comm->c_local_comm->c_coll->coll_scatterv(&_sv, comm->c_local_comm,
                                                        comm->c_local_comm->c_coll->coll_scatterv_module);
 	if (OMPI_SUCCESS != err) {
 	    return err;
@@ -129,7 +128,7 @@ mca_coll_inter_scatterv_inter(const void *sbuf, ompi_count_array_t scounts,
 	    return OMPI_ERR_OUT_OF_RESOURCE;
 	}
 	for (i = 0; i < size; ++i) {
-	    tmp_scounts_root[i] = ompi_count_array_get(scounts, i);
+	    tmp_scounts_root[i] = ompi_count_array_get(args->src.info_v.counts, i);
 	}
 	err = MCA_PML_CALL(send(tmp_scounts_root, sizeof(size_t) * size, MPI_BYTE, 0,
 				MCA_COLL_BASE_TAG_SCATTERV,
@@ -140,10 +139,10 @@ mca_coll_inter_scatterv_inter(const void *sbuf, ompi_count_array_t scounts,
 	    return err;
 	}
 
-	ompi_datatype_create_indexed(size,scounts,disps,sdtype,&ndtype);
+	ompi_datatype_create_indexed(size,args->src.info_v.counts,args->src.info_v.displacements,args->src.info_v.datatype,&ndtype);
 	ompi_datatype_commit(&ndtype);
 
-	err = MCA_PML_CALL(send(sbuf, 1, ndtype, 0,
+	err = MCA_PML_CALL(send(args->src.info_v.buffer, 1, ndtype, 0,
 				MCA_COLL_BASE_TAG_SCATTERV,
 				MCA_PML_BASE_SEND_STANDARD, comm));
 	if (OMPI_SUCCESS != err) {

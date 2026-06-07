@@ -7,6 +7,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2025      Amazon.com, Inc. or its affiliates.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -135,11 +136,7 @@ int ompi_coll_tuned_bcast_intra_check_forced_init (coll_tuned_force_algorithm_mc
     return (MPI_SUCCESS);
 }
 
-int ompi_coll_tuned_bcast_intra_do_this(void *buf, size_t count,
-                                        struct ompi_datatype_t *dtype,
-                                        int root,
-                                        struct ompi_communicator_t *comm,
-                                        mca_coll_base_module_t *module,
+int ompi_coll_tuned_bcast_intra_do_this(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                         int algorithm, int faninout, int segsize)
 {
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
@@ -148,26 +145,26 @@ int ompi_coll_tuned_bcast_intra_do_this(void *buf, size_t count,
 
     switch (algorithm) {
     case (0):
-        return ompi_coll_tuned_bcast_intra_dec_fixed( buf, count, dtype, root, comm, module );
+        return ompi_coll_tuned_bcast_intra_dec_fixed( args, comm, module );
     case (1):
-        return ompi_coll_base_bcast_intra_basic_linear( buf, count, dtype, root, comm, module );
+        return ompi_coll_base_bcast_intra_basic_linear( args, comm, module );
     case (2):
-        return ompi_coll_base_bcast_intra_chain( buf, count, dtype, root, comm, module, segsize, faninout );
+        return ompi_coll_base_bcast_intra_chain( args, comm, module, segsize, faninout );
     case (3):
-        return ompi_coll_base_bcast_intra_pipeline( buf, count, dtype, root, comm, module, segsize );
+        return ompi_coll_base_bcast_intra_pipeline( args, comm, module, segsize );
     case (4):
-        return ompi_coll_base_bcast_intra_split_bintree( buf, count, dtype, root, comm, module, segsize );
+        return ompi_coll_base_bcast_intra_split_bintree( args, comm, module, segsize );
     case (5):
-        return ompi_coll_base_bcast_intra_bintree( buf, count, dtype, root, comm, module, segsize );
+        return ompi_coll_base_bcast_intra_bintree( args, comm, module, segsize );
     case (6):
-        return ompi_coll_base_bcast_intra_binomial( buf, count, dtype, root, comm, module, segsize );
+        return ompi_coll_base_bcast_intra_binomial( args, comm, module, segsize );
     case (7):
-        return ompi_coll_base_bcast_intra_knomial(buf, count, dtype, root, comm, module,
+        return ompi_coll_base_bcast_intra_knomial(args, comm, module,
                                                   segsize, coll_tuned_bcast_knomial_radix);
     case (8):
-        return ompi_coll_base_bcast_intra_scatter_allgather(buf, count, dtype, root, comm, module, segsize);
+        return ompi_coll_base_bcast_intra_scatter_allgather(args, comm, module, segsize);
     case (9):
-        return ompi_coll_base_bcast_intra_scatter_allgather_ring(buf, count, dtype, root, comm, module, segsize);
+        return ompi_coll_base_bcast_intra_scatter_allgather_ring(args, comm, module, segsize);
     } /* switch */
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
         "coll:tuned:bcast_intra_do_this attempt to select algorithm %d when only 0-%d is valid?",

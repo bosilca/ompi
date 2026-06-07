@@ -18,6 +18,7 @@
  *                         reserved.
  * Copyright (c) 2024      Advanced Micro Devices, Inc. All rights reserved.
  * Copyright (c) 2026      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -202,11 +203,10 @@ int mca_fcoll_vulcan_file_write_all (struct ompio_file_t *fh,
 #if OMPIO_FCOLL_WANT_TIME_BREAKDOWN
     start_comm_time = MPI_Wtime();
 #endif
-    ret = fh->f_comm->c_coll->coll_allreduce (MPI_IN_PLACE,
-                                              broken_total_lengths,
-                                              fh->f_num_aggrs,
-                                              MPI_LONG,
-                                              MPI_SUM,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_allreduce(&coll_args, MPI_IN_PLACE, broken_total_lengths,
+                             fh->f_num_aggrs, MPI_LONG, MPI_SUM);
+    ret = fh->f_comm->c_coll->coll_allreduce (&coll_args,
                                               fh->f_comm,
                                               fh->f_comm->c_coll->coll_allreduce_module);
     if( OMPI_SUCCESS != ret){
@@ -237,12 +237,9 @@ int mca_fcoll_vulcan_file_write_all (struct ompio_file_t *fh,
 #if OMPIO_FCOLL_WANT_TIME_BREAKDOWN
     start_comm_time = MPI_Wtime();
 #endif
-    ret = fh->f_comm->c_coll->coll_allgather(broken_counts,
-                                                 fh->f_num_aggrs,
-                                                 MPI_INT,
-                                                 result_counts,
-                                                 fh->f_num_aggrs,
-                                                 MPI_INT,
+    ompi_coll_args_allgather(&coll_args, broken_counts, fh->f_num_aggrs, MPI_INT,
+                             result_counts, fh->f_num_aggrs, MPI_INT);
+    ret = fh->f_comm->c_coll->coll_allgather(&coll_args,
                                                  fh->f_comm,
                                                  fh->f_comm->c_coll->coll_allgather_module);
     if( OMPI_SUCCESS != ret){
@@ -311,13 +308,10 @@ int mca_fcoll_vulcan_file_write_all (struct ompio_file_t *fh,
 #endif
         OMPI_COUNT_ARRAY_INIT(&fview_count_desc, aggr_data[i]->fview_count);
         OMPI_DISP_ARRAY_INIT(&displs_desc, displs);
-        ret = fh->f_comm->c_coll->coll_allgatherv (broken_iov_arrays[i],
-                                                   broken_counts[i],
-                                                   fh->f_iov_type,
-                                                   aggr_data[i]->global_iov_array,
-                                                   fview_count_desc,
-                                                   displs_desc,
-                                                   fh->f_iov_type,
+        ompi_coll_args_allgatherv(&coll_args, broken_iov_arrays[i], broken_counts[i],
+                                  fh->f_iov_type, aggr_data[i]->global_iov_array,
+                                  fview_count_desc, displs_desc, fh->f_iov_type);
+        ret = fh->f_comm->c_coll->coll_allgatherv (&coll_args,
                                                    fh->f_comm,
                                                    fh->f_comm->c_coll->coll_allgatherv_module );
         if (OMPI_SUCCESS != ret){
@@ -973,10 +967,13 @@ int mca_fcoll_vulcan_minmax (ompio_file_t *fh, struct iovec *iov, int iov_count,
         min = 0;
         max = 0;
     }
-    fh->f_comm->c_coll->coll_allreduce ( &min, &globalmin, 1, MPI_LONG, MPI_MIN,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_allreduce(&coll_args, &min, &globalmin, 1, MPI_LONG, MPI_MIN);
+    fh->f_comm->c_coll->coll_allreduce ( &coll_args,
                                          fh->f_comm, fh->f_comm->c_coll->coll_allreduce_module);
     
-    fh->f_comm->c_coll->coll_allreduce ( &max, &globalmax, 1, MPI_LONG, MPI_MAX,
+    ompi_coll_args_allreduce(&coll_args, &max, &globalmax, 1, MPI_LONG, MPI_MAX);
+    fh->f_comm->c_coll->coll_allreduce ( &coll_args,
                                          fh->f_comm, fh->f_comm->c_coll->coll_allreduce_module);
 
     stripe_size = (globalmax - globalmin)/num_aggregators;

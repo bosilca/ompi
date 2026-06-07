@@ -6,6 +6,7 @@
  * Copyright (c) 2022      IBM Corporation. All rights reserved
  * Copyright (c) 2024      Amazon.com, Inc. or its affiliates. All Rights Reserved.
  *
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -375,27 +376,22 @@ get_algorithm(COLLTYPE_T coll_id,
  * calls the correct module if fallback mechanism is activated
  */
 int
-mca_coll_han_allgather_intra_dynamic(const void *sbuf, size_t scount,
-                                     struct ompi_datatype_t *sdtype,
-                                     void *rbuf, size_t rcount,
-                                     struct ompi_datatype_t *rdtype,
-                                     struct ompi_communicator_t *comm,
-                                     mca_coll_base_module_t *module)
+mca_coll_han_allgather_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_allgather_fn_t allgather;
+    mca_coll_base_module_coll_fn_t allgather;
     mca_coll_base_module_t *sub_module;
     size_t dtype_size;
     int rank, verbosity = 0;
 
     /* Compute configuration information for dynamic rules */
-    if( MPI_IN_PLACE != sbuf ) {
-        ompi_datatype_type_size(sdtype, &dtype_size);
-        dtype_size = dtype_size * scount;
+    if( MPI_IN_PLACE != args->src.info.buffer ) {
+        ompi_datatype_type_size(args->src.info.datatype, &dtype_size);
+        dtype_size = dtype_size * args->src.info.count;
     } else {
-        ompi_datatype_type_size(rdtype, &dtype_size);
-        dtype_size = dtype_size * rcount;
+        ompi_datatype_type_size(args->dst.info.datatype, &dtype_size);
+        dtype_size = dtype_size * args->dst.info.count;
     }
     sub_module = get_module(ALLGATHER,
                             dtype_size,
@@ -456,7 +452,7 @@ mca_coll_han_allgather_intra_dynamic(const void *sbuf, size_t scount,
                                          dtype_size,
                                          comm,
                                          han_module);
-        allgather = (mca_coll_base_module_allgather_fn_t)mca_coll_han_algorithm_id_to_fn(ALLGATHER, algorithm_id);
+        allgather = (mca_coll_base_module_coll_fn_t)mca_coll_han_algorithm_id_to_fn(ALLGATHER, algorithm_id);
         if (NULL == allgather) { /* default behaviour */
             if(mca_coll_han_component.use_simple_algorithm[ALLGATHER]) {
                 allgather = mca_coll_han_allgather_intra_simple;
@@ -474,10 +470,7 @@ mca_coll_han_allgather_intra_dynamic(const void *sbuf, size_t scount,
          */
         allgather = sub_module->coll_allgather;
     }
-    return allgather(sbuf, scount, sdtype,
-                     rbuf, rcount, rdtype,
-                     comm,
-                     sub_module);
+    return allgather(args, comm, sub_module);
 }
 
 
@@ -489,28 +482,22 @@ mca_coll_han_allgather_intra_dynamic(const void *sbuf, size_t scount,
  * The allgatherv size is the size of the biggest segment
  */
 int
-mca_coll_han_allgatherv_intra_dynamic(const void *sbuf, size_t scount,
-                                      struct ompi_datatype_t *sdtype,
-                                      void *rbuf, ompi_count_array_t rcounts,
-                                      ompi_disp_array_t displs,
-                                      struct ompi_datatype_t *rdtype,
-                                      struct ompi_communicator_t *comm,
-                                      mca_coll_base_module_t *module)
+mca_coll_han_allgatherv_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_allgatherv_fn_t allgatherv;
+    mca_coll_base_module_coll_fn_t allgatherv;
     int rank, verbosity = 0, comm_size, i;
     mca_coll_base_module_t *sub_module;
     size_t dtype_size, msg_size = 0;
 
     /* Compute configuration information for dynamic rules */
     comm_size = ompi_comm_size(comm);
-    ompi_datatype_type_size(rdtype, &dtype_size);
+    ompi_datatype_type_size(args->dst.info_v.datatype, &dtype_size);
 
     for(i = 0; i < comm_size; i++) {
-        if(dtype_size * ompi_count_array_get(rcounts, i) > msg_size) {
-            msg_size = dtype_size * ompi_count_array_get(rcounts, i);
+        if(dtype_size * ompi_count_array_get(args->dst.info_v.counts, i) > msg_size) {
+            msg_size = dtype_size * ompi_count_array_get(args->dst.info_v.counts, i);
         }
     }
 
@@ -592,10 +579,7 @@ mca_coll_han_allgatherv_intra_dynamic(const void *sbuf, size_t scount,
          */
         allgatherv = sub_module->coll_allgatherv;
     }
-    return allgatherv(sbuf, scount, sdtype,
-                      rbuf, rcounts, displs,
-                      rdtype, comm,
-                      sub_module);
+    return allgatherv(args, comm, sub_module);
 }
 
 
@@ -606,29 +590,23 @@ mca_coll_han_allgatherv_intra_dynamic(const void *sbuf, size_t scount,
  * calls the correct module if fallback mechanism is activated
  */
 int
-mca_coll_han_allreduce_intra_dynamic(const void *sbuf,
-                                     void *rbuf,
-                                     size_t count,
-                                     struct ompi_datatype_t *dtype,
-                                     struct ompi_op_t *op,
-                                     struct ompi_communicator_t *comm,
-                                     mca_coll_base_module_t *module)
+mca_coll_han_allreduce_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_allreduce_fn_t allreduce;
+    mca_coll_base_module_coll_fn_t allreduce;
     mca_coll_base_module_t *sub_module;
     size_t dtype_size;
     int rank, verbosity = 0;
 
     if (!han_module->enabled) {
-        return han_module->previous_allreduce(sbuf, rbuf, count, dtype, op, comm,
+        return han_module->previous_allreduce(args, comm,
                                               han_module->previous_allreduce_module);
     }
 
     /* Compute configuration information for dynamic rules */
-    ompi_datatype_type_size(dtype, &dtype_size);
-    dtype_size = dtype_size * count;
+    ompi_datatype_type_size(args->src.info.datatype, &dtype_size);
+    dtype_size = dtype_size * args->src.info.count;
 
     sub_module = get_module(ALLREDUCE,
                             dtype_size,
@@ -693,7 +671,7 @@ mca_coll_han_allreduce_intra_dynamic(const void *sbuf,
              * Call han topological collective algorithm
              */
             int algorithm_id = get_algorithm(ALLREDUCE, dtype_size, comm, han_module);
-            allreduce = (mca_coll_base_module_allreduce_fn_t) mca_coll_han_algorithm_id_to_fn(ALLREDUCE, algorithm_id);
+            allreduce = (mca_coll_base_module_coll_fn_t) mca_coll_han_algorithm_id_to_fn(ALLREDUCE, algorithm_id);
 
             if (NULL == allreduce) { /* default behaviour */
                 if(mca_coll_han_component.use_simple_algorithm[ALLREDUCE]) {
@@ -713,8 +691,7 @@ mca_coll_han_allreduce_intra_dynamic(const void *sbuf,
          */
         allreduce = sub_module->coll_allreduce;
     }
-    return allreduce(sbuf, rbuf, count, dtype,
-                     op, comm, sub_module);
+    return allreduce(args, comm, sub_module);
 }
 
 
@@ -725,17 +702,16 @@ mca_coll_han_allreduce_intra_dynamic(const void *sbuf,
  * calls the correct module if fallback mechanism is activated
  */
 int
-mca_coll_han_barrier_intra_dynamic(struct ompi_communicator_t *comm,
-                                   mca_coll_base_module_t *module)
+mca_coll_han_barrier_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_barrier_fn_t barrier;
+    mca_coll_base_module_coll_fn_t barrier;
     mca_coll_base_module_t *sub_module;
     int rank, verbosity = 0;
 
     if (!han_module->enabled) {
-        return han_module->previous_barrier(comm, han_module->previous_barrier_module);
+        return han_module->previous_barrier(args, comm, han_module->previous_barrier_module);
     }
 
     /* Compute configuration information for dynamic rules */
@@ -798,7 +774,7 @@ mca_coll_han_barrier_intra_dynamic(struct ompi_communicator_t *comm,
          * Call han topological collective algorithm
          */
         int algorithm_id = get_algorithm(BARRIER, 0, comm, han_module);
-        barrier = (mca_coll_base_module_barrier_fn_t) mca_coll_han_algorithm_id_to_fn(BARRIER, algorithm_id);
+        barrier = (mca_coll_base_module_coll_fn_t) mca_coll_han_algorithm_id_to_fn(BARRIER, algorithm_id);
         if (NULL == barrier) { /* default behaviour*/
             barrier = mca_coll_han_barrier_intra_simple;
         }
@@ -812,7 +788,7 @@ mca_coll_han_barrier_intra_dynamic(struct ompi_communicator_t *comm,
          */
         barrier = sub_module->coll_barrier;
     }
-    return barrier(comm, sub_module);
+    return barrier(args, comm, sub_module);
 }
 
 /*
@@ -822,28 +798,23 @@ mca_coll_han_barrier_intra_dynamic(struct ompi_communicator_t *comm,
  * calls the correct module if fallback mechanism is activated
  */
 int
-mca_coll_han_bcast_intra_dynamic(void *buff,
-                                 size_t count,
-                                 struct ompi_datatype_t *dtype,
-                                 int root,
-                                 struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module)
+mca_coll_han_bcast_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_bcast_fn_t bcast;
+    mca_coll_base_module_coll_fn_t bcast;
     mca_coll_base_module_t *sub_module;
     size_t dtype_size;
     int rank, verbosity = 0;
 
     if (!han_module->enabled) {
-        return han_module->previous_bcast(buff, count, dtype, root, comm,
+        return han_module->previous_bcast(args, comm,
                                           han_module->previous_bcast_module);
     }
 
     /* Compute configuration information for dynamic rules */
-    ompi_datatype_type_size(dtype, &dtype_size);
-    dtype_size = dtype_size * count;
+    ompi_datatype_type_size(args->src.info.datatype, &dtype_size);
+    dtype_size = dtype_size * args->src.info.count;
 
     sub_module = get_module(BCAST,
                             dtype_size,
@@ -907,7 +878,7 @@ mca_coll_han_bcast_intra_dynamic(void *buff,
                                          dtype_size,
                                          comm,
                                          han_module);
-        bcast = (mca_coll_base_module_bcast_fn_t)mca_coll_han_algorithm_id_to_fn(BCAST, algorithm_id);
+        bcast = (mca_coll_base_module_coll_fn_t)mca_coll_han_algorithm_id_to_fn(BCAST, algorithm_id);
         if (NULL == bcast) { /* default behaviour */
              if(mca_coll_han_component.use_simple_algorithm[BCAST]) {
                 bcast = mca_coll_han_bcast_intra_simple;
@@ -925,8 +896,7 @@ mca_coll_han_bcast_intra_dynamic(void *buff,
          */
         bcast = sub_module->coll_bcast;
     }
-    return bcast(buff, count, dtype,
-                 root, comm, sub_module);
+    return bcast(args, comm, sub_module);
 }
 
 
@@ -937,33 +907,27 @@ mca_coll_han_bcast_intra_dynamic(void *buff,
  * calls the correct module if fallback mechanism is activated
  */
 int
-mca_coll_han_gather_intra_dynamic(const void *sbuf, size_t scount,
-                                  struct ompi_datatype_t *sdtype,
-                                  void *rbuf, size_t rcount,
-                                  struct ompi_datatype_t *rdtype,
-                                  int root,
-                                  struct ompi_communicator_t *comm,
-                                  mca_coll_base_module_t *module)
+mca_coll_han_gather_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_gather_fn_t gather;
+    mca_coll_base_module_coll_fn_t gather;
     mca_coll_base_module_t *sub_module;
     size_t dtype_size;
     int rank, verbosity = 0;
 
     if (!han_module->enabled) {
-        return han_module->previous_gather(sbuf, scount, sdtype, rbuf, rcount, rdtype, root, comm,
+        return han_module->previous_gather(args, comm,
                                            han_module->previous_gather_module);
     }
 
     /* Compute configuration information for dynamic rules */
-    if( MPI_IN_PLACE != sbuf ) {
-        ompi_datatype_type_size(sdtype, &dtype_size);
-        dtype_size = dtype_size * scount;
+    if( MPI_IN_PLACE != args->src.info.buffer ) {
+        ompi_datatype_type_size(args->src.info.datatype, &dtype_size);
+        dtype_size = dtype_size * args->src.info.count;
     } else {
-        ompi_datatype_type_size(rdtype, &dtype_size);
-        dtype_size = dtype_size * rcount;
+        ompi_datatype_type_size(args->dst.info.datatype, &dtype_size);
+        dtype_size = dtype_size * args->dst.info.count;
     }
 
     sub_module = get_module(GATHER,
@@ -1028,7 +992,7 @@ mca_coll_han_gather_intra_dynamic(const void *sbuf, size_t scount,
                                          dtype_size,
                                          comm,
                                          han_module);
-        gather = (mca_coll_base_module_gather_fn_t) mca_coll_han_algorithm_id_to_fn(GATHER, algorithm_id);
+        gather = (mca_coll_base_module_coll_fn_t) mca_coll_han_algorithm_id_to_fn(GATHER, algorithm_id);
         if (NULL == gather) { /* default behaviour */
             if(mca_coll_han_component.use_simple_algorithm[GATHER]) {
                 gather = mca_coll_han_gather_intra_simple;
@@ -1046,10 +1010,7 @@ mca_coll_han_gather_intra_dynamic(const void *sbuf, size_t scount,
          */
         gather = sub_module->coll_gather;
     }
-    return gather(sbuf, scount, sdtype,
-                  rbuf, rcount, rdtype,
-                  root, comm,
-                  sub_module);
+    return gather(args, comm, sub_module);
 }
 
 /*
@@ -1058,21 +1019,16 @@ mca_coll_han_gather_intra_dynamic(const void *sbuf, size_t scount,
  * On the global communicator, calls the han collective implementation, or
  * calls the correct module if fallback mechanism is activated
  */
-int mca_coll_han_gatherv_intra_dynamic(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                                       void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t displs,
-                                       struct ompi_datatype_t *rdtype, int root,
-                                       struct ompi_communicator_t *comm,
-                                       mca_coll_base_module_t *module)
+int mca_coll_han_gatherv_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_gatherv_fn_t gatherv;
+    mca_coll_base_module_coll_fn_t gatherv;
     mca_coll_base_module_t *sub_module;
     int rank, verbosity = 0;
 
     if (!han_module->enabled) {
-        return han_module->previous_gatherv(sbuf, scount, sdtype, rbuf, rcounts, displs, rdtype,
-                                            root, comm, han_module->previous_gatherv_module);
+        return han_module->previous_gatherv(args, comm, han_module->previous_gatherv_module);
     }
 
     /* v collectives do not support message-size based dynamic rules */
@@ -1132,7 +1088,7 @@ int mca_coll_han_gatherv_intra_dynamic(const void *sbuf, size_t scount, struct o
          * Call han topological collective algorithm
          */
         int algorithm_id = get_algorithm(GATHERV, MCA_COLL_HAN_ANY_MESSAGE_SIZE, comm, han_module);
-        gatherv = (mca_coll_base_module_gatherv_fn_t) mca_coll_han_algorithm_id_to_fn(GATHERV, algorithm_id);
+        gatherv = (mca_coll_base_module_coll_fn_t) mca_coll_han_algorithm_id_to_fn(GATHERV, algorithm_id);
         if (NULL == gatherv) { /* default behaviour */
             gatherv = mca_coll_han_gatherv_intra;
         }
@@ -1146,7 +1102,7 @@ int mca_coll_han_gatherv_intra_dynamic(const void *sbuf, size_t scount, struct o
          */
         gatherv = sub_module->coll_gatherv;
     }
-    return gatherv(sbuf, scount, sdtype, rbuf, rcounts, displs, rdtype, root, comm, sub_module);
+    return gatherv(args, comm, sub_module);
 }
 
 
@@ -1157,30 +1113,23 @@ int mca_coll_han_gatherv_intra_dynamic(const void *sbuf, size_t scount, struct o
  * calls the correct module if fallback mechanism is activated
  */
 int
-mca_coll_han_reduce_intra_dynamic(const void *sbuf,
-                                  void *rbuf,
-                                  size_t count,
-                                  struct ompi_datatype_t *dtype,
-                                  struct ompi_op_t *op,
-                                  int root,
-                                  struct ompi_communicator_t *comm,
-                                  mca_coll_base_module_t *module)
+mca_coll_han_reduce_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_reduce_fn_t reduce;
+    mca_coll_base_module_coll_fn_t reduce;
     mca_coll_base_module_t *sub_module;
     size_t dtype_size;
     int rank, verbosity = 0;
 
     if (!han_module->enabled) {
-        return han_module->previous_reduce(sbuf, rbuf, count, dtype, op, root, comm,
+        return han_module->previous_reduce(args, comm,
                                            han_module->previous_reduce_module);
     }
 
     /* Compute configuration information for dynamic rules */
-    ompi_datatype_type_size(dtype, &dtype_size);
-    dtype_size = dtype_size * count;
+    ompi_datatype_type_size(args->src.info.datatype, &dtype_size);
+    dtype_size = dtype_size * args->src.info.count;
 
     sub_module = get_module(REDUCE,
                             dtype_size,
@@ -1248,7 +1197,7 @@ mca_coll_han_reduce_intra_dynamic(const void *sbuf,
                                              dtype_size,
                                              comm,
                                              han_module);
-            reduce = (mca_coll_base_module_reduce_fn_t)mca_coll_han_algorithm_id_to_fn(REDUCE, algorithm_id);
+            reduce = (mca_coll_base_module_coll_fn_t)mca_coll_han_algorithm_id_to_fn(REDUCE, algorithm_id);
             if (NULL == reduce) { /* default behaviour */
                 if(mca_coll_han_component.use_simple_algorithm[REDUCE]) {
                     reduce = mca_coll_han_reduce_intra_simple;
@@ -1267,8 +1216,7 @@ mca_coll_han_reduce_intra_dynamic(const void *sbuf,
          */
         reduce = sub_module->coll_reduce;
     }
-    return reduce(sbuf, rbuf, count, dtype,
-                  op, root, comm, sub_module);
+    return reduce(args, comm, sub_module);
 }
 
 
@@ -1279,33 +1227,27 @@ mca_coll_han_reduce_intra_dynamic(const void *sbuf,
  * calls the correct module if fallback mechanism is activated
  */
 int
-mca_coll_han_scatter_intra_dynamic(const void *sbuf, size_t scount,
-                                   struct ompi_datatype_t *sdtype,
-                                   void *rbuf, size_t rcount,
-                                   struct ompi_datatype_t *rdtype,
-                                   int root,
-                                   struct ompi_communicator_t *comm,
-                                   mca_coll_base_module_t *module)
+mca_coll_han_scatter_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_scatter_fn_t scatter;
+    mca_coll_base_module_coll_fn_t scatter;
     mca_coll_base_module_t *sub_module;
     size_t dtype_size;
     int rank, verbosity = 0;
 
     if (!han_module->enabled) {
-        return han_module->previous_scatter(sbuf, scount, sdtype, rbuf, rcount, rdtype, root, comm,
+        return han_module->previous_scatter(args, comm,
                                             han_module->previous_scatter_module);
     }
 
     /* Compute configuration information for dynamic rules */
-    if( MPI_IN_PLACE != rbuf ) {
-        ompi_datatype_type_size(rdtype, &dtype_size);
-        dtype_size = dtype_size * rcount;
+    if( MPI_IN_PLACE != args->dst.info.buffer ) {
+        ompi_datatype_type_size(args->dst.info.datatype, &dtype_size);
+        dtype_size = dtype_size * args->dst.info.count;
     } else {
-        ompi_datatype_type_size(sdtype, &dtype_size);
-        dtype_size = dtype_size * scount;
+        ompi_datatype_type_size(args->src.info.datatype, &dtype_size);
+        dtype_size = dtype_size * args->src.info.count;
     }
 
     sub_module = get_module(SCATTER,
@@ -1370,7 +1312,7 @@ mca_coll_han_scatter_intra_dynamic(const void *sbuf, size_t scount,
                                          dtype_size,
                                          comm,
                                          han_module);
-        scatter = (mca_coll_base_module_scatter_fn_t)mca_coll_han_algorithm_id_to_fn(SCATTER, algorithm_id);
+        scatter = (mca_coll_base_module_coll_fn_t)mca_coll_han_algorithm_id_to_fn(SCATTER, algorithm_id);
         if (NULL == scatter) { /* default behaviour */
             if(mca_coll_han_component.use_simple_algorithm[SCATTER]) {
                 scatter = mca_coll_han_scatter_intra_simple;
@@ -1396,10 +1338,7 @@ mca_coll_han_scatter_intra_dynamic(const void *sbuf, size_t scount,
      * They points to the collective to use, according to the dynamic rules
      * Selector's job is done, call the collective
      */
-    return scatter(sbuf, scount, sdtype,
-                   rbuf, rcount, rdtype,
-                   root, comm,
-                   sub_module);
+    return scatter(args, comm, sub_module);
 }
 
 
@@ -1410,23 +1349,16 @@ mca_coll_han_scatter_intra_dynamic(const void *sbuf, size_t scount,
  * calls the correct module if fallback mechanism is activated
  */
 int
-mca_coll_han_scatterv_intra_dynamic(const void *sbuf, ompi_count_array_t scounts,
-                                    ompi_disp_array_t displs, struct ompi_datatype_t *sdtype,
-                                    void *rbuf, size_t rcount,
-                                    struct ompi_datatype_t *rdtype, 
-                                    int root,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module)
+mca_coll_han_scatterv_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_scatterv_fn_t scatterv;
+    mca_coll_base_module_coll_fn_t scatterv;
     mca_coll_base_module_t *sub_module;
     int rank, verbosity = 0;
 
     if (!han_module->enabled) {
-        return han_module->previous_scatterv(sbuf, scounts, displs, sdtype, rbuf, rcount, rdtype, 
-                                             root, comm, han_module->previous_scatterv_module);
+        return han_module->previous_scatterv(args, comm, han_module->previous_scatterv_module);
     }
 
     /* v collectives do not support message-size based dynamic rules */
@@ -1492,7 +1424,7 @@ mca_coll_han_scatterv_intra_dynamic(const void *sbuf, ompi_count_array_t scounts
                                          MCA_COLL_HAN_ANY_MESSAGE_SIZE,
                                          comm,
                                          han_module);
-        scatterv = (mca_coll_base_module_scatterv_fn_t)mca_coll_han_algorithm_id_to_fn(SCATTERV, algorithm_id);
+        scatterv = (mca_coll_base_module_coll_fn_t)mca_coll_han_algorithm_id_to_fn(SCATTERV, algorithm_id);
         if (NULL == scatterv) { /* default behaviour */
             scatterv = mca_coll_han_scatterv_intra;
         }
@@ -1507,9 +1439,7 @@ mca_coll_han_scatterv_intra_dynamic(const void *sbuf, ompi_count_array_t scounts
         scatterv = sub_module->coll_scatterv;
     }
 
-    return scatterv(sbuf, scounts, displs, sdtype, 
-                    rbuf, rcount, rdtype, 
-                    root, comm, sub_module);
+    return scatterv(args, comm, sub_module);
 }
 
 /*
@@ -1519,32 +1449,27 @@ mca_coll_han_scatterv_intra_dynamic(const void *sbuf, ompi_count_array_t scounts
  * calls the correct module if fallback mechanism is activated
  */
 int
-mca_coll_han_alltoall_intra_dynamic(const void *sbuf, size_t scount,
-                                    struct ompi_datatype_t *sdtype,
-                                    void* rbuf, size_t rcount,
-                                    struct ompi_datatype_t *rdtype,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module)
+mca_coll_han_alltoall_intra_dynamic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_alltoall_fn_t alltoall;
+    mca_coll_base_module_coll_fn_t alltoall;
     mca_coll_base_module_t *sub_module;
     size_t dtype_size;
     int rank, verbosity = 0;
 
     if (!han_module->enabled) {
-        return han_module->previous_alltoall(sbuf, scount, sdtype, rbuf, rcount, rdtype, comm,
+        return han_module->previous_alltoall(args, comm,
                                             han_module->previous_alltoall_module);
     }
 
     /* Compute configuration information for dynamic rules */
-    if( MPI_IN_PLACE != rbuf ) {
-        ompi_datatype_type_size(rdtype, &dtype_size);
-        dtype_size = dtype_size * rcount;
+    if( MPI_IN_PLACE != args->dst.info.buffer ) {
+        ompi_datatype_type_size(args->dst.info.datatype, &dtype_size);
+        dtype_size = dtype_size * args->dst.info.count;
     } else {
-        ompi_datatype_type_size(sdtype, &dtype_size);
-        dtype_size = dtype_size * scount;
+        ompi_datatype_type_size(args->src.info.datatype, &dtype_size);
+        dtype_size = dtype_size * args->src.info.count;
     }
 
     sub_module = get_module(ALLTOALL,
@@ -1609,7 +1534,7 @@ mca_coll_han_alltoall_intra_dynamic(const void *sbuf, size_t scount,
                                          dtype_size,
                                          comm,
                                          han_module);
-        alltoall = (mca_coll_base_module_alltoall_fn_t)mca_coll_han_algorithm_id_to_fn(ALLTOALL, algorithm_id);
+        alltoall = (mca_coll_base_module_coll_fn_t)mca_coll_han_algorithm_id_to_fn(ALLTOALL, algorithm_id);
         if (NULL == alltoall) { /* default behaviour */
             alltoall = mca_coll_han_alltoall_using_smsc;
         }
@@ -1631,10 +1556,7 @@ mca_coll_han_alltoall_intra_dynamic(const void *sbuf, size_t scount,
      * They points to the collective to use, according to the dynamic rules
      * Selector's job is done, call the collective
      */
-    return alltoall(sbuf, scount, sdtype,
-                   rbuf, rcount, rdtype,
-                   comm,
-                   sub_module);
+    return alltoall(args, comm, sub_module);
 }
 
 
@@ -1646,17 +1568,17 @@ mca_coll_han_alltoall_intra_dynamic(const void *sbuf, size_t scount,
  */
 int
 mca_coll_han_alltoallv_intra_dynamic(
-        ALLTOALLV_BASE_ARGS,
+        ompi_coll_args_t *args, struct ompi_communicator_t *comm,
         mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t*) module;
     TOPO_LVL_T topo_lvl = han_module->topologic_level;
-    mca_coll_base_module_alltoallv_fn_t alltoallv;
+    mca_coll_base_module_coll_fn_t alltoallv;
     mca_coll_base_module_t *sub_module;
     int rank, verbosity = 0;
 
     if (!han_module->enabled) {
-        return han_module->previous_alltoallv(ALLTOALLV_BASE_ARG_NAMES,
+        return han_module->previous_alltoallv(args, comm,
                                               han_module->previous_alltoallv_module);
     }
 
@@ -1723,7 +1645,7 @@ mca_coll_han_alltoallv_intra_dynamic(
                                          MCA_COLL_HAN_ANY_MESSAGE_SIZE,
                                          comm,
                                          han_module);
-        alltoallv = (mca_coll_base_module_alltoallv_fn_t)mca_coll_han_algorithm_id_to_fn(ALLTOALLV, algorithm_id);
+        alltoallv = (mca_coll_base_module_coll_fn_t)mca_coll_han_algorithm_id_to_fn(ALLTOALLV, algorithm_id);
         if (NULL == alltoallv) { /* default behaviour */
             alltoallv = mca_coll_han_alltoallv_using_smsc;
         }
@@ -1745,5 +1667,5 @@ mca_coll_han_alltoallv_intra_dynamic(
      * They points to the collective to use, according to the dynamic rules
      * Selector's job is done, call the collective
      */
-    return alltoallv(ALLTOALLV_BASE_ARG_NAMES, sub_module);
+    return alltoallv(args, comm, sub_module);
 }

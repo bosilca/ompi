@@ -18,6 +18,7 @@
  *                         reserved.
  * Copyright (c) 2017-2018 Intel, Inc. All rights reserved.
  * Copyright (c) 2021      Google, LLC. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -600,7 +601,9 @@ int ompi_osc_rdma_fence_atomic (int mpi_assert, ompi_win_t *win)
     ompi_osc_rdma_sync_rdma_complete (&module->all_sync);
 
     /* ensure all writes to my memory are complete (both local stores, and RMA operations) */
-    ret = module->comm->c_coll->coll_barrier(module->comm, module->comm->c_coll->coll_barrier_module);
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    ret = module->comm->c_coll->coll_barrier(&coll_args, module->comm, module->comm->c_coll->coll_barrier_module);
 
     if (mpi_assert & MPI_MODE_NOSUCCEED) {
         /* as specified in MPI-3 p 438 3-5 the fence can end an epoch. it isn't explicitly

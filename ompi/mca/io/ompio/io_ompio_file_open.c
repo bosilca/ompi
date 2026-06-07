@@ -14,6 +14,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -117,10 +118,9 @@ int mca_io_ompio_file_preallocate (ompi_file_t *fh,
     OPAL_THREAD_LOCK(&fh->f_lock);
     tmp = diskspace;
 
-    ret = data->ompio_fh.f_comm->c_coll->coll_bcast (&tmp,
-                                                    1,
-                                                    OMPI_OFFSET_DATATYPE,
-                                                    OMPIO_ROOT,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_bcast(&coll_args, &tmp, 1, OMPI_OFFSET_DATATYPE, OMPIO_ROOT);
+    ret = data->ompio_fh.f_comm->c_coll->coll_bcast (&coll_args,
                                                     data->ompio_fh.f_comm,
                                                     data->ompio_fh.f_comm->c_coll->coll_bcast_module);
     if ( OMPI_SUCCESS != ret ) {
@@ -211,7 +211,8 @@ int mca_io_ompio_file_preallocate (ompi_file_t *fh,
 
 exit:     
     free ( buf );
-    fh->f_comm->c_coll->coll_bcast ( &ret, 1, MPI_INT, OMPIO_ROOT, fh->f_comm,
+    ompi_coll_args_bcast(&coll_args, &ret, 1, MPI_INT, OMPIO_ROOT);
+    fh->f_comm->c_coll->coll_bcast ( &coll_args, fh->f_comm,
                                    fh->f_comm->c_coll->coll_bcast_module);
     
     if ( diskspace > current_size ) {
@@ -233,10 +234,9 @@ int mca_io_ompio_file_set_size (ompi_file_t *fh,
 
     tmp = size;
     OPAL_THREAD_LOCK(&fh->f_lock);
-    ret = data->ompio_fh.f_comm->c_coll->coll_bcast (&tmp,
-                                                    1,
-                                                    OMPI_OFFSET_DATATYPE,
-                                                    OMPIO_ROOT,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_bcast(&coll_args, &tmp, 1, OMPI_OFFSET_DATATYPE, OMPIO_ROOT);
+    ret = data->ompio_fh.f_comm->c_coll->coll_bcast (&coll_args,
                                                     data->ompio_fh.f_comm,
                                                     data->ompio_fh.f_comm->c_coll->coll_bcast_module);
     if ( OMPI_SUCCESS != ret ) {
@@ -258,7 +258,9 @@ int mca_io_ompio_file_set_size (ompi_file_t *fh,
         return ret;
     }
     
-    ret = data->ompio_fh.f_comm->c_coll->coll_barrier (data->ompio_fh.f_comm,
+    ompi_coll_args_barrier(&coll_args);
+    ret = data->ompio_fh.f_comm->c_coll->coll_barrier (&coll_args,
+                                                      data->ompio_fh.f_comm,
                                                       data->ompio_fh.f_comm->c_coll->coll_barrier_module);
     if ( OMPI_SUCCESS != ret ) {
         opal_output(1, ",mca_io_ompio_file_set_size: error in barrier\n");
@@ -323,10 +325,9 @@ int mca_io_ompio_file_set_atomicity (ompi_file_t *fh,
 
     /* check if the atomicity flag is the same on all processes */
     tmp = flag;
-    data->ompio_fh.f_comm->c_coll->coll_bcast (&tmp,
-                                              1,
-                                              MPI_INT,
-                                              OMPIO_ROOT,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_bcast(&coll_args, &tmp, 1, MPI_INT, OMPIO_ROOT);
+    data->ompio_fh.f_comm->c_coll->coll_bcast (&coll_args,
                                               data->ompio_fh.f_comm,
                                               data->ompio_fh.f_comm->c_coll->coll_bcast_module);
 
@@ -385,7 +386,10 @@ int mca_io_ompio_file_sync (ompi_file_t *fh)
         return MPI_ERR_ACCESS;
     }        
     // Make sure all processes reach this point before syncing the file.
-    ret = data->ompio_fh.f_comm->c_coll->coll_barrier (data->ompio_fh.f_comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    ret = data->ompio_fh.f_comm->c_coll->coll_barrier (&coll_args,
+                                                       data->ompio_fh.f_comm,
                                                        data->ompio_fh.f_comm->c_coll->coll_barrier_module);
     if ( MPI_SUCCESS != ret ) {
         OPAL_THREAD_UNLOCK(&fh->f_lock);

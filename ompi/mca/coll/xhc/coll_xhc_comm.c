@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021-2024 Computer Architecture and VLSI Systems (CARV)
  *                         Laboratory, ICS Forth. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -123,8 +124,10 @@ int mca_coll_xhc_comms_make(ompi_communicator_t *ompi_comm,
         bool is_candidate = (0 == comm_count
             || rank == comms[comm_count - 1].owner_rank);
 
-        err = ompi_comm->c_coll->coll_allgather(&is_candidate, 1,
-            MPI_C_BOOL, candidate_list, 1, MPI_C_BOOL,
+        ompi_coll_args_t _ag;
+        ompi_coll_args_allgather(&_ag, &is_candidate, 1, MPI_C_BOOL,
+            candidate_list, 1, MPI_C_BOOL);
+        err = ompi_comm->c_coll->coll_allgather(&_ag,
             ompi_comm, ompi_comm->c_coll->coll_allgather_module);
         if(OMPI_SUCCESS != err) {
             RETURN_WITH_ERROR(return_code, err, comm_error);
@@ -175,10 +178,12 @@ int mca_coll_xhc_comms_make(ompi_communicator_t *ompi_comm,
              * participate in the Allgather they'll do on the ompi comm in
              * order to share control structurs, even if it's useless to us. */
 
-            err = ompi_comm->c_coll->coll_allgather(&xc->comm_ds,
+            ompi_coll_args_t _ag_skip;
+            ompi_coll_args_allgather(&_ag_skip, &xc->comm_ds,
                 sizeof(opal_shmem_ds_t), MPI_BYTE, ds_list,
-                sizeof(opal_shmem_ds_t), MPI_BYTE, ompi_comm,
-                ompi_comm->c_coll->coll_allgather_module);
+                sizeof(opal_shmem_ds_t), MPI_BYTE);
+            err = ompi_comm->c_coll->coll_allgather(&_ag_skip,
+                ompi_comm, ompi_comm->c_coll->coll_allgather_module);
             if(OMPI_SUCCESS != err) {
                 RETURN_WITH_ERROR(return_code, err, comm_error);
             }
@@ -270,10 +275,12 @@ int mca_coll_xhc_comms_make(ompi_communicator_t *ompi_comm,
          * MPI communicator that only includes the member of the XHC comm,
          * so a single Allgather on the original MPI comm is preformed. */
 
-        err = ompi_comm->c_coll->coll_allgather(&xc->comm_ds,
+        ompi_coll_args_t _ag_share;
+        ompi_coll_args_allgather(&_ag_share, &xc->comm_ds,
             sizeof(opal_shmem_ds_t), MPI_BYTE, ds_list,
-            sizeof(opal_shmem_ds_t), MPI_BYTE, ompi_comm,
-            ompi_comm->c_coll->coll_allgather_module);
+            sizeof(opal_shmem_ds_t), MPI_BYTE);
+        err = ompi_comm->c_coll->coll_allgather(&_ag_share,
+            ompi_comm, ompi_comm->c_coll->coll_allgather_module);
         if(OMPI_SUCCESS != err) {
             RETURN_WITH_ERROR(return_code, err, comm_error);
         }

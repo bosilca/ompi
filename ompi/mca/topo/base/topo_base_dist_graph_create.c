@@ -14,6 +14,7 @@
  * Copyright (c) 2016-2017 IBM Corporation.  All rights reserved.
  * Copyright (c) 2018      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  */
 
 #include "ompi_config.h"
@@ -48,6 +49,7 @@ int mca_topo_base_dist_graph_distribute(mca_topo_base_module_t* module,
     ompi_status_public_t status;
     ompi_request_t **reqs = NULL;
     mca_topo_base_comm_dist_graph_2_2_0_t* topo=NULL;
+    ompi_coll_args_t coll_args;
 
     ompi_datatype_type_size( (ompi_datatype_t*)&ompi_mpi_int, &int_size);
 
@@ -116,8 +118,9 @@ int mca_topo_base_dist_graph_distribute(mca_topo_base_module_t* module,
         }
     }
 
-    err = comm->c_coll->coll_reduce_scatter_block( MPI_IN_PLACE, idx, 2,
-                                                  (ompi_datatype_t*)&ompi_mpi_int, MPI_SUM, comm,
+    ompi_coll_args_reduce_scatter_block(&coll_args, MPI_IN_PLACE, idx, 2,
+                                        (ompi_datatype_t*)&ompi_mpi_int, MPI_SUM);
+    err = comm->c_coll->coll_reduce_scatter_block( &coll_args, comm,
                                                   comm->c_coll->coll_reduce_scatter_block_module);
     /**
      * At this point in the indexes array we have:

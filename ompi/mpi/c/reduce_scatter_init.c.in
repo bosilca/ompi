@@ -19,6 +19,7 @@
  * Copyright (c) 2018      FUJITSU LIMITED.  All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -127,10 +128,12 @@ PROTOTYPE ERROR_CLASS reduce_scatter_init(BUFFER sendbuf, BUFFER_OUT recvbuf, CO
     /* Invoke the coll component to perform the back-end operation */
 
     OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, recvcounts);
-    err = comm->c_coll->coll_reduce_scatter_init(sendbuf, recvbuf, recvcounts_desc,
-                                                 datatype, op, comm, info, request,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_reduce_scatter(&coll_args, sendbuf, recvbuf, recvcounts_desc, datatype, op);
+    err = comm->c_coll->coll_reduce_scatter_init(&coll_args, comm, info, request,
                                                  comm->c_coll->coll_reduce_scatter_init_module);
     if (OPAL_LIKELY(OMPI_SUCCESS == err)) {
+        ((ompi_coll_base_nbc_request_t *) *request)->args = coll_args;
         ompi_coll_base_retain_op(*request, op, datatype);
     }
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);

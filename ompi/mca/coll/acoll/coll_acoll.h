@@ -1,7 +1,7 @@
 /* -*- Mode: C; c-basic-offset:4 ; indent-tabs-mode:nil -*- */
 /*
  * Copyright (c) 2024 - 2025 Advanced Micro Devices, Inc. All rights reserved.
- * Copyright (c) 2026        NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -31,7 +31,7 @@
 BEGIN_C_DECLS
 
 /* Globally exported variables */
-OMPI_DECLSPEC extern const mca_coll_base_component_3_0_0_t mca_coll_acoll_component;
+OMPI_DECLSPEC extern const mca_coll_base_component_4_0_0_t mca_coll_acoll_component;
 extern int mca_coll_acoll_priority;
 extern int mca_coll_acoll_max_comms;
 extern int mca_coll_acoll_comm_size_thresh;
@@ -56,34 +56,19 @@ mca_coll_base_module_t *mca_coll_acoll_comm_query(struct ompi_communicator_t *co
 
 int mca_coll_acoll_module_enable(mca_coll_base_module_t *module, struct ompi_communicator_t *comm);
 
-int mca_coll_acoll_allgather(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                             void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                             struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int mca_coll_acoll_allgather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_acoll_bcast(void *buff, size_t count, struct ompi_datatype_t *datatype, int root,
-                         struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int mca_coll_acoll_bcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_acoll_gather_intra(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                                void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype, int root,
-                                struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int mca_coll_acoll_gather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_acoll_alltoall(const void *sbuf, size_t scount,
-                            struct ompi_datatype_t *sdtype,
-                            void* rbuf, size_t rcount,
-                            struct ompi_datatype_t *rdtype,
-                            struct ompi_communicator_t *comm,
-                            mca_coll_base_module_t *module);
+int mca_coll_acoll_alltoall(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_acoll_reduce_intra(const void *sbuf, void *rbuf, size_t count,
-                                struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root,
-                                struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int mca_coll_acoll_reduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_acoll_allreduce_intra(const void *sbuf, void *rbuf, size_t count,
-                                   struct ompi_datatype_t *dtype, struct ompi_op_t *op,
-                                   struct ompi_communicator_t *comm,
-                                   mca_coll_base_module_t *module);
+int mca_coll_acoll_allreduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_acoll_barrier_intra(struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int mca_coll_acoll_barrier_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 END_C_DECLS
 

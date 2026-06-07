@@ -1,6 +1,7 @@
 /**
   Copyright (c) 2011 Mellanox Technologies. All rights reserved.
   Copyright (c) 2017      IBM Corporation.  All rights reserved.
+  Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
   $COPYRIGHT$
 
   Additional copyrights may follow
@@ -19,10 +20,12 @@ int mca_scoll_mpi_barrier(struct oshmem_group_t *group, long *pSync, int alg)
 {
     mca_scoll_mpi_module_t *mpi_module;
     int rc;
+    ompi_coll_args_t coll_args;
     MPI_COLL_VERBOSE(20,"RUNNING MPI BARRIER");
     mpi_module = (mca_scoll_mpi_module_t *) group->g_scoll.scoll_barrier_module;
 
-    rc = mpi_module->comm->c_coll->coll_barrier(mpi_module->comm, mpi_module->comm->c_coll->coll_barrier_module);
+    ompi_coll_args_barrier(&coll_args);
+    rc = mpi_module->comm->c_coll->coll_barrier(&coll_args, mpi_module->comm, mpi_module->comm->c_coll->coll_barrier_module);
     if (OMPI_SUCCESS != rc){
         MPI_COLL_VERBOSE(20,"RUNNING FALLBACK BARRIER");
         PREVIOUS_SCOLL_FN(mpi_module, barrier, group,
@@ -46,6 +49,7 @@ int mca_scoll_mpi_broadcast(struct oshmem_group_t *group,
     int rc;
     void* buf;
     int root;
+    ompi_coll_args_t coll_args;
     MPI_COLL_VERBOSE(20,"RUNNING MPI BCAST");
     mpi_module = (mca_scoll_mpi_module_t *) group->g_scoll.scoll_broadcast_module;
     if (group->my_pe == PE_root) {
@@ -84,7 +88,8 @@ int mca_scoll_mpi_broadcast(struct oshmem_group_t *group,
         return OSHMEM_SUCCESS;
     }
 
-    rc = mpi_module->comm->c_coll->coll_bcast(buf, nlong, dtype, root, mpi_module->comm, mpi_module->comm->c_coll->coll_bcast_module);
+    ompi_coll_args_bcast(&coll_args, buf, nlong, dtype, root);
+    rc = mpi_module->comm->c_coll->coll_bcast(&coll_args, mpi_module->comm, mpi_module->comm->c_coll->coll_bcast_module);
     if (OMPI_SUCCESS != rc){
         MPI_COLL_VERBOSE(20,"RUNNING FALLBACK BCAST");
         PREVIOUS_SCOLL_FN(mpi_module, broadcast, group,
@@ -117,6 +122,7 @@ int mca_scoll_mpi_collect(struct oshmem_group_t *group,
     int *disps, *recvcounts;
     ompi_count_array_t recvcounts_desc;
     ompi_disp_array_t disps_desc;
+    ompi_coll_args_t coll_args;
     MPI_COLL_VERBOSE(20,"RUNNING MPI ALLGATHER");
     mpi_module = (mca_scoll_mpi_module_t *) group->g_scoll.scoll_collect_module;
 
@@ -146,9 +152,11 @@ int mca_scoll_mpi_collect(struct oshmem_group_t *group,
                     SCOLL_DEFAULT_ALG);
             return rc;
         }
-        rc = mpi_module->comm->c_coll->coll_allgather(sbuf, (int)nlong, stype, rbuf, (int)nlong, rtype, mpi_module->comm, mpi_module->comm->c_coll->coll_allgather_module);
+        ompi_coll_args_allgather(&coll_args, sbuf, (int)nlong, stype, rbuf, (int)nlong, rtype);
+        rc = mpi_module->comm->c_coll->coll_allgather(&coll_args, mpi_module->comm, mpi_module->comm->c_coll->coll_allgather_module);
 #else
-        rc = mpi_module->comm->c_coll->coll_allgather(sbuf, nlong, stype, rbuf, nlong, rtype, mpi_module->comm, mpi_module->comm->c_coll->coll_allgather_module);
+        ompi_coll_args_allgather(&coll_args, sbuf, nlong, stype, rbuf, nlong, rtype);
+        rc = mpi_module->comm->c_coll->coll_allgather(&coll_args, mpi_module->comm, mpi_module->comm->c_coll->coll_allgather_module);
 #endif
         if (OMPI_SUCCESS != rc){
             MPI_COLL_VERBOSE(20,"RUNNING FALLBACK FCOLLECT");
@@ -186,8 +194,9 @@ int mca_scoll_mpi_collect(struct oshmem_group_t *group,
             goto failed_mem;
         }
 
-        rc = mpi_module->comm->c_coll->coll_allgather(&len, sizeof(len), stype, recvcounts,
-                                                      sizeof(len), rtype, mpi_module->comm,
+        ompi_coll_args_allgather(&coll_args, &len, sizeof(len), stype, recvcounts,
+                                 sizeof(len), rtype);
+        rc = mpi_module->comm->c_coll->coll_allgather(&coll_args, mpi_module->comm,
                                                       mpi_module->comm->c_coll->coll_allgather_module);
         if (rc != OSHMEM_SUCCESS) {
             goto failed_allgather;
@@ -200,8 +209,9 @@ int mca_scoll_mpi_collect(struct oshmem_group_t *group,
 
         OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, recvcounts);
         OMPI_DISP_ARRAY_INIT(&disps_desc, disps);
-        rc = mpi_module->comm->c_coll->coll_allgatherv(source, nlong, stype, target, recvcounts_desc,
-                                                       disps_desc, rtype, mpi_module->comm,
+        ompi_coll_args_allgatherv(&coll_args, source, nlong, stype, target, recvcounts_desc,
+                                  disps_desc, rtype);
+        rc = mpi_module->comm->c_coll->coll_allgatherv(&coll_args, mpi_module->comm,
                                                        mpi_module->comm->c_coll->coll_allgatherv_module);
 failed_allgather:
         free(recvcounts);
@@ -227,6 +237,7 @@ int mca_scoll_mpi_reduce(struct oshmem_group_t *group,
     struct ompi_op_t *h_op;
     int rc;
     size_t count;
+    ompi_coll_args_t coll_args;
     MPI_COLL_VERBOSE(20,"RUNNING MPI REDUCE");
     void *sbuf, *rbuf;
     mpi_module = (mca_scoll_mpi_module_t *) group->g_scoll.scoll_reduce_module;
@@ -260,9 +271,11 @@ int mca_scoll_mpi_reduce(struct oshmem_group_t *group,
                 SCOLL_DEFAULT_ALG);
         return rc;
     }
-    rc = mpi_module->comm->c_coll->coll_allreduce(sbuf, rbuf, (int)count, dtype, h_op, mpi_module->comm, mpi_module->comm->c_coll->coll_allreduce_module);
+    ompi_coll_args_allreduce(&coll_args, sbuf, rbuf, (int)count, dtype, h_op);
+    rc = mpi_module->comm->c_coll->coll_allreduce(&coll_args, mpi_module->comm, mpi_module->comm->c_coll->coll_allreduce_module);
 #else
-    rc = mpi_module->comm->c_coll->coll_allreduce(sbuf, rbuf, count, dtype, h_op, mpi_module->comm, mpi_module->comm->c_coll->coll_allreduce_module);
+    ompi_coll_args_allreduce(&coll_args, sbuf, rbuf, count, dtype, h_op);
+    rc = mpi_module->comm->c_coll->coll_allreduce(&coll_args, mpi_module->comm, mpi_module->comm->c_coll->coll_allreduce_module);
 #endif
     if (OMPI_SUCCESS != rc){
         MPI_COLL_VERBOSE(20,"RUNNING FALLBACK REDUCE");

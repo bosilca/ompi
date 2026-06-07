@@ -2,6 +2,7 @@
  * Copyright (c) 2016-2018 Inria. All rights reserved.
  * Copyright (c) 2019      Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -16,20 +17,15 @@
 #include "ompi/mca/topo/base/base.h"
 #include "coll_monitoring.h"
 
-int mca_coll_monitoring_neighbor_alltoall(const void *sbuf, size_t scount,
-                                          struct ompi_datatype_t *sdtype,
-                                          void* rbuf, size_t rcount,
-                                          struct ompi_datatype_t *rdtype,
-                                          struct ompi_communicator_t *comm,
-                                          mca_coll_base_module_t *module)
+int mca_coll_monitoring_neighbor_alltoall(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     size_t type_size, data_size, data_size_aggreg = 0;
     const mca_topo_base_comm_cart_t *cart = comm->c_topo->mtc.cart;
     int dim, srank, drank, world_rank;
 
-    ompi_datatype_type_size(sdtype, &type_size);
-    data_size = scount * type_size;
+    ompi_datatype_type_size(args->src.info.datatype, &type_size);
+    data_size = args->src.info.count * type_size;
 
     for( dim = 0; dim < cart->ndims; ++dim ) {
         srank = MPI_PROC_NULL, drank = MPI_PROC_NULL;
@@ -66,24 +62,18 @@ int mca_coll_monitoring_neighbor_alltoall(const void *sbuf, size_t scount,
 
     mca_common_monitoring_coll_a2a(data_size_aggreg, monitoring_module->data);
 
-    return monitoring_module->real.coll_neighbor_alltoall(sbuf, scount, sdtype, rbuf, rcount, rdtype, comm, monitoring_module->real.coll_neighbor_alltoall_module);
+    return monitoring_module->real.coll_neighbor_alltoall(args, comm, monitoring_module->real.coll_neighbor_alltoall_module);
 }
 
-int mca_coll_monitoring_ineighbor_alltoall(const void *sbuf, size_t scount,
-                                           struct ompi_datatype_t *sdtype,
-                                           void *rbuf, size_t rcount,
-                                           struct ompi_datatype_t *rdtype,
-                                           struct ompi_communicator_t *comm,
-                                           ompi_request_t ** request,
-                                           mca_coll_base_module_t *module)
+int mca_coll_monitoring_ineighbor_alltoall(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     size_t type_size, data_size, data_size_aggreg = 0;
     const mca_topo_base_comm_cart_t *cart = comm->c_topo->mtc.cart;
     int dim, srank, drank, world_rank;
 
-    ompi_datatype_type_size(sdtype, &type_size);
-    data_size = scount * type_size;
+    ompi_datatype_type_size(args->src.info.datatype, &type_size);
+    data_size = args->src.info.count * type_size;
 
     for( dim = 0; dim < cart->ndims; ++dim ) {
         srank = MPI_PROC_NULL, drank = MPI_PROC_NULL;
@@ -120,5 +110,5 @@ int mca_coll_monitoring_ineighbor_alltoall(const void *sbuf, size_t scount,
 
     mca_common_monitoring_coll_a2a(data_size_aggreg, monitoring_module->data);
 
-    return monitoring_module->real.coll_ineighbor_alltoall(sbuf, scount, sdtype, rbuf, rcount, rdtype, comm, request, monitoring_module->real.coll_ineighbor_alltoall_module);
+    return monitoring_module->real.coll_ineighbor_alltoall(args, comm, request, monitoring_module->real.coll_ineighbor_alltoall_module);
 }

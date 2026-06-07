@@ -11,6 +11,7 @@
  *                         All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -32,23 +33,18 @@
  *	Accepts:	- same arguments as MPI_Scatter()
  *	Returns:	- MPI_SUCCESS or error code
  */
-int mca_coll_self_scatterv_intra(const void *sbuf, ompi_count_array_t scounts,
-                                 ompi_disp_array_t disps, struct ompi_datatype_t *sdtype,
-                                 void *rbuf, size_t rcount,
-                                 struct ompi_datatype_t *rdtype, int root,
-                                 struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module)
+int mca_coll_self_scatterv_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
-    if (MPI_IN_PLACE == rbuf) {
+    if (MPI_IN_PLACE == args->dst.info.buffer) {
         return MPI_SUCCESS;
     } else {
         int err;
         ptrdiff_t lb, extent;
-        err = ompi_datatype_get_extent(sdtype, &lb, &extent);
+        err = ompi_datatype_get_extent(args->src.info_v.datatype, &lb, &extent);
         if (OMPI_SUCCESS != err) {
             return OMPI_ERROR;
         }
-        return ompi_datatype_sndrcv(((char *) sbuf) + ompi_disp_array_get(disps, 0)*extent, ompi_count_array_get(scounts, 0),
-                               sdtype, rbuf, rcount, rdtype);
+        return ompi_datatype_sndrcv(((char *) args->src.info_v.buffer) + ompi_disp_array_get(args->src.info_v.displacements, 0)*extent, ompi_count_array_get(args->src.info_v.counts, 0),
+                               args->src.info_v.datatype, args->dst.info.buffer, args->dst.info.count, args->dst.info.datatype);
     }
 }

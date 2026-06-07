@@ -16,6 +16,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
  * Copyright (c) 2022      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -53,13 +54,12 @@
  *     up at some point)
  */
 int
-mca_coll_basic_reduce_scatter_block_intra(const void *sbuf, void *rbuf, size_t rcount,
-                                          struct ompi_datatype_t *dtype,
-                                          struct ompi_op_t *op,
-                                          struct ompi_communicator_t *comm,
-                                          mca_coll_base_module_t *module)
+mca_coll_basic_reduce_scatter_block_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
-    return ompi_coll_base_reduce_scatter_block_basic_linear(sbuf, rbuf, rcount, dtype, op, comm, module);
+    ompi_coll_args_t _rsb;
+    ompi_coll_args_reduce_scatter_block(&_rsb, args->src.info.buffer, args->dst.info.buffer,
+                                        args->dst.info.count, args->dst.info.datatype, args->op);
+    return ompi_coll_base_reduce_scatter_block_basic_linear(&_rsb, comm, module);
 }
 
 /*
@@ -70,12 +70,10 @@ mca_coll_basic_reduce_scatter_block_intra(const void *sbuf, void *rbuf, size_t r
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_reduce_scatter_block_inter(const void *sbuf, void *rbuf, size_t rcount,
-                                          struct ompi_datatype_t *dtype,
-                                          struct ompi_op_t *op,
-                                          struct ompi_communicator_t *comm,
-                                          mca_coll_base_module_t *module)
+mca_coll_basic_reduce_scatter_block_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
     int err, i, rank, root = 0, rsize, lsize;
     int totalcounts;
     ptrdiff_t gap, span;
@@ -116,7 +114,7 @@ mca_coll_basic_reduce_scatter_block_inter(const void *sbuf, void *rbuf, size_t r
         buf = tmpbuf2 - gap;
 
         /* Do a send-recv between the two root procs. to avoid deadlock */
-        err = MCA_PML_CALL(isend(sbuf, totalcounts, dtype, 0,
+        err = MCA_PML_CALL(isend(args->src.info.buffer, totalcounts, dtype, 0,
                                  MCA_COLL_BASE_TAG_REDUCE_SCATTER,
                                  MCA_PML_BASE_SEND_STANDARD, comm, &req));
         if (OMPI_SUCCESS != err) {
@@ -150,13 +148,13 @@ mca_coll_basic_reduce_scatter_block_inter(const void *sbuf, void *rbuf, size_t r
             }
 
             /* Perform the reduction */
-            ompi_op_reduce(op, lbuf, buf, totalcounts, dtype);
+            ompi_op_reduce(args->op, lbuf, buf, totalcounts, dtype);
             /* swap the buffers */
             tbuf = lbuf; lbuf = buf; buf = tbuf;
         }
     } else {
         /* If not root, send data to the root. */
-        err = MCA_PML_CALL(send(sbuf, totalcounts, dtype, root,
+        err = MCA_PML_CALL(send(args->src.info.buffer, totalcounts, dtype, root,
                                 MCA_COLL_BASE_TAG_REDUCE_SCATTER,
                                 MCA_PML_BASE_SEND_STANDARD, comm));
         if (OMPI_SUCCESS != err) {
@@ -165,10 +163,10 @@ mca_coll_basic_reduce_scatter_block_inter(const void *sbuf, void *rbuf, size_t r
     }
 
     /* Now do a scatterv on the local communicator */
-    err = comm->c_local_comm->c_coll->coll_scatter(lbuf, rcount, dtype,
-				   rbuf, rcount, dtype, 0,
-				   comm->c_local_comm,
-				   comm->c_local_comm->c_coll->coll_scatter_module);
+    ompi_coll_args_t _sc;
+    ompi_coll_args_scatter(&_sc, lbuf, rcount, dtype, args->dst.info.buffer, rcount, dtype, 0);
+    err = comm->c_local_comm->c_coll->coll_scatter(&_sc, comm->c_local_comm,
+                                                   comm->c_local_comm->c_coll->coll_scatter_module);
 
   exit:
     if (NULL != tmpbuf) {

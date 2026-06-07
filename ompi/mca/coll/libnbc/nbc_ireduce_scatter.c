@@ -14,6 +14,7 @@
  *                         reserved.
  * Copyright (c) 2017-2021 IBM Corporation.  All rights reserved.
  * Copyright (c) 2018      FUJITSU LIMITED.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -211,10 +212,9 @@ static int nbc_reduce_scatter_init(const void* sendbuf, void* recvbuf, ompi_coun
   return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_ireduce_scatter (const void* sendbuf, void* recvbuf, ompi_count_array_t recvcounts, MPI_Datatype datatype,
-                                      MPI_Op op, struct ompi_communicator_t *comm, ompi_request_t ** request,
-                                      mca_coll_base_module_t *module) {
-    int res = nbc_reduce_scatter_init(sendbuf, recvbuf, recvcounts, datatype, op,
+int ompi_coll_libnbc_ireduce_scatter (ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_reduce_scatter_init(args->src.info.buffer, args->dst.info_v.buffer,
+                                      args->dst.info_v.counts, args->dst.info_v.datatype, args->op,
                                       comm, request, module, false);
     if (OPAL_LIKELY(OMPI_SUCCESS != res)) {
         return res;
@@ -355,10 +355,9 @@ static int nbc_reduce_scatter_inter_init (const void* sendbuf, void* recvbuf, om
   return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_ireduce_scatter_inter (const void* sendbuf, void* recvbuf, ompi_count_array_t recvcounts, MPI_Datatype datatype,
-                                            MPI_Op op, struct ompi_communicator_t *comm, ompi_request_t ** request,
-                                            mca_coll_base_module_t *module) {
-    int res = nbc_reduce_scatter_inter_init(sendbuf, recvbuf, recvcounts, datatype, op,
+int ompi_coll_libnbc_ireduce_scatter_inter (ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_reduce_scatter_inter_init(args->src.info.buffer, args->dst.info_v.buffer,
+                                            args->dst.info_v.counts, args->dst.info_v.datatype, args->op,
                                             comm, request, module, false);
     if (OPAL_LIKELY(OMPI_SUCCESS != res)) {
         return res;
@@ -373,10 +372,9 @@ int ompi_coll_libnbc_ireduce_scatter_inter (const void* sendbuf, void* recvbuf, 
     return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_reduce_scatter_init(const void* sendbuf, void* recvbuf, ompi_count_array_t recvcounts, MPI_Datatype datatype,
-                                         MPI_Op op, struct ompi_communicator_t *comm, MPI_Info info, ompi_request_t ** request,
-                                         mca_coll_base_module_t *module) {
-    int res = nbc_reduce_scatter_init(sendbuf, recvbuf, recvcounts, datatype, op,
+int ompi_coll_libnbc_reduce_scatter_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_reduce_scatter_init(args->src.info.buffer, args->dst.info_v.buffer,
+                                      args->dst.info_v.counts, args->dst.info_v.datatype, args->op,
                                       comm, request, module, true);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
         return res;
@@ -385,10 +383,9 @@ int ompi_coll_libnbc_reduce_scatter_init(const void* sendbuf, void* recvbuf, omp
     return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_reduce_scatter_inter_init(const void* sendbuf, void* recvbuf, ompi_count_array_t recvcounts, MPI_Datatype datatype,
-                                               MPI_Op op, struct ompi_communicator_t *comm, MPI_Info info, ompi_request_t ** request,
-                                               mca_coll_base_module_t *module) {
-    int res = nbc_reduce_scatter_inter_init(sendbuf, recvbuf, recvcounts, datatype, op,
+int ompi_coll_libnbc_reduce_scatter_inter_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_reduce_scatter_inter_init(args->src.info.buffer, args->dst.info_v.buffer,
+                                            args->dst.info_v.counts, args->dst.info_v.datatype, args->op,
                                             comm, request, module, true);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
         return res;

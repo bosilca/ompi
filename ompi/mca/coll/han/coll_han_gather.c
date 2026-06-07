@@ -6,6 +6,7 @@
  * Copyright (c) 2020      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2022      IBM Corporation. All rights reserved
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -74,14 +75,12 @@ mca_coll_han_set_gather_args(mca_coll_han_gather_args_t * args,
  * Main function for taskified gather: calls lg task, a gather on low comm
  */
 int
-mca_coll_han_gather_intra(const void *sbuf, size_t scount,
-                          struct ompi_datatype_t *sdtype,
-                          void *rbuf, size_t rcount,
-                          struct ompi_datatype_t *rdtype,
-                          int root,
-                          struct ompi_communicator_t *comm,
-                          mca_coll_base_module_t * module)
+mca_coll_han_gather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
+    int root = args->root;
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
     int w_rank, w_size; /* information about the global communicator */
     int root_low_rank, root_up_rank; /* root ranks for both sub-communicators */
@@ -96,8 +95,7 @@ mca_coll_han_gather_intra(const void *sbuf, size_t scount,
                              "han cannot handle gather with this communicator. Fall back on another component\n"));
         /* HAN cannot work with this communicator so fallback on all collectives */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
-        return han_module->previous_gather(sbuf, scount, sdtype, rbuf, rcount, rdtype, root,
-                                          comm, han_module->previous_gather_module);
+        return han_module->previous_gather(args, comm, han_module->previous_gather_module);
     }
 
     /* Topo must be initialized to know rank distribution which then is used to
@@ -108,8 +106,7 @@ mca_coll_han_gather_intra(const void *sbuf, size_t scount,
                              "han cannot handle gather with this communicator (imbalance). Fall back on another component\n"));
         /* Unregister HAN gather if possible, and execute the fallback gather */
         HAN_UNINSTALL_COLL_API(comm, han_module, gather);
-        return han_module->previous_gather(sbuf, scount, sdtype, rbuf, rcount, rdtype, root,
-                                          comm, han_module->previous_gather_module);
+        return han_module->previous_gather(args, comm, han_module->previous_gather_module);
     }
 
     w_rank = ompi_comm_rank(comm);
@@ -166,7 +163,7 @@ mca_coll_han_gather_intra(const void *sbuf, size_t scount,
             /* rgap is the size of unused space at the start of the datatype */
             reorder_rbuf = reorder_buf - rgap;
 
-            if (MPI_IN_PLACE == sbuf) {
+            if (MPI_IN_PLACE == args->src.info.buffer) {
                 ptrdiff_t rextent;
                 ompi_datatype_type_extent(rdtype, &rextent);
                 ptrdiff_t block_size = rextent * (ptrdiff_t)rcount;
@@ -184,7 +181,7 @@ mca_coll_han_gather_intra(const void *sbuf, size_t scount,
     mca_coll_task_t *lg = OBJ_NEW(mca_coll_task_t);
     /* Setup lg task arguments */
     mca_coll_han_gather_args_t *lg_args = malloc(sizeof(mca_coll_han_gather_args_t));
-    mca_coll_han_set_gather_args(lg_args, lg, (char *) sbuf, NULL, scount, sdtype, reorder_rbuf,
+    mca_coll_han_set_gather_args(lg_args, lg, (char *) args->src.info.buffer, NULL, args->src.info.count, args->src.info.datatype, reorder_rbuf,
                                  rcount, rdtype, root, root_up_rank, root_low_rank, up_comm,
                                  low_comm, w_rank, low_rank != root_low_rank, han_module->is_mapbycore, temp_request,
                                  han_module);
@@ -248,14 +245,10 @@ int mca_coll_han_gather_lg_task(void *task_args)
     }
 
     /* Low level (usually intra-node or shared memory) node gather */
-    t->low_comm->c_coll->coll_gather((char *)t->sbuf,
-                                     count,
-                                     dtype,
-                                     tmp_rbuf,
-                                     count,
-                                     dtype,
-                                     t->root_low_rank,
-                                     t->low_comm,
+    ompi_coll_args_t _lg;
+    ompi_coll_args_gather(&_lg, (char *)t->sbuf, count, dtype,
+                          tmp_rbuf, count, dtype, t->root_low_rank);
+    t->low_comm->c_coll->coll_gather(&_lg, t->low_comm,
                                      t->low_comm->c_coll->coll_gather_module);
 
     /* Prepare up comm gather */
@@ -288,14 +281,10 @@ int mca_coll_han_gather_ug_task(void *task_args)
 
         int low_size = ompi_comm_size(t->low_comm);
         /* inter node gather */
-        t->up_comm->c_coll->coll_gather((char *)t->sbuf,
-                                        count*low_size,
-                                        dtype,
-                                        (char *)t->rbuf,
-                                        count*low_size,
-                                        dtype,
-                                        t->root_up_rank,
-                                        t->up_comm,
+        ompi_coll_args_t _ug;
+        ompi_coll_args_gather(&_ug, (char *)t->sbuf, count*low_size, dtype,
+                              (char *)t->rbuf, count*low_size, dtype, t->root_up_rank);
+        t->up_comm->c_coll->coll_gather(&_ug, t->up_comm,
                                         t->up_comm->c_coll->coll_gather_module);
 
         /* Free intra-node buffer when not using persist buffers */
@@ -316,14 +305,13 @@ int mca_coll_han_gather_ug_task(void *task_args)
 
 /* only work with regular situation (each node has equal number of processes) */
 int
-mca_coll_han_gather_intra_simple(const void *sbuf, size_t scount,
-                                 struct ompi_datatype_t *sdtype,
-                                 void *rbuf, size_t rcount,
-                                 struct ompi_datatype_t *rdtype,
-                                 int root,
-                                 struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module)
+mca_coll_han_gather_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
+    int root = args->root;
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
     int *topo, w_rank = ompi_comm_rank(comm);
     int w_size = ompi_comm_size(comm);
@@ -334,8 +322,7 @@ mca_coll_han_gather_intra_simple(const void *sbuf, size_t scount,
                              "han cannot handle gather with this communicator. Fall back on another component\n"));
         /* HAN cannot work with this communicator so fallback on all collectives */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
-        return han_module->previous_gather(sbuf, scount, sdtype, rbuf, rcount, rdtype, root,
-                                          comm, han_module->previous_gather_module);
+        return han_module->previous_gather(args, comm, han_module->previous_gather_module);
     }
 
     /* Topo must be initialized to know rank distribution which then is used to
@@ -346,15 +333,14 @@ mca_coll_han_gather_intra_simple(const void *sbuf, size_t scount,
                              "han cannot handle gather with this communicator (imbalance). Fall back on another component\n"));
         /* Unregister HAN gather if possible, and execute the fallback gather */
         HAN_UNINSTALL_COLL_API(comm, han_module, gather);
-        return han_module->previous_gather(sbuf, scount, sdtype, rbuf, rcount, rdtype, root,
-                                          comm, han_module->previous_gather_module);
+        return han_module->previous_gather(args, comm, han_module->previous_gather_module);
     }
 
     ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
     ompi_communicator_t *up_comm = han_module->sub_comm[INTER_NODE];
 
-    ompi_datatype_t* dtype = (w_rank == root) ? rdtype : sdtype;
-    size_t count = (w_rank == root) ? rcount : scount;
+    ompi_datatype_t* dtype = (w_rank == root) ? rdtype : args->src.info.datatype;
+    size_t count = (w_rank == root) ? rcount : args->src.info.count;
 
     /* Get the 'virtual ranks' mapping corresponding to the communicators */
     int *vranks = han_module->cached_vranks;
@@ -414,26 +400,18 @@ mca_coll_han_gather_intra_simple(const void *sbuf, size_t scount,
     }
 
     /* 1. low gather on nodes leaders */
-    low_comm->c_coll->coll_gather((char *)sbuf,
-                                  count,
-                                  dtype,
-                                  tmp_buf_start,
-                                  count,
-                                  dtype,
-                                  root_low_rank,
-                                  low_comm,
+    ompi_coll_args_t _lg;
+    ompi_coll_args_gather(&_lg, (char *)sbuf, count, dtype,
+                          tmp_buf_start, count, dtype, root_low_rank);
+    low_comm->c_coll->coll_gather(&_lg, low_comm,
                                   low_comm->c_coll->coll_gather_module);
 
     /* 2. upper gather (inter-node) between node leaders */
     if (low_rank == root_low_rank) {
-        up_comm->c_coll->coll_gather((char *)tmp_buf_start,
-                                     count*low_size,
-                                     dtype,
-                                     (char *)reorder_buf_start,
-                                     count*low_size,
-                                     dtype,
-                                     root_up_rank,
-                                     up_comm,
+        ompi_coll_args_t _ug;
+        ompi_coll_args_gather(&_ug, (char *)tmp_buf_start, count*low_size, dtype,
+                              (char *)reorder_buf_start, count*low_size, dtype, root_up_rank);
+        up_comm->c_coll->coll_gather(&_ug, up_comm,
                                      up_comm->c_coll->coll_gather_module);
 
         /* Free intra-node buffer when not using persist buffers */

@@ -18,6 +18,7 @@
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -97,10 +98,13 @@ PROTOTYPE ERROR_CLASS ireduce_scatter_block(BUFFER sendbuf, BUFFER_OUT recvbuf, 
 
     /* Invoke the coll component to perform the back-end operation */
 
-    err = comm->c_coll->coll_ireduce_scatter_block(sendbuf, recvbuf, recvcount,
-                                                  datatype, op, comm, request,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_reduce_scatter_block(&coll_args, sendbuf, recvbuf, recvcount,
+                                        datatype, op);
+    err = comm->c_coll->coll_ireduce_scatter_block(&coll_args, comm, request,
                                                   comm->c_coll->coll_ireduce_scatter_block_module);
     if (OPAL_LIKELY(OMPI_SUCCESS == err)) {
+        ((ompi_coll_base_nbc_request_t *) *request)->args = coll_args;
         ompi_coll_base_retain_op(*request, op, datatype);
     }
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);

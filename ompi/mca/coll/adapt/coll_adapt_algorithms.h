@@ -17,12 +17,12 @@
 /* Bcast */
 int ompi_coll_adapt_ibcast_register(void);
 int ompi_coll_adapt_ibcast_fini(void);
-int ompi_coll_adapt_bcast(BCAST_ARGS);
-int ompi_coll_adapt_ibcast(IBCAST_ARGS);
+int ompi_coll_adapt_bcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_adapt_ibcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module);
 
 /* Reduce */
 int ompi_coll_adapt_ireduce_register(void);
 int ompi_coll_adapt_ireduce_fini(void);
-int ompi_coll_adapt_reduce(REDUCE_ARGS);
-int ompi_coll_adapt_ireduce(IREDUCE_ARGS);
+int ompi_coll_adapt_reduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_adapt_ireduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module);
 

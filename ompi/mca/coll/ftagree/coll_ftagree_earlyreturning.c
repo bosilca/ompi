@@ -8,6 +8,7 @@
  * Copyright (c) 2022      IBM Corporation. All rights reserved
  *
  *
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -3197,18 +3198,12 @@ static int mca_coll_ftagree_era_complete_agreement(era_identifier_t agreement_id
  * Accepts:	- same as MPI_Comm_agree()
  * Returns:	- MPI_SUCCESS or an MPI error code
  */
-int mca_coll_ftagree_era_intra(void *contrib,
-                                         size_t dt_count,
-                                         ompi_datatype_t *dt,
-                                         ompi_op_t *op,
-                                         ompi_group_t **group, bool grp_update,
-                                         ompi_communicator_t* comm,
-                                         mca_coll_base_module_t *module)
+int mca_coll_ftagree_era_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int rc;
     ompi_request_t* req;
 
-    rc = mca_coll_ftagree_iera_intra(contrib, dt_count, dt, op, group, grp_update, comm, &req, module);
+    rc = mca_coll_ftagree_iera_intra(args, comm, &req, module);
     if(OPAL_UNLIKELY( OMPI_SUCCESS != rc ))
         return rc;
     ompi_request_wait_completion(req);
@@ -3224,23 +3219,19 @@ int mca_coll_ftagree_era_intra(void *contrib,
  * Accepts:	- same as MPI_Comm_agree()
  * Returns:	- MPI_SUCCESS or an MPI error code
  */
-int mca_coll_ftagree_era_inter(void *contrib,
-                                         size_t dt_count,
-                                         ompi_datatype_t *dt,
-                                         ompi_op_t *op,
-                                         ompi_group_t **group, bool grp_update,
-                                         ompi_communicator_t* comm,
-                                         mca_coll_base_module_t *module)
+int mca_coll_ftagree_era_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *contrib = args->src.info.buffer;
+    bool grp_update = 0 != (args->flags & OMPI_COLL_ARGS_FLAG_UPDATE_FAILEDGROUP);
     ompi_communicator_t* shadowcomm;
     ompi_group_t* uniongrp;
     int contriblh[2];
     int rc;
     int first;
 
-    if( OPAL_UNLIKELY(op != &ompi_mpi_op_band.op
-                   || dt != &ompi_mpi_int.dt
-                   || dt_count != 1) ) {
+    if( OPAL_UNLIKELY(args->op != &ompi_mpi_op_band.op
+                   || args->src.info.datatype != &ompi_mpi_int.dt
+                   || args->src.info.count != 1) ) {
         return MPI_ERR_UNSUPPORTED_OPERATION;
     }
 
@@ -3282,7 +3273,9 @@ int mca_coll_ftagree_era_inter(void *contrib,
     shadowcomm->any_source_offset = comm->any_source_offset;
     shadowcomm->agreement_specific = comm->agreement_specific;
 
-    rc = mca_coll_ftagree_era_intra(contriblh, dt_count*2, dt, op, group, grp_update, shadowcomm, module);
+    ompi_coll_args_t shadow_args;
+    ompi_coll_args_agree(&shadow_args, contriblh, args->src.info.count*2, args->src.info.datatype, args->op, args->failedgroup, grp_update);
+    rc = mca_coll_ftagree_era_intra(&shadow_args, shadowcomm, module);
 
     comm->agreement_specific = shadowcomm->agreement_specific;
     if( NULL != comm->agreement_specific ) OBJ_RETAIN(comm->agreement_specific);
@@ -3320,15 +3313,10 @@ static int era_iagree_req_complete_cb(struct ompi_request_t* request)
     return 0;
 }
 
-int mca_coll_ftagree_iera_intra(void *contrib,
-                                          size_t dt_count,
-                                          ompi_datatype_t *dt,
-                                          ompi_op_t *op,
-                                          ompi_group_t **group, bool grp_update,
-                                          ompi_communicator_t* comm,
-                                          ompi_request_t **request,
-                                          mca_coll_base_module_t *module)
+int mca_coll_ftagree_iera_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request,
+                                mca_coll_base_module_t *module)
 {
+    bool grp_update = 0 != (args->flags & OMPI_COLL_ARGS_FLAG_UPDATE_FAILEDGROUP);
     opal_free_list_item_t* item;
     ompi_coll_ftagree_era_iagree_request_t *req;
     era_identifier_t agreement_id;
@@ -3341,7 +3329,7 @@ int mca_coll_ftagree_iera_intra(void *contrib,
     OMPI_REQUEST_INIT(&req->super, false);
     assert(MPI_UNDEFINED == req->super.req_f_to_c_index);
 
-    mca_coll_ftagree_era_prepare_agreement(comm, *group, op, dt, dt_count, contrib, module,
+    mca_coll_ftagree_era_prepare_agreement(comm, *args->failedgroup, args->op, args->src.info.datatype, args->src.info.count, args->src.info.buffer, module,
                                                      &agreement_id, &ci);
     req->super.req_state = OMPI_REQUEST_ACTIVE;
     req->super.req_type = OMPI_REQUEST_COLL;
@@ -3358,8 +3346,8 @@ int mca_coll_ftagree_iera_intra(void *contrib,
     req->super.req_complete_cb = era_iagree_req_complete_cb;
 
     req->agreement_id = agreement_id;
-    req->contrib = contrib;
-    req->outgroup = grp_update? group: NULL;
+    req->contrib = args->src.info.buffer;
+    req->outgroup = grp_update? args->failedgroup: NULL;
     req->ci = ci;
 
     ci->req = req;

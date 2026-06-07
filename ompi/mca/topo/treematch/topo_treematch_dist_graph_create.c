@@ -14,6 +14,7 @@
  * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
  * Copyright (c) 2025      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -59,6 +60,7 @@ static int check_oversubscribing(int rank,
                                  ompi_communicator_t *comm_old)
 {
     int oversubscribed = 0, local_oversub = 0, err;
+    ompi_coll_args_t coll_args;
 
     /* Only a single process per node, the local root, compute the oversubscription condition */
     if (rank == local_procs[0])
@@ -66,8 +68,9 @@ static int check_oversubscribing(int rank,
             local_oversub = 1;
 
 
-    if (OMPI_SUCCESS != (err = comm_old->c_coll->coll_allreduce(&local_oversub, &oversubscribed, 1, MPI_INT,
-                                                                MPI_SUM, comm_old, comm_old->c_coll->coll_allreduce_module)))
+    ompi_coll_args_allreduce(&coll_args, &local_oversub, &oversubscribed, 1, MPI_INT, MPI_SUM);
+    if (OMPI_SUCCESS != (err = comm_old->c_coll->coll_allreduce(&coll_args,
+                                                                comm_old, comm_old->c_coll->coll_allreduce_module)))
         return err;
 
     return oversubscribed;
@@ -127,6 +130,7 @@ int mca_topo_treematch_dist_graph_create(mca_topo_base_module_t* topo_module,
     }  /* reorder == yes */
 
     mca_topo_base_comm_dist_graph_2_2_0_t *topo = NULL;
+    ompi_coll_args_t coll_args;
     ompi_proc_t *proc = NULL;
     MPI_Request  *reqs = NULL;
     hwloc_cpuset_t set = NULL;
@@ -405,9 +409,11 @@ int mca_topo_treematch_dist_graph_create(mca_topo_base_module_t* topo_module,
             for(i = 0; i < topo->outdegree ; i++)
                 local_pattern[topo->out[i]] += topo->outw[i];
         }
-        err = comm_old->c_coll->coll_gather( (0 == rank ? MPI_IN_PLACE : local_pattern), size, MPI_DOUBLE,
-                                             local_pattern, size, MPI_DOUBLE,  /* ignored on non-root */
-                                             0, comm_old, comm_old->c_coll->coll_gather_module);
+        ompi_coll_args_gather(&coll_args, (0 == rank ? MPI_IN_PLACE : local_pattern), size, MPI_DOUBLE,
+                              local_pattern, size, MPI_DOUBLE,  /* ignored on non-root */
+                              0);
+        err = comm_old->c_coll->coll_gather( &coll_args,
+                                             comm_old, comm_old->c_coll->coll_gather_module);
         if (OMPI_SUCCESS != err) {
             goto release_and_return;
         }
@@ -691,9 +697,9 @@ int mca_topo_treematch_dist_graph_create(mca_topo_base_module_t* topo_module,
         /* Todo : Bcast + group creation */
         /* scatter the ranks */
         /* don't need to convert k from local rank to global rank */
-        if (OMPI_SUCCESS != (err = comm_old->c_coll->coll_scatter(k, 1, MPI_INT,
-                                                                  &newrank, 1, MPI_INT,
-                                                                  0, comm_old,
+        ompi_coll_args_scatter(&coll_args, k, 1, MPI_INT,
+                               &newrank, 1, MPI_INT, 0);
+        if (OMPI_SUCCESS != (err = comm_old->c_coll->coll_scatter(&coll_args, comm_old,
                                                                   comm_old->c_coll->coll_scatter_module))) {
             if (NULL != k) { free(k); k = NULL; }
             goto release_and_return;
@@ -725,8 +731,9 @@ int mca_topo_treematch_dist_graph_create(mca_topo_base_module_t* topo_module,
         }
 
         lrank_to_grank = (int *)calloc(num_procs_in_node, sizeof(int));
-        if (OMPI_SUCCESS != (err = localcomm->c_coll->coll_allgather(&rank, 1, MPI_INT,
-                                                                     lrank_to_grank, 1, MPI_INT,
+        ompi_coll_args_allgather(&coll_args, &rank, 1, MPI_INT,
+                                 lrank_to_grank, 1, MPI_INT);
+        if (OMPI_SUCCESS != (err = localcomm->c_coll->coll_allgather(&coll_args,
                                                                      localcomm, localcomm->c_coll->coll_allgather_module))) {
             free(lrank_to_grank);
             ompi_comm_free(&localcomm);
@@ -755,10 +762,11 @@ int mca_topo_treematch_dist_graph_create(mca_topo_base_module_t* topo_module,
                 if (grank_to_lrank[topo->out[i]] != -1)
                     local_pattern[grank_to_lrank[topo->out[i]]] += topo->outw[i];
         }
-        if (OMPI_SUCCESS != (err = localcomm->c_coll->coll_gather((rank == lindex_to_grank[0] ? MPI_IN_PLACE : local_pattern),
-                                                                  num_procs_in_node, MPI_DOUBLE,
-                                                                  local_pattern, num_procs_in_node, MPI_DOUBLE,
-                                                                  0, localcomm, localcomm->c_coll->coll_gather_module))) {
+        ompi_coll_args_gather(&coll_args, (rank == lindex_to_grank[0] ? MPI_IN_PLACE : local_pattern),
+                              num_procs_in_node, MPI_DOUBLE,
+                              local_pattern, num_procs_in_node, MPI_DOUBLE, 0);
+        if (OMPI_SUCCESS != (err = localcomm->c_coll->coll_gather(&coll_args,
+                                                                  localcomm, localcomm->c_coll->coll_gather_module))) {
             free(lrank_to_grank);
             ompi_comm_free(&localcomm);
             free(grank_to_lrank);
@@ -902,9 +910,9 @@ int mca_topo_treematch_dist_graph_create(mca_topo_base_module_t* topo_module,
         
         /* Todo : Bcast + group creation */
         /* scatter the ranks */
-        if (OMPI_SUCCESS != (err = localcomm->c_coll->coll_scatter(k, 1, MPI_INT,
-                                                                   &newrank, 1, MPI_INT,
-                                                                   0, localcomm,
+        ompi_coll_args_scatter(&coll_args, k, 1, MPI_INT,
+                               &newrank, 1, MPI_INT, 0);
+        if (OMPI_SUCCESS != (err = localcomm->c_coll->coll_scatter(&coll_args, localcomm,
                                                                    localcomm->c_coll->coll_scatter_module))) {
             if (NULL != k) { free(k); k = NULL; };
             ompi_comm_free(&localcomm);

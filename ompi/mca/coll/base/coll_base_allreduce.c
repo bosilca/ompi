@@ -21,6 +21,7 @@
  * Copyright (c)           Amazon.com, Inc. or its affiliates.
  *                         All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -55,12 +56,12 @@
  *
  */
 int
-ompi_coll_base_allreduce_intra_nonoverlapping(const void *sbuf, void *rbuf, size_t count,
-                                               struct ompi_datatype_t *dtype,
-                                               struct ompi_op_t *op,
-                                               struct ompi_communicator_t *comm,
-                                               mca_coll_base_module_t *module)
+ompi_coll_base_allreduce_intra_nonoverlapping(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
     int err, rank;
 
     rank = ompi_comm_rank(comm);
@@ -69,24 +70,28 @@ ompi_coll_base_allreduce_intra_nonoverlapping(const void *sbuf, void *rbuf, size
 
     /* Reduce to 0 and broadcast. */
 
-    if (MPI_IN_PLACE == sbuf) {
+    if (MPI_IN_PLACE == args->src.info.buffer) {
         if (0 == rank) {
-            err = comm->c_coll->coll_reduce (MPI_IN_PLACE, rbuf, count, dtype,
-                                            op, 0, comm, comm->c_coll->coll_reduce_module);
+            ompi_coll_args_t _r;
+            ompi_coll_args_reduce(&_r, MPI_IN_PLACE, rbuf, count, dtype, op, 0);
+            err = comm->c_coll->coll_reduce (&_r, comm, comm->c_coll->coll_reduce_module);
         } else {
-            err = comm->c_coll->coll_reduce (rbuf, NULL, count, dtype, op, 0,
-                                            comm, comm->c_coll->coll_reduce_module);
+            ompi_coll_args_t _r;
+            ompi_coll_args_reduce(&_r, rbuf, NULL, count, dtype, op, 0);
+            err = comm->c_coll->coll_reduce (&_r, comm, comm->c_coll->coll_reduce_module);
         }
     } else {
-        err = comm->c_coll->coll_reduce (sbuf, rbuf, count, dtype, op, 0,
-                                        comm, comm->c_coll->coll_reduce_module);
+        ompi_coll_args_t _r;
+        ompi_coll_args_reduce(&_r, args->src.info.buffer, rbuf, count, dtype, op, 0);
+        err = comm->c_coll->coll_reduce (&_r, comm, comm->c_coll->coll_reduce_module);
     }
     if (MPI_SUCCESS != err) {
         return err;
     }
 
-    return comm->c_coll->coll_bcast (rbuf, count, dtype, 0, comm,
-                                    comm->c_coll->coll_bcast_module);
+    ompi_coll_args_t _b;
+    ompi_coll_args_bcast(&_b, rbuf, count, dtype, 0);
+    return comm->c_coll->coll_bcast (&_b, comm, comm->c_coll->coll_bcast_module);
 }
 
 /*
@@ -131,13 +136,13 @@ ompi_coll_base_allreduce_intra_nonoverlapping(const void *sbuf, void *rbuf, size
  *
  */
 int
-ompi_coll_base_allreduce_intra_recursivedoubling(const void *sbuf, void *rbuf,
-                                                  size_t count,
-                                                  struct ompi_datatype_t *dtype,
-                                                  struct ompi_op_t *op,
-                                                  struct ompi_communicator_t *comm,
-                                                  mca_coll_base_module_t *module)
+ompi_coll_base_allreduce_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
     int ret, line, rank, size, adjsize, remote, distance;
     int newrank, newremote, extra_ranks;
     char *tmpsend = NULL, *tmprecv = NULL, *tmpswap = NULL, *inplacebuf_free = NULL, *inplacebuf;
@@ -342,12 +347,12 @@ ompi_coll_base_allreduce_intra_recursivedoubling(const void *sbuf, void *rbuf,
  *
  */
 int
-ompi_coll_base_allreduce_intra_ring(const void *sbuf, void *rbuf, size_t count,
-                                     struct ompi_datatype_t *dtype,
-                                     struct ompi_op_t *op,
-                                     struct ompi_communicator_t *comm,
-                                     mca_coll_base_module_t *module)
+ompi_coll_base_allreduce_intra_ring(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
     int ret, line, rank, size, k, recv_from, send_to, block_count, inbi;
     int early_segcount, late_segcount, split_rank, max_segcount;
     size_t typelng;
@@ -374,10 +379,7 @@ ompi_coll_base_allreduce_intra_ring(const void *sbuf, void *rbuf, size_t count,
     /* Special case for count less than size - use recursive doubling */
     if (count < (size_t) size) {
         OPAL_OUTPUT((ompi_coll_base_framework.framework_output, "coll:base:allreduce_ring rank %d/%d, count %zu, switching to recursive doubling", rank, size, count));
-        return (ompi_coll_base_allreduce_intra_recursivedoubling(sbuf, rbuf,
-                                                                  count,
-                                                                  dtype, op,
-                                                                  comm, module));
+        return (ompi_coll_base_allreduce_intra_recursivedoubling(args, comm, module));
     }
 
     /* Allocate and initialize temporary buffers */
@@ -472,7 +474,7 @@ ompi_coll_base_allreduce_intra_ring(const void *sbuf, void *rbuf, size_t count,
                         ((ptrdiff_t)prevblock * late_segcount + split_rank));
         block_count = ((prevblock < split_rank)? early_segcount : late_segcount);
         tmprecv = ((char*)rbuf) + (ptrdiff_t)block_offset * extent;
-        ompi_op_reduce(op, inbuf[inbi ^ 0x1], tmprecv, block_count, dtype);
+        ompi_op_reduce(args->op, inbuf[inbi ^ 0x1], tmprecv, block_count, dtype);
 
         /* send previous block to send_to */
         ret = MCA_PML_CALL(send(tmprecv, block_count, dtype, send_to,
@@ -493,7 +495,7 @@ ompi_coll_base_allreduce_intra_ring(const void *sbuf, void *rbuf, size_t count,
                     ((ptrdiff_t)recv_from * late_segcount + split_rank));
     block_count = ((recv_from < split_rank)? early_segcount : late_segcount);
     tmprecv = ((char*)rbuf) + (ptrdiff_t)block_offset * extent;
-    ompi_op_reduce(op, inbuf[inbi], tmprecv, block_count, dtype);
+    ompi_op_reduce(args->op, inbuf[inbi], tmprecv, block_count, dtype);
 
     /* Distribution loop - variation of ring allgather */
     send_to = (rank + 1) % size;
@@ -619,13 +621,12 @@ ompi_coll_base_allreduce_intra_ring(const void *sbuf, void *rbuf, size_t count,
  *
  */
 int
-ompi_coll_base_allreduce_intra_ring_segmented(const void *sbuf, void *rbuf, size_t count,
-                                               struct ompi_datatype_t *dtype,
-                                               struct ompi_op_t *op,
-                                               struct ompi_communicator_t *comm,
-                                               mca_coll_base_module_t *module,
-                                               uint32_t segsize)
+ompi_coll_base_allreduce_intra_ring_segmented(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
     int ret, line, rank, size, k, recv_from, send_to;
     int early_blockcount, late_blockcount, split_rank;
     int num_phases, phase, block_count, inbi;
@@ -659,8 +660,7 @@ ompi_coll_base_allreduce_intra_ring_segmented(const void *sbuf, void *rbuf, size
         /* Special case for count less than size * segcount - use regular ring */
         if (count < (size_t) (size * segcount)) {
             OPAL_OUTPUT((ompi_coll_base_framework.framework_output, "coll:base:allreduce_ring_segmented rank %d/%d, count %zu, switching to regular ring", rank, size, count));
-            return (ompi_coll_base_allreduce_intra_ring(sbuf, rbuf, count, dtype, op,
-                                                         comm, module));
+            return (ompi_coll_base_allreduce_intra_ring(args, comm, module));
         }
 
     /* Determine the number of phases of the algorithm */
@@ -783,7 +783,7 @@ ompi_coll_base_allreduce_intra_ring_segmented(const void *sbuf, void *rbuf, size
                             ((ptrdiff_t)phase * (ptrdiff_t)early_phase_segcount) :
                             ((ptrdiff_t)phase * (ptrdiff_t)late_phase_segcount + split_phase));
             tmprecv = ((char*)rbuf) + (ptrdiff_t)(block_offset + phase_offset) * extent;
-            ompi_op_reduce(op, inbuf[inbi ^ 0x1], tmprecv, phase_count, dtype);
+            ompi_op_reduce(args->op, inbuf[inbi ^ 0x1], tmprecv, phase_count, dtype);
 
             /* send previous block to send_to */
             ret = MCA_PML_CALL(send(tmprecv, phase_count, dtype, send_to,
@@ -812,7 +812,7 @@ ompi_coll_base_allreduce_intra_ring_segmented(const void *sbuf, void *rbuf, size
                         ((ptrdiff_t)phase * (ptrdiff_t)early_phase_segcount) :
                         ((ptrdiff_t)phase * (ptrdiff_t)late_phase_segcount + split_phase));
         tmprecv = ((char*)rbuf) + (ptrdiff_t)(block_offset + phase_offset) * extent;
-        ompi_op_reduce(op, inbuf[inbi], tmprecv, phase_count, dtype);
+        ompi_op_reduce(args->op, inbuf[inbi], tmprecv, phase_count, dtype);
     }
 
     /* Distribution loop - variation of ring allgather */
@@ -882,12 +882,12 @@ ompi_coll_base_allreduce_intra_ring_segmented(const void *sbuf, void *rbuf, size
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-ompi_coll_base_allreduce_intra_basic_linear(const void *sbuf, void *rbuf, size_t count,
-                                             struct ompi_datatype_t *dtype,
-                                             struct ompi_op_t *op,
-                                             struct ompi_communicator_t *comm,
-                                             mca_coll_base_module_t *module)
+ompi_coll_base_allreduce_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
     int err, rank;
 
     rank = ompi_comm_rank(comm);
@@ -896,23 +896,28 @@ ompi_coll_base_allreduce_intra_basic_linear(const void *sbuf, void *rbuf, size_t
 
     /* Reduce to 0 and broadcast. */
 
-    if (MPI_IN_PLACE == sbuf) {
+    if (MPI_IN_PLACE == args->src.info.buffer) {
         if (0 == rank) {
-            err = ompi_coll_base_reduce_intra_basic_linear (MPI_IN_PLACE, rbuf, count, dtype,
-                                                             op, 0, comm, module);
+            ompi_coll_args_t _r;
+            ompi_coll_args_reduce(&_r, MPI_IN_PLACE, rbuf, count, dtype, op, 0);
+            err = ompi_coll_base_reduce_intra_basic_linear (&_r, comm, module);
         } else {
-            err = ompi_coll_base_reduce_intra_basic_linear(rbuf, NULL, count, dtype,
-                                                            op, 0, comm, module);
+            ompi_coll_args_t _r;
+            ompi_coll_args_reduce(&_r, rbuf, NULL, count, dtype, op, 0);
+            err = ompi_coll_base_reduce_intra_basic_linear(&_r, comm, module);
         }
     } else {
-        err = ompi_coll_base_reduce_intra_basic_linear(sbuf, rbuf, count, dtype,
-                                                        op, 0, comm, module);
+        ompi_coll_args_t _r;
+        ompi_coll_args_reduce(&_r, args->src.info.buffer, rbuf, count, dtype, op, 0);
+        err = ompi_coll_base_reduce_intra_basic_linear(&_r, comm, module);
     }
     if (MPI_SUCCESS != err) {
         return err;
     }
 
-    return ompi_coll_base_bcast_intra_basic_linear(rbuf, count, dtype, 0, comm, module);
+    ompi_coll_args_t _b;
+    ompi_coll_args_bcast(&_b, rbuf, count, dtype, 0);
+    return ompi_coll_base_bcast_intra_basic_linear(&_b, comm, module);
 }
 
 /*
@@ -971,11 +976,12 @@ ompi_coll_base_allreduce_intra_basic_linear(const void *sbuf, void *rbuf, size_t
  * Memory requirements (per process):
  *   count * typesize + 4 * \log_2(p) * sizeof(int) = O(count)
  */
-int ompi_coll_base_allreduce_intra_redscat_allgather(
-    const void *sbuf, void *rbuf, size_t count, struct ompi_datatype_t *dtype,
-    struct ompi_op_t *op, struct ompi_communicator_t *comm,
-    mca_coll_base_module_t *module)
+int ompi_coll_base_allreduce_intra_redscat_allgather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
     int *rindex = NULL, *rcount = NULL, *sindex = NULL, *scount = NULL;
 
     int comm_size = ompi_comm_size(comm);
@@ -989,8 +995,7 @@ int ompi_coll_base_allreduce_intra_redscat_allgather(
                      "coll:base:allreduce_intra_redscat_allgather: rank %d/%d "
                      "count %zu switching to basic linear allreduce",
                      rank, comm_size, count));
-        return ompi_coll_base_allreduce_intra_basic_linear(sbuf, rbuf, count, dtype,
-                                                           op, comm, module);
+        return ompi_coll_base_allreduce_intra_basic_linear(args, comm, module);
     }
 
     /* Find nearest power-of-two less than or equal to comm_size */
@@ -1011,9 +1016,9 @@ int ompi_coll_base_allreduce_intra_redscat_allgather(
         return OMPI_ERR_OUT_OF_RESOURCE;
     tmp_buf = tmp_buf_raw - gap;
 
-    if (sbuf != MPI_IN_PLACE) {
+    if (args->src.info.buffer != MPI_IN_PLACE) {
         err = ompi_datatype_copy_content_same_ddt(dtype, count, (char *)rbuf,
-                                                  (char *)sbuf);
+                                                  (char *)args->src.info.buffer);
         if (MPI_SUCCESS != err) { goto cleanup_and_return; }
     }
 
@@ -1264,12 +1269,10 @@ int ompi_coll_base_allreduce_intra_redscat_allgather(
  *                   is not efficient in terms of network bandwidth comparing
  *                   to gather/reduce/bcast type of approach.
  */
-int ompi_coll_base_allreduce_intra_allgather_reduce(const void *sbuf, void *rbuf, size_t count,
-                                                    struct ompi_datatype_t *dtype,
-                                                    struct ompi_op_t *op,
-                                                    struct ompi_communicator_t *comm,
-                                                    mca_coll_base_module_t *module)
+int ompi_coll_base_allreduce_intra_allgather_reduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
     int line = -1;
     char *partial_buf = NULL;
     char *partial_buf_start = NULL;
@@ -1283,9 +1286,9 @@ int ompi_coll_base_allreduce_intra_allgather_reduce(const void *sbuf, void *rbuf
 
     int size = ompi_comm_size(comm);
 
-    sendtmpbuf = (char*) sbuf;
-    if( sbuf == MPI_IN_PLACE ) {
-        sendtmpbuf = (char *)rbuf;
+    sendtmpbuf = (char*) args->src.info.buffer;
+    if( args->src.info.buffer == MPI_IN_PLACE ) {
+        sendtmpbuf = (char *)args->dst.info.buffer;
     }
     ptrdiff_t buf_size, gap = 0;
     buf_size = opal_datatype_span(&dtype->super, (int64_t)count * size, &gap);
@@ -1301,13 +1304,14 @@ int ompi_coll_base_allreduce_intra_allgather_reduce(const void *sbuf, void *rbuf
     if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
 
     // apply allgather data so that each rank has a full copy to do reduce (trade bandwidth for better latency)
-    err = comm->c_coll->coll_allgather(tmpsend_start, count, dtype,
-                                       partial_buf_start, count, dtype,
-                                       comm, comm->c_coll->coll_allgather_module);
+    ompi_coll_args_t _ag;
+    ompi_coll_args_allgather(&_ag, tmpsend_start, count, dtype,
+                             partial_buf_start, count, dtype);
+    err = comm->c_coll->coll_allgather(&_ag, comm, comm->c_coll->coll_allgather_module);
     if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
 
     for (int target = 1; target < size; target++) {
-        ompi_op_reduce(op,
+        ompi_op_reduce(args->op,
                        partial_buf_start + (ptrdiff_t)target * count * extent,
                        partial_buf_start,
                        count,
@@ -1316,7 +1320,7 @@ int ompi_coll_base_allreduce_intra_allgather_reduce(const void *sbuf, void *rbuf
 
     // move data to rbuf
     err = ompi_datatype_copy_content_same_ddt(dtype, count,
-                                              (char*)rbuf,
+                                              (char*)args->dst.info.buffer,
                                               (char*)partial_buf_start);
     if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
 

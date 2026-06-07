@@ -15,6 +15,7 @@
  * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2019      Mellanox Technologies. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -60,12 +61,14 @@
  *   7                    7                  11   7
  */
 int
-ompi_coll_base_scatter_intra_binomial(
-    const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-    void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-    int root, struct ompi_communicator_t *comm,
-    mca_coll_base_module_t *module)
+ompi_coll_base_scatter_intra_binomial(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
+    int root = args->root;
     mca_coll_base_module_t *base_module = (mca_coll_base_module_t*)module;
     mca_coll_base_comm_t *data = base_module->base_data;
     int line = -1, rank, vrank, size, err, packed_size;
@@ -103,10 +106,10 @@ ompi_coll_base_scatter_intra_binomial(
     OBJ_CONSTRUCT( &convertor, opal_convertor_t );
     if (rank == root) {  /* root and non-leafs */
         ompi_datatype_type_extent(sdtype, &sextent);
-        ptmp = (char *)sbuf;  /* if root == 0, just use the send buffer */
+        ptmp = (char *)args->src.info.buffer;  /* if root == 0, just use the send buffer */
         if (0 != root) {
             opal_convertor_copy_and_prepare_for_send( ompi_mpi_local_convertor, &(sdtype->super),
-                                                      scount * size, sbuf, 0, &convertor );
+                                                      scount * size, args->src.info.buffer, 0, &convertor );
             opal_convertor_get_packed_size( &convertor, &packed_sizet );
             packed_size = packed_sizet;
             packed_sizet = packed_sizet / size;
@@ -220,14 +223,11 @@ ompi_coll_base_scatter_intra_binomial(
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-ompi_coll_base_scatter_intra_basic_linear(const void *sbuf, size_t scount,
-                                          struct ompi_datatype_t *sdtype,
-                                          void *rbuf, size_t rcount,
-                                          struct ompi_datatype_t *rdtype,
-                                          int root,
-                                          struct ompi_communicator_t *comm,
-                                          mca_coll_base_module_t *module)
+ompi_coll_base_scatter_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
     int i, rank, size, err;
     ptrdiff_t incr;
     char *ptmp;
@@ -239,8 +239,8 @@ ompi_coll_base_scatter_intra_basic_linear(const void *sbuf, size_t scount,
 
     /* If not root, receive data. */
 
-    if (rank != root) {
-        err = MCA_PML_CALL(recv(rbuf, rcount, rdtype, root,
+    if (rank != args->root) {
+        err = MCA_PML_CALL(recv(rbuf, args->dst.info.count, args->dst.info.datatype, args->root,
                                 MCA_COLL_BASE_TAG_SCATTER,
                                 comm, MPI_STATUS_IGNORE));
         return err;
@@ -254,15 +254,15 @@ ompi_coll_base_scatter_intra_basic_linear(const void *sbuf, size_t scount,
     }
 
     incr *= scount;
-    for (i = 0, ptmp = (char *) sbuf; i < size; ++i, ptmp += incr) {
+    for (i = 0, ptmp = (char *) args->src.info.buffer; i < size; ++i, ptmp += incr) {
 
         /* simple optimization */
 
         if (i == rank) {
             if (MPI_IN_PLACE != rbuf) {
                 err =
-                    ompi_datatype_sndrcv(ptmp, scount, sdtype, rbuf, rcount,
-                                         rdtype);
+                    ompi_datatype_sndrcv(ptmp, scount, sdtype, rbuf, args->dst.info.count,
+                                         args->dst.info.datatype);
             }
         } else {
             err = MCA_PML_CALL(send(ptmp, scount, sdtype, i,
@@ -287,15 +287,11 @@ ompi_coll_base_scatter_intra_basic_linear(const void *sbuf, size_t scount,
  * progression until the message is sent/(copied to some sort of transmit buffer).
  */
 int
-ompi_coll_base_scatter_intra_linear_nb(const void *sbuf, size_t scount,
-                                       struct ompi_datatype_t *sdtype,
-                                       void *rbuf, size_t rcount,
-                                       struct ompi_datatype_t *rdtype,
-                                       int root,
-                                       struct ompi_communicator_t *comm,
-                                       mca_coll_base_module_t *module,
-                                       int max_reqs)
+ompi_coll_base_scatter_intra_linear_nb(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, int max_reqs)
 {
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
     int i, rank, size, err, line, nreqs;
     ptrdiff_t incr;
     char *ptmp;
@@ -305,8 +301,8 @@ ompi_coll_base_scatter_intra_linear_nb(const void *sbuf, size_t scount,
     size = ompi_comm_size(comm);
 
     /* If not root, receive data. */
-    if (rank != root) {
-        err = MCA_PML_CALL(recv(rbuf, rcount, rdtype, root,
+    if (rank != args->root) {
+        err = MCA_PML_CALL(recv(rbuf, args->dst.info.count, args->dst.info.datatype, args->root,
                                 MCA_COLL_BASE_TAG_SCATTER,
                                 comm, MPI_STATUS_IGNORE));
         if (MPI_SUCCESS != err) {
@@ -339,12 +335,12 @@ ompi_coll_base_scatter_intra_linear_nb(const void *sbuf, size_t scount,
     incr *= scount;
 
     /* I am the root, loop sending data. */
-    for (i = 0, ptmp = (char *)sbuf, preq = reqs; i < size; ++i, ptmp += incr) {
+    for (i = 0, ptmp = (char *)args->src.info.buffer, preq = reqs; i < size; ++i, ptmp += incr) {
         /* simple optimization */
         if (i == rank) {
             if (MPI_IN_PLACE != rbuf) {
-                err = ompi_datatype_sndrcv(ptmp, scount, sdtype, rbuf, rcount,
-                                           rdtype);
+                err = ompi_datatype_sndrcv(ptmp, scount, sdtype, rbuf, args->dst.info.count,
+                                           args->dst.info.datatype);
             }
         } else {
             if (!max_reqs || (i % max_reqs)) {

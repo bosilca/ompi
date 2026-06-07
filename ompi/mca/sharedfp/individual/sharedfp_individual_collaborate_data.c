@@ -12,6 +12,7 @@
  * Copyright (c) 2013-2018 University of Houston. All rights reserved.
  * Copyright (c) 2018      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -46,6 +47,7 @@ int mca_sharedfp_individual_collaborate_data(struct mca_sharedfp_base_data_t *sh
     int *displ = NULL;
     ompi_count_array_t countbuff_desc;
     ompi_disp_array_t displ_desc;
+    ompi_coll_args_t coll_args;
     double *ind_ts = NULL;
     long *ind_recordlength = NULL;
     OMPI_MPI_OFFSET_TYPE *local_off = NULL;
@@ -88,12 +90,9 @@ int mca_sharedfp_individual_collaborate_data(struct mca_sharedfp_base_data_t *sh
 	goto exit;
     }
 
-    ret = ompio_fh->f_comm->c_coll->coll_allgather ( &nodesoneachprocess, 
-                                                     1, 
-                                                     MPI_INT,
-                                                     countbuff, 
-                                                     1, 
-                                                     MPI_INT, 
+    ompi_coll_args_allgather(&coll_args, &nodesoneachprocess, 1, MPI_INT,
+                             countbuff, 1, MPI_INT);
+    ret = ompio_fh->f_comm->c_coll->coll_allgather ( &coll_args,
                                                      ompio_fh->f_comm,
                                                      ompio_fh->f_comm->c_coll->coll_allgather_module );
 
@@ -147,27 +146,20 @@ int mca_sharedfp_individual_collaborate_data(struct mca_sharedfp_base_data_t *sh
     OMPI_COUNT_ARRAY_INIT(&countbuff_desc, countbuff);
     OMPI_DISP_ARRAY_INIT(&displ_desc, displ);
 
-    ret = ompio_fh->f_comm->c_coll->coll_allgatherv ( ind_ts, 
-                                                      countbuff[ompio_fh->f_rank], 
-                                                      MPI_DOUBLE,
-                                                      timestampbuff, 
-                                                      countbuff_desc,
-                                                      displ_desc,
-                                                      MPI_DOUBLE,
-                                                      ompio_fh->f_comm, 
+    ompi_coll_args_allgatherv(&coll_args, ind_ts, countbuff[ompio_fh->f_rank], MPI_DOUBLE,
+                              timestampbuff, countbuff_desc, displ_desc, MPI_DOUBLE);
+    ret = ompio_fh->f_comm->c_coll->coll_allgatherv ( &coll_args,
+                                                      ompio_fh->f_comm,
                                                       ompio_fh->f_comm->c_coll->coll_allgatherv_module );
     if ( OMPI_SUCCESS != ret ) {
 	goto exit;
     }
 
-    ret = ompio_fh->f_comm->c_coll->coll_allgatherv ( ind_recordlength, 
-                                                      countbuff[ompio_fh->f_rank], 
-                                                      OMPI_OFFSET_DATATYPE,
-                                                      offsetbuff, 
-                                                      countbuff_desc,
-                                                      displ_desc,
-                                                      OMPI_OFFSET_DATATYPE,
-                                                      ompio_fh->f_comm, 
+    ompi_coll_args_allgatherv(&coll_args, ind_recordlength, countbuff[ompio_fh->f_rank],
+                              OMPI_OFFSET_DATATYPE, offsetbuff, countbuff_desc, displ_desc,
+                              OMPI_OFFSET_DATATYPE);
+    ret = ompio_fh->f_comm->c_coll->coll_allgatherv ( &coll_args,
+                                                      ompio_fh->f_comm,
                                                       ompio_fh->f_comm->c_coll->coll_allgatherv_module );
     if ( OMPI_SUCCESS != ret ) {
 	goto exit;

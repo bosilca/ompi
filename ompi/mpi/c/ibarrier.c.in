@@ -14,6 +14,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -50,7 +51,9 @@ PROTOTYPE ERROR_CLASS ibarrier(COMM comm, REQUEST_INOUT request)
         }
     }
 
-    err = comm->c_coll->coll_ibarrier(comm, request, comm->c_coll->coll_ibarrier_module);
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    err = comm->c_coll->coll_ibarrier(&coll_args, comm, request, comm->c_coll->coll_ibarrier_module);
 
     /* All done */
 

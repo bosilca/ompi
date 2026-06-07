@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2025      Barcelona Supercomputing Center (BSC-CNS). All Rights Reserved.
  * Copyright (c) 2025      Triad National Security, LLC. All rights
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  *
  * Additional copyrights may follow
  *
@@ -116,15 +117,14 @@ static int alltoall_cache_setup(
     return 0; /* cache miss */
 }
 
-int mca_coll_han_alltoall_using_smsc(
-        const void *sbuf, size_t scount,
-        struct ompi_datatype_t *sdtype,
-        void* rbuf, size_t rcount,
-        struct ompi_datatype_t *rdtype,
-        struct ompi_communicator_t *comm,
-        mca_coll_base_module_t *module)
+int mca_coll_han_alltoall_using_smsc(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
-
+    const void *sbuf = args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
     opal_convertor_t convertor;
     int send_needs_bounce, have_device_buffer;
@@ -145,14 +145,12 @@ int mca_coll_han_alltoall_using_smsc(
         opal_output_verbose(1, mca_coll_han_component.han_output, "in mca_coll_han_alltoall_using_smsc, "
             "but MCA_SMSC_FEATURE_CAN_MAP not available.  Disqualifying this alg!\n");
         HAN_UNINSTALL_COLL_API(comm, han_module, alltoall);
-        return han_module->previous_alltoall(sbuf, scount, sdtype, rbuf, rcount, rdtype,
-                                             comm, han_module->previous_alltoall_module);
+        return han_module->previous_alltoall(args, comm, han_module->previous_alltoall_module);
     }
 
     if (sbuf == MPI_IN_PLACE) {
         /* This is not an in-place algorithm */
-        return han_module->previous_alltoall(sbuf, scount, sdtype, rbuf, rcount, rdtype,
-                                             comm, han_module->previous_alltoall_module);
+        return han_module->previous_alltoall(args, comm, han_module->previous_alltoall_module);
    }
 
     OBJ_CONSTRUCT( &convertor, opal_convertor_t );
@@ -181,8 +179,7 @@ int mca_coll_han_alltoall_using_smsc(
         is no need to communicate before taking this branch.
         */
         OBJ_DESTRUCT(&convertor);
-        return han_module->previous_alltoall(sbuf, scount, sdtype, rbuf, rcount, rdtype,
-                                             comm, han_module->previous_alltoall_module);
+        return han_module->previous_alltoall(args, comm, han_module->previous_alltoall_module);
     }
 
 
@@ -194,8 +191,7 @@ int mca_coll_han_alltoall_using_smsc(
         /* HAN cannot work with this communicator so fallback on all collectives */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
         OBJ_DESTRUCT(&convertor);
-        return han_module->previous_alltoall(sbuf, scount, sdtype, rbuf, rcount, rdtype,
-                                          comm, han_module->previous_alltoall_module);
+        return han_module->previous_alltoall(args, comm, han_module->previous_alltoall_module);
     }
 
     /* Topo must be initialized to know rank distribution which then is used to
@@ -210,8 +206,7 @@ int mca_coll_han_alltoall_using_smsc(
          */
         HAN_UNINSTALL_COLL_API(comm, han_module, alltoall);
         OBJ_DESTRUCT(&convertor);
-        return han_module->previous_alltoall(sbuf, scount, sdtype, rbuf, rcount, rdtype,
-                                             comm, han_module->previous_alltoall_module);
+        return han_module->previous_alltoall(args, comm, han_module->previous_alltoall_module);
     }
 
     int rc, ii_push_data;
@@ -345,8 +340,10 @@ start_allgather:
             gather_buf_in[1] = (void*)(intptr_t)send_needs_bounce;
             gather_buf_in[2] = (void*)(intptr_t)ii_push_data;
 
-            rc = low_comm->c_coll->coll_allgather(gather_buf_in, nptrs_gather, MPI_AINT,
-                        gather_buf_out, nptrs_gather, MPI_AINT, low_comm,
+            ompi_coll_args_t _ag;
+            ompi_coll_args_allgather(&_ag, gather_buf_in, nptrs_gather, MPI_AINT,
+                        gather_buf_out, nptrs_gather, MPI_AINT);
+            rc = low_comm->c_coll->coll_allgather(&_ag, low_comm,
                         low_comm->c_coll->coll_allgather_module);
 
             if (rc != 0) {
@@ -445,7 +442,9 @@ start_allgather:
             if (ii_push_data && jloop < up_size) {
                 /*  barrier here so followers know all leaders have completed
                     previous isend for this slot, and may begin overwriting bounce slot. */
-                low_comm->c_coll->coll_barrier(low_comm, low_comm->c_coll->coll_barrier_module);
+                ompi_coll_args_t _br;
+                ompi_coll_args_barrier(&_br);
+                low_comm->c_coll->coll_barrier(&_br, low_comm, low_comm->c_coll->coll_barrier_module);
             }
         }
 
@@ -504,7 +503,9 @@ start_allgather:
             if (ii_push_data) {
                 /* barrier here so leaders know all followers have filled data,
                    and can issue send. */
-                low_comm->c_coll->coll_barrier(low_comm, low_comm->c_coll->coll_barrier_module);
+                ompi_coll_args_t _br;
+                ompi_coll_args_barrier(&_br);
+                low_comm->c_coll->coll_barrier(&_br, low_comm, low_comm->c_coll->coll_barrier_module);
             }
 
             if (use_isend == 0) {
@@ -543,7 +544,9 @@ cleanup:
     /* we may still have neighbors reading directly from our buffer, so we must ensure it is not modified */
     if (!ii_push_data)
     {
-        low_comm->c_coll->coll_barrier(low_comm, low_comm->c_coll->coll_barrier_module);
+        ompi_coll_args_t _br;
+        ompi_coll_args_barrier(&_br);
+        low_comm->c_coll->coll_barrier(&_br, low_comm, low_comm->c_coll->coll_barrier_module);
     }
 
     if (mca_coll_han_component.han_use_persist_buffers) {

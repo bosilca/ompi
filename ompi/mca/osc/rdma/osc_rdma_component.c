@@ -26,6 +26,7 @@
  * Copyright (c) 2019-2021 Triad National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2025      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -576,7 +577,9 @@ static int synchronize_errorcode(int errorcode, ompi_communicator_t *comm)
     int ret;
     int err = errorcode;
     /* This assumes that error codes are negative integers */
-    ret = comm->c_coll->coll_allreduce (MPI_IN_PLACE, &err, 1, MPI_INT, MPI_MIN,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_allreduce (&coll_args, MPI_IN_PLACE, &err, 1, MPI_INT, MPI_MIN);
+    ret = comm->c_coll->coll_allreduce (&coll_args,
                                         comm, comm->c_coll->coll_allreduce_module);
     if (OPAL_UNLIKELY (OMPI_SUCCESS != ret)) {
         err = ret;
@@ -654,8 +657,10 @@ static int allocate_state_shared (ompi_osc_rdma_module_t *module, void **base, s
         temp[local_rank].size = size;
 
         /* gather the local sizes and ranks */
-        ret = shared_comm->c_coll->coll_allgather (MPI_IN_PLACE, sizeof (*temp), MPI_BYTE, temp, sizeof (*temp),
-                                                  MPI_BYTE, shared_comm, shared_comm->c_coll->coll_allgather_module);
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_allgather (&coll_args, MPI_IN_PLACE, sizeof (*temp), MPI_BYTE, temp, sizeof (*temp),
+                                  MPI_BYTE);
+        ret = shared_comm->c_coll->coll_allgather (&coll_args, shared_comm, shared_comm->c_coll->coll_allgather_module);
         if (OMPI_SUCCESS != ret) {
             break;
         }
@@ -695,7 +700,8 @@ static int allocate_state_shared (ompi_osc_rdma_module_t *module, void **base, s
             break;
         }
 
-        ret = shared_comm->c_coll->coll_bcast (&module->seg_ds, sizeof (module->seg_ds), MPI_BYTE, 0,
+        ompi_coll_args_bcast (&coll_args, &module->seg_ds, sizeof (module->seg_ds), MPI_BYTE, 0);
+        ret = shared_comm->c_coll->coll_bcast (&coll_args,
                                                shared_comm, shared_comm->c_coll->coll_bcast_module);
         if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
             break;
@@ -735,7 +741,8 @@ static int allocate_state_shared (ompi_osc_rdma_module_t *module, void **base, s
         memset (module->state, 0, module->state_size);
 
         /* barrier to make sure all ranks have attached and initialized */
-        shared_comm->c_coll->coll_barrier(shared_comm, shared_comm->c_coll->coll_barrier_module);
+        ompi_coll_args_barrier (&coll_args);
+        shared_comm->c_coll->coll_barrier(&coll_args, shared_comm, shared_comm->c_coll->coll_barrier_module);
 
         if (0 == local_rank) {
             /* unlink the shared memory backing file */
@@ -1230,7 +1237,9 @@ static int ompi_osc_rdma_share_data (ompi_osc_rdma_module_t *module)
         temp[my_rank].node_id = module->node_id;
         temp[my_rank].rank = ompi_comm_rank (module->shared_comm);
 
-        ret = module->comm->c_coll->coll_allgather (MPI_IN_PLACE, 1, MPI_2INT, temp, 1, MPI_2INT,
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_allgather (&coll_args, MPI_IN_PLACE, 1, MPI_2INT, temp, 1, MPI_2INT);
+        ret = module->comm->c_coll->coll_allgather (&coll_args,
                                                    module->comm, module->comm->c_coll->coll_allgather_module);
         if (OMPI_SUCCESS != ret) {
             break;
@@ -1252,8 +1261,9 @@ static int ompi_osc_rdma_share_data (ompi_osc_rdma_module_t *module)
 
             /* gather state data at each node leader */
             if (ompi_comm_size (module->local_leaders) > 1) {
-                ret = module->local_leaders->c_coll->coll_allgather (MPI_IN_PLACE, module->region_size, MPI_BYTE, module->node_comm_info,
-                                                                    module->region_size, MPI_BYTE, module->local_leaders,
+                ompi_coll_args_allgather (&coll_args, MPI_IN_PLACE, module->region_size, MPI_BYTE, module->node_comm_info,
+                                          module->region_size, MPI_BYTE);
+                ret = module->local_leaders->c_coll->coll_allgather (&coll_args, module->local_leaders,
                                                                     module->local_leaders->c_coll->coll_allgather_module);
                 if (OMPI_SUCCESS != ret) {
                     opal_output_verbose(MCA_BASE_VERBOSE_ERROR, ompi_osc_base_framework.framework_output,
@@ -1323,7 +1333,9 @@ static int ompi_osc_rdma_create_groups (ompi_osc_rdma_module_t *module)
     }
 
     if (ompi_comm_size (module->shared_comm) > 1) {
-        ret = module->shared_comm->c_coll->coll_bcast (values, 2, MPI_INT, 0, module->shared_comm,
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_bcast (&coll_args, values, 2, MPI_INT, 0);
+        ret = module->shared_comm->c_coll->coll_bcast (&coll_args, module->shared_comm,
                                                       module->shared_comm->c_coll->coll_bcast_module);
         if (OMPI_SUCCESS != ret) {
             opal_output_verbose(MCA_BASE_VERBOSE_ERROR, ompi_osc_base_framework.framework_output,
@@ -1364,7 +1376,9 @@ static int ompi_osc_rdma_check_parameters (ompi_osc_rdma_module_t *module, ptrdi
     values[2] = size;
     values[3] = -(ssize_t) size;
 
-    ret = module->comm->c_coll->coll_allreduce (MPI_IN_PLACE, values, 4, MPI_LONG, MPI_MIN, module->comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_allreduce (&coll_args, MPI_IN_PLACE, values, 4, MPI_LONG, MPI_MIN);
+    ret = module->comm->c_coll->coll_allreduce (&coll_args, module->comm,
                                                module->comm->c_coll->coll_allreduce_module);
     if (OMPI_SUCCESS != ret) {
         return ret;
@@ -1637,7 +1651,9 @@ ompi_osc_rdma_set_no_lock_info(opal_infosubscriber_t *obj, const char *key, cons
         module->no_locks = false;
     }
     /* enforce collectiveness... */
-    module->comm->c_coll->coll_barrier(module->comm, module->comm->c_coll->coll_barrier_module);
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    module->comm->c_coll->coll_barrier(&coll_args, module->comm, module->comm->c_coll->coll_barrier_module);
     /*
      * Accept any value
      */

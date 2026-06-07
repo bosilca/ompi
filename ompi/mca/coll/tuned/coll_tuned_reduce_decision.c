@@ -7,6 +7,7 @@
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2025      Amazon.com, Inc. or its affiliates.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -148,11 +149,7 @@ int ompi_coll_tuned_reduce_intra_check_forced_init (coll_tuned_force_algorithm_m
     return (MPI_SUCCESS);
 }
 
-int ompi_coll_tuned_reduce_intra_do_this(const void *sbuf, void* rbuf, size_t count,
-                                         struct ompi_datatype_t *dtype,
-                                         struct ompi_op_t *op, int root,
-                                         struct ompi_communicator_t *comm,
-                                         mca_coll_base_module_t *module,
+int ompi_coll_tuned_reduce_intra_do_this(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                          int algorithm, int faninout,
                                          int segsize, int max_requests )
 {
@@ -161,29 +158,20 @@ int ompi_coll_tuned_reduce_intra_do_this(const void *sbuf, void* rbuf, size_t co
         algorithm, faninout, segsize));
 
     switch (algorithm) {
-    case (0):  return ompi_coll_tuned_reduce_intra_dec_fixed(sbuf, rbuf, count, dtype,
-                                                             op, root, comm, module);
-    case (1):  return ompi_coll_base_reduce_intra_basic_linear(sbuf, rbuf, count, dtype,
-                                                               op, root, comm, module);
-    case (2):  return ompi_coll_base_reduce_intra_chain(sbuf, rbuf, count, dtype,
-                                                        op, root, comm, module,
+    case (0):  return ompi_coll_tuned_reduce_intra_dec_fixed(args, comm, module);
+    case (1):  return ompi_coll_base_reduce_intra_basic_linear(args, comm, module);
+    case (2):  return ompi_coll_base_reduce_intra_chain(args, comm, module,
                                                         segsize, faninout, max_requests);
-    case (3):  return ompi_coll_base_reduce_intra_pipeline(sbuf, rbuf, count, dtype,
-                                                           op, root, comm, module,
+    case (3):  return ompi_coll_base_reduce_intra_pipeline(args, comm, module,
                                                            segsize, max_requests);
-    case (4):  return ompi_coll_base_reduce_intra_binary(sbuf, rbuf, count, dtype,
-                                                         op, root, comm, module,
+    case (4):  return ompi_coll_base_reduce_intra_binary(args, comm, module,
                                                          segsize, max_requests);
-    case (5):  return ompi_coll_base_reduce_intra_binomial(sbuf, rbuf, count, dtype,
-                                                           op, root, comm, module,
+    case (5):  return ompi_coll_base_reduce_intra_binomial(args, comm, module,
                                                            segsize, max_requests);
-    case (6):  return ompi_coll_base_reduce_intra_in_order_binary(sbuf, rbuf, count, dtype,
-                                                                  op, root, comm, module,
+    case (6):  return ompi_coll_base_reduce_intra_in_order_binary(args, comm, module,
                                                                   segsize, max_requests);
-    case (7):  return ompi_coll_base_reduce_intra_redscat_gather(sbuf, rbuf, count, dtype,
-                                                                  op, root, comm, module);
-    case (8):  return ompi_coll_base_reduce_intra_knomial(sbuf, rbuf, count, dtype,
-                                                          op, root, comm, module,
+    case (7):  return ompi_coll_base_reduce_intra_redscat_gather(args, comm, module);
+    case (8):  return ompi_coll_base_reduce_intra_knomial(args, comm, module,
                                                           segsize, max_requests,
                                                           faninout);
     } /* switch */

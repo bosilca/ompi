@@ -16,6 +16,7 @@
  *                         reserved.
  * Copyright (c) 2014-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -64,12 +65,13 @@
  * so this should be investigated further.
  */
 int
-mca_coll_basic_reduce_scatter_intra(const void *sbuf, void *rbuf, ompi_count_array_t rcounts,
-                                    struct ompi_datatype_t *dtype,
-                                    struct ompi_op_t *op,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module)
+mca_coll_basic_reduce_scatter_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info_v.buffer;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    struct ompi_datatype_t *dtype = args->dst.info_v.datatype;
+    struct ompi_op_t *op = args->op;
     int i, rank, size, count, err = OMPI_SUCCESS;
     ptrdiff_t extent, buf_size, gap;
     ptrdiff_t *disps = NULL;
@@ -332,16 +334,17 @@ mca_coll_basic_reduce_scatter_intra(const void *sbuf, void *rbuf, ompi_count_arr
         }
 
         /* reduction */
-        err =
-            comm->c_coll->coll_reduce(sbuf, recv_buf, count, dtype, op, 0,
-                                     comm, comm->c_coll->coll_reduce_module);
+        ompi_coll_args_t _r;
+        ompi_coll_args_reduce(&_r, sbuf, recv_buf, count, dtype, op, 0);
+        err = comm->c_coll->coll_reduce(&_r, comm, comm->c_coll->coll_reduce_module);
 
         /* scatter */
         if (MPI_SUCCESS == err) {
             OMPI_DISP_ARRAY_INIT(&disps_desc, disps);
-            err = comm->c_coll->coll_scatterv(recv_buf, rcounts, disps_desc, dtype,
-                                             rbuf, ompi_count_array_get(rcounts, rank), dtype, 0,
-                                             comm, comm->c_coll->coll_scatterv_module);
+            ompi_coll_args_t _sv;
+            ompi_coll_args_scatterv(&_sv, recv_buf, rcounts, disps_desc, dtype,
+                                    rbuf, ompi_count_array_get(rcounts, rank), dtype, 0);
+            err = comm->c_coll->coll_scatterv(&_sv, comm, comm->c_coll->coll_scatterv_module);
         }
     }
 
@@ -362,12 +365,10 @@ mca_coll_basic_reduce_scatter_intra(const void *sbuf, void *rbuf, ompi_count_arr
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_reduce_scatter_inter(const void *sbuf, void *rbuf, ompi_count_array_t rcounts,
-                                    struct ompi_datatype_t *dtype,
-                                    struct ompi_op_t *op,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module)
+mca_coll_basic_reduce_scatter_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    struct ompi_datatype_t *dtype = args->dst.info_v.datatype;
     int err, i, rank, root = 0, rsize, lsize, totalcounts;
     char *tmpbuf = NULL, *tmpbuf2 = NULL, *lbuf = NULL, *buf;
     ptrdiff_t gap, span;
@@ -424,7 +425,7 @@ mca_coll_basic_reduce_scatter_inter(const void *sbuf, void *rbuf, ompi_count_arr
         buf = tmpbuf2 - gap;
 
         /* Do a send-recv between the two root procs. to avoid deadlock */
-        err = MCA_PML_CALL(isend(sbuf, totalcounts, dtype, 0,
+        err = MCA_PML_CALL(isend(args->src.info.buffer, totalcounts, dtype, 0,
                                  MCA_COLL_BASE_TAG_REDUCE_SCATTER,
                                  MCA_PML_BASE_SEND_STANDARD, comm, &req));
         if (OMPI_SUCCESS != err) {
@@ -458,13 +459,13 @@ mca_coll_basic_reduce_scatter_inter(const void *sbuf, void *rbuf, ompi_count_arr
             }
 
             /* Perform the reduction */
-            ompi_op_reduce(op, lbuf, buf, totalcounts, dtype);
+            ompi_op_reduce(args->op, lbuf, buf, totalcounts, dtype);
             /* swap the buffers */
             tbuf = lbuf; lbuf = buf; buf = tbuf;
         }
     } else {
         /* If not root, send data to the root. */
-        err = MCA_PML_CALL(send(sbuf, totalcounts, dtype, root,
+        err = MCA_PML_CALL(send(args->src.info.buffer, totalcounts, dtype, root,
                                 MCA_COLL_BASE_TAG_REDUCE_SCATTER,
                                 MCA_PML_BASE_SEND_STANDARD, comm));
         if (OMPI_SUCCESS != err) {
@@ -474,10 +475,11 @@ mca_coll_basic_reduce_scatter_inter(const void *sbuf, void *rbuf, ompi_count_arr
 
     /* Now do a scatterv on the local communicator */
     OMPI_DISP_ARRAY_INIT(&disps_desc, disps);
-    err = comm->c_local_comm->c_coll->coll_scatterv(lbuf, rcounts, disps_desc, dtype,
-                                                   rbuf, ompi_count_array_get(rcounts, rank), dtype, 0,
-                                                   comm->c_local_comm,
-                                                   comm->c_local_comm->c_coll->coll_scatterv_module);
+    ompi_coll_args_t _sv;
+    ompi_coll_args_scatterv(&_sv, lbuf, rcounts, disps_desc, dtype,
+                            args->dst.info_v.buffer, ompi_count_array_get(rcounts, rank), dtype, 0);
+    err = comm->c_local_comm->c_coll->coll_scatterv(&_sv, comm->c_local_comm,
+                                                    comm->c_local_comm->c_coll->coll_scatterv_module);
 
   exit:
     if (NULL != tmpbuf) {

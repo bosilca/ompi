@@ -11,6 +11,7 @@
  *                         All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -32,17 +33,12 @@
  *	Accepts:	- same arguments as MPI_Gather()
  *	Returns:	- MPI_SUCCESS or error code
  */
-int mca_coll_self_gather_intra(const void *sbuf, size_t scount,
-                               struct ompi_datatype_t *sdtype,
-                               void *rbuf, size_t rcount,
-                               struct ompi_datatype_t *rdtype,
-                               int root, struct ompi_communicator_t *comm,
-                               mca_coll_base_module_t *module)
+int mca_coll_self_gather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
-    if (MPI_IN_PLACE == sbuf) {
+    if (MPI_IN_PLACE == args->src.info.buffer) {
         return MPI_SUCCESS;
     } else {
-        return ompi_datatype_sndrcv(sbuf, scount, sdtype,
-                               rbuf, rcount, rdtype);
+        return ompi_datatype_sndrcv(args->src.info.buffer, args->src.info.count, args->src.info.datatype,
+                               args->dst.info.buffer, args->dst.info.count, args->dst.info.datatype);
     }
 }

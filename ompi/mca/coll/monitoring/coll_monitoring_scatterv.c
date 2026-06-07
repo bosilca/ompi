@@ -2,6 +2,7 @@
  * Copyright (c) 2016-2018 Inria. All rights reserved.
  * Copyright (c) 2019      Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -15,21 +16,17 @@
 #include "ompi/communicator/communicator.h"
 #include "coll_monitoring.h"
 
-int mca_coll_monitoring_scatterv(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t disps,
-                                 struct ompi_datatype_t *sdtype,
-                                 void* rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                                 int root, struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module)
+int mca_coll_monitoring_scatterv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     const int my_rank = ompi_comm_rank(comm);
-    if( root == my_rank ) {
+    if( args->root == my_rank ) {
         size_t type_size, data_size, data_size_aggreg = 0;
         const int comm_size = ompi_comm_size(comm);
         int i, rank;
-        ompi_datatype_type_size(sdtype, &type_size);
+        ompi_datatype_type_size(args->src.info_v.datatype, &type_size);
         for( i = 0; i < comm_size; ++i ) {
-            data_size = ompi_count_array_get(scounts, i) * type_size;
+            data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
              * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -41,25 +38,20 @@ int mca_coll_monitoring_scatterv(const void *sbuf, ompi_count_array_t scounts, o
         }
         mca_common_monitoring_coll_o2a(data_size_aggreg, monitoring_module->data);
     }
-    return monitoring_module->real.coll_scatterv(sbuf, scounts, disps, sdtype, rbuf, rcount, rdtype, root, comm, monitoring_module->real.coll_scatterv_module);
+    return monitoring_module->real.coll_scatterv(args, comm, monitoring_module->real.coll_scatterv_module);
 }
 
-int mca_coll_monitoring_iscatterv(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t disps,
-                                  struct ompi_datatype_t *sdtype,
-                                  void *rbuf, size_t rcount, struct ompi_datatype_t *rdtype,
-                                  int root, struct ompi_communicator_t *comm,
-                                  ompi_request_t ** request,
-                                  mca_coll_base_module_t *module)
+int mca_coll_monitoring_iscatterv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     const int my_rank = ompi_comm_rank(comm);
-    if( root == my_rank ) {
+    if( args->root == my_rank ) {
         size_t type_size, data_size, data_size_aggreg = 0;
         const int comm_size = ompi_comm_size(comm);
         int i, rank;
-        ompi_datatype_type_size(sdtype, &type_size);
+        ompi_datatype_type_size(args->src.info_v.datatype, &type_size);
         for( i = 0; i < comm_size; ++i ) {
-            data_size = ompi_count_array_get(scounts, i) * type_size;
+            data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
              * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -71,5 +63,5 @@ int mca_coll_monitoring_iscatterv(const void *sbuf, ompi_count_array_t scounts, 
         }
         mca_common_monitoring_coll_o2a(data_size_aggreg, monitoring_module->data);
     }
-    return monitoring_module->real.coll_iscatterv(sbuf, scounts, disps, sdtype, rbuf, rcount, rdtype, root, comm, request, monitoring_module->real.coll_iscatterv_module);
+    return monitoring_module->real.coll_iscatterv(args, comm, request, monitoring_module->real.coll_iscatterv_module);
 }

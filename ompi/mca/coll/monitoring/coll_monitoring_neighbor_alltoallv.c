@@ -2,6 +2,7 @@
  * Copyright (c) 2016-2018 Inria. All rights reserved.
  * Copyright (c) 2019      Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -16,19 +17,14 @@
 #include "ompi/mca/topo/base/base.h"
 #include "coll_monitoring.h"
 
-int mca_coll_monitoring_neighbor_alltoallv(const void *sbuf, ompi_count_array_t scounts,
-                                           ompi_disp_array_t sdisps, struct ompi_datatype_t *sdtype,
-                                           void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                                           struct ompi_datatype_t *rdtype,
-                                           struct ompi_communicator_t *comm,
-                                           mca_coll_base_module_t *module)
+int mca_coll_monitoring_neighbor_alltoallv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     size_t type_size, data_size, data_size_aggreg = 0;
     const mca_topo_base_comm_cart_t *cart = comm->c_topo->mtc.cart;
     int dim, i, srank, drank, world_rank;
 
-    ompi_datatype_type_size(sdtype, &type_size);
+    ompi_datatype_type_size(args->src.info_v.datatype, &type_size);
 
     for( dim = 0, i = 0; dim < cart->ndims; ++dim ) {
         srank = MPI_PROC_NULL, drank = MPI_PROC_NULL;
@@ -41,7 +37,7 @@ int mca_coll_monitoring_neighbor_alltoallv(const void *sbuf, ompi_count_array_t 
         }
 
         if (MPI_PROC_NULL != srank) {
-            data_size = ompi_count_array_get(scounts, i) * type_size;
+            data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
              * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -54,7 +50,7 @@ int mca_coll_monitoring_neighbor_alltoallv(const void *sbuf, ompi_count_array_t 
         }
 
         if (MPI_PROC_NULL != drank) {
-            data_size = ompi_count_array_get(scounts, i) * type_size;
+            data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
              * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -69,25 +65,17 @@ int mca_coll_monitoring_neighbor_alltoallv(const void *sbuf, ompi_count_array_t 
 
     mca_common_monitoring_coll_a2a(data_size_aggreg, monitoring_module->data);
 
-    return monitoring_module->real.coll_neighbor_alltoallv(sbuf, scounts, sdisps, sdtype, rbuf, rcounts, rdisps, rdtype, comm, monitoring_module->real.coll_neighbor_alltoallv_module);
+    return monitoring_module->real.coll_neighbor_alltoallv(args, comm, monitoring_module->real.coll_neighbor_alltoallv_module);
 }
 
-int mca_coll_monitoring_ineighbor_alltoallv(const void *sbuf, ompi_count_array_t scounts,
-                                            ompi_disp_array_t sdisps,
-                                            struct ompi_datatype_t *sdtype,
-                                            void *rbuf, ompi_count_array_t rcounts,
-                                            ompi_disp_array_t rdisps,
-                                            struct ompi_datatype_t *rdtype,
-                                            struct ompi_communicator_t *comm,
-                                            ompi_request_t ** request,
-                                            mca_coll_base_module_t *module)
+int mca_coll_monitoring_ineighbor_alltoallv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     size_t type_size, data_size, data_size_aggreg = 0;
     const mca_topo_base_comm_cart_t *cart = comm->c_topo->mtc.cart;
     int dim, i, srank, drank, world_rank;
 
-    ompi_datatype_type_size(sdtype, &type_size);
+    ompi_datatype_type_size(args->src.info_v.datatype, &type_size);
 
     for( dim = 0, i = 0; dim < cart->ndims; ++dim ) {
         srank = MPI_PROC_NULL, drank = MPI_PROC_NULL;
@@ -100,7 +88,7 @@ int mca_coll_monitoring_ineighbor_alltoallv(const void *sbuf, ompi_count_array_t
         }
 
         if (MPI_PROC_NULL != srank) {
-            data_size = ompi_count_array_get(scounts, i) * type_size;
+            data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
              * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -113,7 +101,7 @@ int mca_coll_monitoring_ineighbor_alltoallv(const void *sbuf, ompi_count_array_t
         }
 
         if (MPI_PROC_NULL != drank) {
-            data_size = ompi_count_array_get(scounts, i) * type_size;
+            data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
              * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -128,5 +116,5 @@ int mca_coll_monitoring_ineighbor_alltoallv(const void *sbuf, ompi_count_array_t
 
     mca_common_monitoring_coll_a2a(data_size_aggreg, monitoring_module->data);
 
-    return monitoring_module->real.coll_ineighbor_alltoallv(sbuf, scounts, sdisps, sdtype, rbuf, rcounts, rdisps, rdtype, comm, request, monitoring_module->real.coll_ineighbor_alltoallv_module);
+    return monitoring_module->real.coll_ineighbor_alltoallv(args, comm, request, monitoring_module->real.coll_ineighbor_alltoallv_module);
 }

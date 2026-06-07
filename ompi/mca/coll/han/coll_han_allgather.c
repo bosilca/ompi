@@ -5,6 +5,7 @@
  * Copyright (c) 2020      Bull S.A.S. All rights reserved.
  * Copyright (c) 2022      IBM Corporation. All rights reserved
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -158,12 +159,7 @@ mca_coll_han_set_allgather_args(mca_coll_han_allgather_t * args,
  * Main function for taskified allgather: calls lg task, a gather on low comm
  */
 int
-mca_coll_han_allgather_intra(const void *sbuf, size_t scount,
-                             struct ompi_datatype_t *sdtype,
-                             void *rbuf, size_t rcount,
-                             struct ompi_datatype_t *rdtype,
-                             struct ompi_communicator_t *comm,
-                             mca_coll_base_module_t * module)
+mca_coll_han_allgather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     /* Create the subcommunicators */
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
@@ -172,8 +168,7 @@ mca_coll_han_allgather_intra(const void *sbuf, size_t scount,
                              "han cannot handle allgather within this communicator. Fall back on another component\n"));
         /* HAN cannot work with this communicator so fallback on all collectives */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
-        return han_module->previous_allgather(sbuf, scount, sdtype, rbuf, rcount, rdtype,
-                                              comm, han_module->previous_allgather_module);
+        return han_module->previous_allgather(args, comm, han_module->previous_allgather_module);
     }
     ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
     ompi_communicator_t *up_comm = han_module->sub_comm[INTER_NODE];
@@ -187,8 +182,7 @@ mca_coll_han_allgather_intra(const void *sbuf, size_t scount,
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                              "han cannot handle allgather with this communicator (imbalance). Fall back on another component\n"));
         HAN_UNINSTALL_COLL_API(comm, han_module, allgather);
-        return han_module->previous_allgather(sbuf, scount, sdtype, rbuf, rcount, rdtype,
-                                              comm, han_module->previous_allgather_module);
+        return han_module->previous_allgather(args, comm, han_module->previous_allgather_module);
     }
 
     ompi_request_t *temp_request;
@@ -205,8 +199,8 @@ mca_coll_han_allgather_intra(const void *sbuf, size_t scount,
     mca_coll_task_t *lg = OBJ_NEW(mca_coll_task_t);
     /* Setup lg task arguments */
     mca_coll_han_allgather_t *lg_args = malloc(sizeof(mca_coll_han_allgather_t));
-    mca_coll_han_set_allgather_args(lg_args, lg, (char *) sbuf, NULL, scount, sdtype, rbuf, rcount,
-                                    rdtype, root_low_rank, up_comm, low_comm, w_rank,
+    mca_coll_han_set_allgather_args(lg_args, lg, (char *) args->src.info.buffer, NULL, args->src.info.count, args->src.info.datatype, args->dst.info.buffer, args->dst.info.count,
+                                    args->dst.info.datatype, root_low_rank, up_comm, low_comm, w_rank,
                                     low_rank != root_low_rank, han_module->is_mapbycore, topo,
                                     temp_request, han_module);
     /* Init and issue lg task */
@@ -247,19 +241,20 @@ int mca_coll_han_allgather_lg_task(void *task_args)
             char *my_slot = (char *)t->rbuf
                 + (ptrdiff_t)up_rank * (ptrdiff_t)total_count * rext;
 
+            ompi_coll_args_t _lg;
             if (MPI_IN_PLACE == t->sbuf) {
                 char *my_data = ((char*)t->rbuf)
                     + (ptrdiff_t)t->w_rank * (ptrdiff_t)t->rcount * rext;
                 ompi_datatype_copy_content_same_ddt(t->rdtype, t->rcount,
                                                     my_slot, my_data);
-                t->low_comm->c_coll->coll_gather(MPI_IN_PLACE, t->scount, t->sdtype,
-                                                 my_slot, t->rcount, t->rdtype,
-                                                 t->root_low_rank, t->low_comm,
+                ompi_coll_args_gather(&_lg, MPI_IN_PLACE, t->scount, t->sdtype,
+                                      my_slot, t->rcount, t->rdtype, t->root_low_rank);
+                t->low_comm->c_coll->coll_gather(&_lg, t->low_comm,
                                                  t->low_comm->c_coll->coll_gather_module);
             } else {
-                t->low_comm->c_coll->coll_gather((char *)t->sbuf, t->scount, t->sdtype,
-                                                 my_slot, t->rcount, t->rdtype,
-                                                 t->root_low_rank, t->low_comm,
+                ompi_coll_args_gather(&_lg, (char *)t->sbuf, t->scount, t->sdtype,
+                                      my_slot, t->rcount, t->rdtype, t->root_low_rank);
+                t->low_comm->c_coll->coll_gather(&_lg, t->low_comm,
                                                  t->low_comm->c_coll->coll_gather_module);
             }
             t->sbuf = my_slot;
@@ -301,22 +296,26 @@ int mca_coll_han_allgather_lg_task(void *task_args)
         }
     }
     /* Lower level (shared memory or intra-node) gather */
+    ompi_coll_args_t _lg2;
     if (MPI_IN_PLACE == t->sbuf) {
         if (!t->noop) {
-            t->low_comm->c_coll->coll_gather(MPI_IN_PLACE, t->scount, t->sdtype, 
-                                             tmp_rbuf, t->rcount, t->rdtype, t->root_low_rank, 
-                                             t->low_comm, t->low_comm->c_coll->coll_gather_module);
+            ompi_coll_args_gather(&_lg2, MPI_IN_PLACE, t->scount, t->sdtype,
+                                  tmp_rbuf, t->rcount, t->rdtype, t->root_low_rank);
+            t->low_comm->c_coll->coll_gather(&_lg2, t->low_comm,
+                                             t->low_comm->c_coll->coll_gather_module);
         }
         else {
             tmp_send = ((char*)t->rbuf) + (ptrdiff_t)t->w_rank * (ptrdiff_t)t->rcount * rext;
-            t->low_comm->c_coll->coll_gather(tmp_send, t->rcount, t->rdtype, 
-                                             NULL, t->rcount, t->rdtype, t->root_low_rank, 
-                                             t->low_comm, t->low_comm->c_coll->coll_gather_module);
+            ompi_coll_args_gather(&_lg2, tmp_send, t->rcount, t->rdtype,
+                                  NULL, t->rcount, t->rdtype, t->root_low_rank);
+            t->low_comm->c_coll->coll_gather(&_lg2, t->low_comm,
+                                             t->low_comm->c_coll->coll_gather_module);
         }
     }
     else {
-        t->low_comm->c_coll->coll_gather((char *) t->sbuf, t->scount, t->sdtype, tmp_rbuf, t->rcount,
-                                         t->rdtype, t->root_low_rank, t->low_comm,
+        ompi_coll_args_gather(&_lg2, (char *) t->sbuf, t->scount, t->sdtype, tmp_rbuf, t->rcount,
+                              t->rdtype, t->root_low_rank);
+        t->low_comm->c_coll->coll_gather(&_lg2, t->low_comm,
                                          t->low_comm->c_coll->coll_gather_module);
     }
 
@@ -359,10 +358,12 @@ int mca_coll_han_allgather_uag_task(void *task_args)
             /* When persist buffers gathered directly into rbuf, use in-place */
             if (mca_coll_han_component.han_use_persist_buffers
                 && t->sbuf_inter_free == NULL) {
-                t->up_comm->c_coll->coll_allgather(MPI_IN_PLACE,
+                ompi_coll_args_t _uag;
+                ompi_coll_args_allgather(&_uag, MPI_IN_PLACE,
                     t->scount * low_size, t->sdtype,
-                    reorder_rbuf, t->rcount * low_size, t->rdtype,
-                    t->up_comm, t->up_comm->c_coll->coll_allgather_module);
+                    reorder_rbuf, t->rcount * low_size, t->rdtype);
+                t->up_comm->c_coll->coll_allgather(&_uag, t->up_comm,
+                    t->up_comm->c_coll->coll_allgather_module);
                 goto allgather_done;
             }
         } else {
@@ -383,9 +384,11 @@ int mca_coll_han_allgather_uag_task(void *task_args)
         }
 
         /* Inter node allgather */
-        t->up_comm->c_coll->coll_allgather((char *) t->sbuf, t->scount * low_size, t->sdtype,
-                                           reorder_rbuf, t->rcount * low_size, t->rdtype,
-                                           t->up_comm, t->up_comm->c_coll->coll_allgather_module);
+        ompi_coll_args_t _uag;
+        ompi_coll_args_allgather(&_uag, (char *) t->sbuf, t->scount * low_size, t->sdtype,
+                                 reorder_rbuf, t->rcount * low_size, t->rdtype);
+        t->up_comm->c_coll->coll_allgather(&_uag, t->up_comm,
+                                           t->up_comm->c_coll->coll_allgather_module);
 
         if (t->sbuf_inter_free != NULL) {
             han_free_frag(&t->han_module->fragment_freelist,
@@ -447,8 +450,10 @@ int mca_coll_han_allgather_lb_task(void *task_args)
     OBJ_RELEASE(t->cur_task);
     int low_size = ompi_comm_size(t->low_comm);
     int up_size = ompi_comm_size(t->up_comm);
-    t->low_comm->c_coll->coll_bcast((char *) t->rbuf, t->rcount * low_size * up_size, t->rdtype,
-                                    t->root_low_rank, t->low_comm,
+    ompi_coll_args_t _lb;
+    ompi_coll_args_bcast(&_lb, (char *) t->rbuf, t->rcount * low_size * up_size, t->rdtype,
+                         t->root_low_rank);
+    t->low_comm->c_coll->coll_bcast(&_lb, t->low_comm,
                                     t->low_comm->c_coll->coll_bcast_module);
 
     ompi_request_t *temp_req = t->req;
@@ -501,31 +506,38 @@ han_allgather_mapbycore(const void *sbuf, size_t scount,
     size_t total_count = rcount * low_size;
     char *my_slot = (char *)rbuf + (ptrdiff_t)up_rank * (ptrdiff_t)total_count * rext;
 
+    ompi_coll_args_t _lg;
     if (MPI_IN_PLACE == sbuf) {
         if (low_rank == root_low_rank) {
-            low_comm->c_coll->coll_gather(MPI_IN_PLACE, scount, sdtype,
-                                          my_slot, rcount, rdtype, root_low_rank,
-                                          low_comm, low_comm->c_coll->coll_gather_module);
+            ompi_coll_args_gather(&_lg, MPI_IN_PLACE, scount, sdtype,
+                                  my_slot, rcount, rdtype, root_low_rank);
+            low_comm->c_coll->coll_gather(&_lg, low_comm,
+                                          low_comm->c_coll->coll_gather_module);
         } else {
             char *my_data = ((char*)rbuf) + (ptrdiff_t)w_rank * (ptrdiff_t)rcount * rext;
-            low_comm->c_coll->coll_gather(my_data, rcount, rdtype,
-                                          NULL, rcount, rdtype, root_low_rank,
-                                          low_comm, low_comm->c_coll->coll_gather_module);
+            ompi_coll_args_gather(&_lg, my_data, rcount, rdtype,
+                                  NULL, rcount, rdtype, root_low_rank);
+            low_comm->c_coll->coll_gather(&_lg, low_comm,
+                                          low_comm->c_coll->coll_gather_module);
         }
     } else {
-        low_comm->c_coll->coll_gather((char *)sbuf, scount, sdtype,
-                                      my_slot, rcount, rdtype, root_low_rank,
-                                      low_comm, low_comm->c_coll->coll_gather_module);
+        ompi_coll_args_gather(&_lg, (char *)sbuf, scount, sdtype,
+                              my_slot, rcount, rdtype, root_low_rank);
+        low_comm->c_coll->coll_gather(&_lg, low_comm,
+                                      low_comm->c_coll->coll_gather_module);
     }
 
     if (low_rank == root_low_rank) {
-        up_comm->c_coll->coll_allgather(MPI_IN_PLACE, total_count, rdtype,
-                                        rbuf, total_count, rdtype,
-                                        up_comm, up_comm->c_coll->coll_allgather_module);
+        ompi_coll_args_t _uag;
+        ompi_coll_args_allgather(&_uag, MPI_IN_PLACE, total_count, rdtype,
+                                 rbuf, total_count, rdtype);
+        up_comm->c_coll->coll_allgather(&_uag, up_comm,
+                                        up_comm->c_coll->coll_allgather_module);
     }
 
-    low_comm->c_coll->coll_bcast(rbuf, rcount*low_size*up_size, rdtype,
-                                 root_low_rank, low_comm,
+    ompi_coll_args_t _lb;
+    ompi_coll_args_bcast(&_lb, rbuf, rcount*low_size*up_size, rdtype, root_low_rank);
+    low_comm->c_coll->coll_bcast(&_lb, low_comm,
                                  low_comm->c_coll->coll_bcast_module);
     return OMPI_SUCCESS;
 }
@@ -575,34 +587,41 @@ han_allgather_single_frag(const void *sbuf, size_t scount,
         }
     }
 
+    ompi_coll_args_t _lg;
     if (MPI_IN_PLACE == sbuf) {
         if (low_rank == root_low_rank) {
-            low_comm->c_coll->coll_gather(MPI_IN_PLACE, scount, sdtype,
-                my_slot, rcount, rdtype, root_low_rank,
-                low_comm, low_comm->c_coll->coll_gather_module);
+            ompi_coll_args_gather(&_lg, MPI_IN_PLACE, scount, sdtype,
+                my_slot, rcount, rdtype, root_low_rank);
+            low_comm->c_coll->coll_gather(&_lg, low_comm,
+                low_comm->c_coll->coll_gather_module);
         } else {
             char *my_data = ((char*)rbuf) + (ptrdiff_t)w_rank * (ptrdiff_t)rcount * rext;
-            low_comm->c_coll->coll_gather(my_data, rcount, rdtype,
-                NULL, rcount, rdtype, root_low_rank,
-                low_comm, low_comm->c_coll->coll_gather_module);
+            ompi_coll_args_gather(&_lg, my_data, rcount, rdtype,
+                NULL, rcount, rdtype, root_low_rank);
+            low_comm->c_coll->coll_gather(&_lg, low_comm,
+                low_comm->c_coll->coll_gather_module);
         }
     } else {
-        low_comm->c_coll->coll_gather((char *)sbuf, scount, sdtype,
-            my_slot, rcount, rdtype, root_low_rank,
-            low_comm, low_comm->c_coll->coll_gather_module);
+        ompi_coll_args_gather(&_lg, (char *)sbuf, scount, sdtype,
+            my_slot, rcount, rdtype, root_low_rank);
+        low_comm->c_coll->coll_gather(&_lg, low_comm,
+            low_comm->c_coll->coll_gather_module);
     }
 
     if (low_rank == root_low_rank) {
-        up_comm->c_coll->coll_allgather(MPI_IN_PLACE, total_count, rdtype,
-            reorder_buf_start, total_count, rdtype,
-            up_comm, up_comm->c_coll->coll_allgather_module);
+        ompi_coll_args_t _uag;
+        ompi_coll_args_allgather(&_uag, MPI_IN_PLACE, total_count, rdtype,
+            reorder_buf_start, total_count, rdtype);
+        up_comm->c_coll->coll_allgather(&_uag, up_comm,
+            up_comm->c_coll->coll_allgather_module);
 
         ompi_coll_han_reorder_gather(reorder_buf_start, rbuf, rcount, rdtype, comm, topo);
         han_free_frag(&han_module->fragment_freelist, fl_item, reorder_buf);
     }
 
-    low_comm->c_coll->coll_bcast(rbuf, rcount * low_size * up_size, rdtype,
-        root_low_rank, low_comm, low_comm->c_coll->coll_bcast_module);
+    ompi_coll_args_t _lb;
+    ompi_coll_args_bcast(&_lb, rbuf, rcount * low_size * up_size, rdtype, root_low_rank);
+    low_comm->c_coll->coll_bcast(&_lb, low_comm, low_comm->c_coll->coll_bcast_module);
     return OMPI_SUCCESS;
 }
 
@@ -685,8 +704,9 @@ han_allgather_pipeline(const void *sbuf, size_t scount,
             gather_buf = NULL;
 
             size_t prev_ag = prev_frag_count * low_size * up_size;
-            up_comm->c_coll->coll_ibcast(frag_reorder[prev_buf], prev_ag, rdtype,
-                root_up_rank, up_comm, &ibcast_req,
+            ompi_coll_args_t _ib;
+            ompi_coll_args_bcast(&_ib, frag_reorder[prev_buf], prev_ag, rdtype, root_up_rank);
+            up_comm->c_coll->coll_ibcast(&_ib, up_comm, &ibcast_req,
                 up_comm->c_coll->coll_ibcast_module);
         }
 
@@ -717,30 +737,36 @@ han_allgather_pipeline(const void *sbuf, size_t scount,
         }
 
         /* ALL ranks: blocking low_comm gather — SYNC POINT */
+        ompi_coll_args_t _lg;
         if (MPI_IN_PLACE == sbuf) {
             if (low_rank == root_low_rank) {
-                low_comm->c_coll->coll_gather(MPI_IN_PLACE, this_count, rdtype,
-                    gather_buf, this_count, rdtype, root_low_rank,
-                    low_comm, low_comm->c_coll->coll_gather_module);
+                ompi_coll_args_gather(&_lg, MPI_IN_PLACE, this_count, rdtype,
+                    gather_buf, this_count, rdtype, root_low_rank);
+                low_comm->c_coll->coll_gather(&_lg, low_comm,
+                    low_comm->c_coll->coll_gather_module);
             } else {
                 char *my_data = ((char*)rbuf)
                     + ((ptrdiff_t)w_rank * (ptrdiff_t)rcount + (ptrdiff_t)frag_offset) * rext;
-                low_comm->c_coll->coll_gather(my_data, this_count, rdtype,
-                    NULL, this_count, rdtype, root_low_rank,
-                    low_comm, low_comm->c_coll->coll_gather_module);
+                ompi_coll_args_gather(&_lg, my_data, this_count, rdtype,
+                    NULL, this_count, rdtype, root_low_rank);
+                low_comm->c_coll->coll_gather(&_lg, low_comm,
+                    low_comm->c_coll->coll_gather_module);
             }
         } else {
-            low_comm->c_coll->coll_gather(
+            ompi_coll_args_gather(&_lg,
                 (char *)sbuf + (ptrdiff_t)frag_offset * rext, this_count, sdtype,
-                gather_buf, this_count, rdtype, root_low_rank,
-                low_comm, low_comm->c_coll->coll_gather_module);
+                gather_buf, this_count, rdtype, root_low_rank);
+            low_comm->c_coll->coll_gather(&_lg, low_comm,
+                low_comm->c_coll->coll_gather_module);
         }
 
         if (low_rank == root_low_rank) {
             size_t ag_count = this_count * low_size;
-            up_comm->c_coll->coll_igather(gather_buf, ag_count, rdtype,
-                frag_reorder[cur_buf], ag_count, rdtype, root_up_rank,
-                up_comm, &igather_req, up_comm->c_coll->coll_igather_module);
+            ompi_coll_args_t _ig;
+            ompi_coll_args_gather(&_ig, gather_buf, ag_count, rdtype,
+                frag_reorder[cur_buf], ag_count, rdtype, root_up_rank);
+            up_comm->c_coll->coll_igather(&_ig, up_comm, &igather_req,
+                up_comm->c_coll->coll_igather_module);
         }
 
         if (frag > 0 && low_rank == root_low_rank) {
@@ -769,8 +795,9 @@ han_allgather_pipeline(const void *sbuf, size_t scount,
                       inter_frag_item, gather_buf);
 
         size_t last_ag = prev_frag_count * low_size * up_size;
-        up_comm->c_coll->coll_ibcast(frag_reorder[last_buf], last_ag, rdtype,
-            root_up_rank, up_comm, &ibcast_req,
+        ompi_coll_args_t _ib;
+        ompi_coll_args_bcast(&_ib, frag_reorder[last_buf], last_ag, rdtype, root_up_rank);
+        up_comm->c_coll->coll_ibcast(&_ib, up_comm, &ibcast_req,
             up_comm->c_coll->coll_ibcast_module);
         ompi_request_wait(&ibcast_req, MPI_STATUS_IGNORE);
 
@@ -786,8 +813,9 @@ han_allgather_pipeline(const void *sbuf, size_t scount,
         }
     }
 
-    low_comm->c_coll->coll_bcast(rbuf, rcount * low_size * up_size, rdtype,
-                                 root_low_rank, low_comm,
+    ompi_coll_args_t _lb;
+    ompi_coll_args_bcast(&_lb, rbuf, rcount * low_size * up_size, rdtype, root_low_rank);
+    low_comm->c_coll->coll_bcast(&_lb, low_comm,
                                  low_comm->c_coll->coll_bcast_module);
     return OMPI_SUCCESS;
 }
@@ -797,13 +825,13 @@ han_allgather_pipeline(const void *sbuf, size_t scount,
  * communications without tasks.
  */
 int
-mca_coll_han_allgather_intra_simple(const void *sbuf, size_t scount,
-                                    struct ompi_datatype_t *sdtype,
-                                    void* rbuf, size_t rcount,
-                                    struct ompi_datatype_t *rdtype,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module){
-
+mca_coll_han_allgather_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module){
+    const void *sbuf = args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
 
     /* create the subcommunicators */
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
@@ -813,8 +841,7 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, size_t scount,
                              "han cannot handle allgather within this communicator. Fall back on another component\n"));
         /* HAN cannot work with this communicator so fallback on all collectives */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
-        return han_module->previous_allgather(sbuf, scount, sdtype, rbuf, rcount, rdtype,
-                                              comm, han_module->previous_allgather_module);
+        return han_module->previous_allgather(args, comm, han_module->previous_allgather_module);
     }
     /* discovery topology */
     int *topo = mca_coll_han_topo_init(comm, han_module, 2);
@@ -827,8 +854,7 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, size_t scount,
          * future calls will then be automatically redirected.
          */
         HAN_UNINSTALL_COLL_API(comm, han_module, allgather);
-        return han_module->previous_allgather(sbuf, scount, sdtype, rbuf, rcount, rdtype,
-                                              comm, han_module->previous_allgather_module);
+        return han_module->previous_allgather(args, comm, han_module->previous_allgather_module);
     }
 
     ompi_communicator_t *low_comm = han_module->sub_comm[INTRA_NODE];
@@ -884,23 +910,27 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, size_t scount,
         }
 
         /* 1. low gather on node leaders into tmp_buf */
+        ompi_coll_args_t _lg;
         if (MPI_IN_PLACE == sbuf) {
             if (low_rank == root_low_rank) {
-                low_comm->c_coll->coll_gather(MPI_IN_PLACE, scount, sdtype,
-                                              tmp_buf_start, rcount, rdtype, root_low_rank,
-                                              low_comm, low_comm->c_coll->coll_gather_module);
+                ompi_coll_args_gather(&_lg, MPI_IN_PLACE, scount, sdtype,
+                                      tmp_buf_start, rcount, rdtype, root_low_rank);
+                low_comm->c_coll->coll_gather(&_lg, low_comm,
+                                              low_comm->c_coll->coll_gather_module);
             }
             else {
                 tmp_send = ((char*)rbuf) + (ptrdiff_t)w_rank * (ptrdiff_t)rcount * rext;
-                low_comm->c_coll->coll_gather(tmp_send, rcount, rdtype,
-                                              NULL, rcount, rdtype, root_low_rank,
-                                              low_comm, low_comm->c_coll->coll_gather_module);
+                ompi_coll_args_gather(&_lg, tmp_send, rcount, rdtype,
+                                      NULL, rcount, rdtype, root_low_rank);
+                low_comm->c_coll->coll_gather(&_lg, low_comm,
+                                              low_comm->c_coll->coll_gather_module);
             }
         }
         else {
-            low_comm->c_coll->coll_gather((char *)sbuf, scount, sdtype,
-                                          tmp_buf_start, rcount, rdtype, root_low_rank,
-                                          low_comm, low_comm->c_coll->coll_gather_module);
+            ompi_coll_args_gather(&_lg, (char *)sbuf, scount, sdtype,
+                                  tmp_buf_start, rcount, rdtype, root_low_rank);
+            low_comm->c_coll->coll_gather(&_lg, low_comm,
+                                          low_comm->c_coll->coll_gather_module);
         }
         /* 2. allgather between node leaders, from tmp_buf to reorder_buf */
         if (low_rank == root_low_rank) {
@@ -927,9 +957,11 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, size_t scount,
             }
 
             /* 2a. inter node allgather */
-            up_comm->c_coll->coll_allgather(tmp_buf_start, scount*low_size, sdtype,
-                                            reorder_buf_start, rcount*low_size, rdtype,
-                                            up_comm, up_comm->c_coll->coll_allgather_module);
+            ompi_coll_args_t _uag;
+            ompi_coll_args_allgather(&_uag, tmp_buf_start, scount*low_size, sdtype,
+                                     reorder_buf_start, rcount*low_size, rdtype);
+            up_comm->c_coll->coll_allgather(&_uag, up_comm,
+                                            up_comm->c_coll->coll_allgather_module);
 
             if (tmp_buf != NULL && !mca_coll_han_component.han_use_persist_buffers) {
                 free(tmp_buf);
@@ -954,8 +986,9 @@ mca_coll_han_allgather_intra_simple(const void *sbuf, size_t scount,
         }
 
         /* 3. up broadcast: leaders broadcast on their nodes */
-        low_comm->c_coll->coll_bcast(rbuf, rcount*low_size*up_size, rdtype,
-                                     root_low_rank, low_comm,
+        ompi_coll_args_t _lb;
+        ompi_coll_args_bcast(&_lb, rbuf, rcount*low_size*up_size, rdtype, root_low_rank);
+        low_comm->c_coll->coll_bcast(&_lb, low_comm,
                                      low_comm->c_coll->coll_bcast_module);
 
     } else {

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021-2024 Computer Architecture and VLSI Systems (CARV)
  *                         Laboratory, ICS Forth. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -627,19 +628,13 @@ int mca_coll_xhc_hierarchy_make(xhc_module_t *module,
 // Primitives (respective file)
 // ----------------------------
 
-int mca_coll_xhc_bcast(void *buf, size_t count, ompi_datatype_t *datatype,
-    int root, ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int mca_coll_xhc_bcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_xhc_barrier(ompi_communicator_t *ompi_comm,
-    mca_coll_base_module_t *module);
+int mca_coll_xhc_barrier(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_xhc_reduce(const void *sbuf, void *rbuf,
-    size_t count, ompi_datatype_t *datatype, ompi_op_t *op, int root,
-    ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int mca_coll_xhc_reduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_xhc_allreduce(const void *sbuf, void *rbuf,
-    size_t count, ompi_datatype_t *datatype, ompi_op_t *op,
-    ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int mca_coll_xhc_allreduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 // coll_xhc_bcast.c
 // ----------------

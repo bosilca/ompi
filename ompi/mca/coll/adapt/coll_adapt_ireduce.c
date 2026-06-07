@@ -6,6 +6,7 @@
  * Copyright (c) 2022      IBM Corporation. All rights reserved
  * Copyright (c) 2023      Jeffrey M. Squyres.  All rights reserved.
  * Copyright (c) 2024      NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -25,7 +26,7 @@
 #include "ompi/mca/pml/pml.h"
 #include "ompi/mca/coll/base/coll_base_topo.h"
 
-static int ompi_coll_adapt_ireduce_generic(IREDUCE_ARGS,
+static int ompi_coll_adapt_ireduce_generic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module,
                                            ompi_coll_tree_t * tree, size_t seg_size);
 
 /* MPI_Reduce and MPI_Ireduce in the ADAPT module only work for commutative operations */
@@ -478,25 +479,21 @@ static int recv_cb(ompi_request_t * req)
     return 1;
 }
 
-int ompi_coll_adapt_ireduce(const void *sbuf, void *rbuf, size_t count, struct ompi_datatype_t *dtype,
-                           struct ompi_op_t *op, int root, struct ompi_communicator_t *comm,
-                           ompi_request_t ** request, mca_coll_base_module_t * module)
+int ompi_coll_adapt_ireduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
-
     /* Fall-back if operation is commutative */
-    if (!ompi_op_is_commute(op)){
+    if (!ompi_op_is_commute(args->op)){
         mca_coll_adapt_module_t *adapt_module = (mca_coll_adapt_module_t *) module;
         OPAL_OUTPUT_VERBOSE((30, mca_coll_adapt_component.adapt_output,
                     "ADAPT cannot handle reduce with this (non-commutative) operation. It needs to fall back on another component\n"));
-        return adapt_module->previous_ireduce(sbuf, rbuf, count, dtype, op, root,
-                                              comm, request,
+        return adapt_module->previous_ireduce(args, comm, request,
                                               adapt_module->previous_reduce_module);
     }
 
 
     OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output,
                          "ireduce root %d, algorithm %d, coll_adapt_ireduce_segment_size %zu, coll_adapt_ireduce_max_send_requests %d, coll_adapt_ireduce_max_recv_requests %d\n",
-                         root, mca_coll_adapt_component.adapt_ireduce_algorithm,
+                         args->root, mca_coll_adapt_component.adapt_ireduce_algorithm,
                          mca_coll_adapt_component.adapt_ireduce_segment_size,
                          mca_coll_adapt_component.adapt_ireduce_max_send_requests,
                          mca_coll_adapt_component.adapt_ireduce_max_recv_requests));
@@ -507,20 +504,22 @@ int ompi_coll_adapt_ireduce(const void *sbuf, void *rbuf, size_t count, struct o
     }
 
 
-    return ompi_coll_adapt_ireduce_generic(sbuf, rbuf, count, dtype, op, root, comm, request, module,
-                                           ompi_coll_adapt_module_cached_topology(module, comm, root,
+    return ompi_coll_adapt_ireduce_generic(args, comm, request, module,
+                                           ompi_coll_adapt_module_cached_topology(module, comm, args->root,
                                         		                                            mca_coll_adapt_component.adapt_ireduce_algorithm),
                                            mca_coll_adapt_component.adapt_ireduce_segment_size);
 
 }
 
 
-int ompi_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, size_t count,
-                                    struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root,
-                                    struct ompi_communicator_t *comm, ompi_request_t ** request,
-                                    mca_coll_base_module_t * module, ompi_coll_tree_t * tree,
+int ompi_coll_adapt_ireduce_generic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module, ompi_coll_tree_t * tree,
                                     size_t seg_size)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    int root = args->root;
 
     ptrdiff_t extent, lower_bound, segment_increment;
     ptrdiff_t true_lower_bound, true_extent, real_seg_size;
@@ -597,7 +596,7 @@ int ompi_coll_adapt_ireduce_generic(const void *sbuf, void *rbuf, size_t count,
     con->num_sent_segs = 0;
     con->ongoing_send  = 0;
     con->mutex_op_list = mutex_op_list;
-    con->op = op;
+    con->op = args->op;
     con->tree = tree;
     con->lower_bound = lower_bound;
     con->sbuf = (char *) sbuf;

@@ -8,6 +8,7 @@
  * Copyright (c)           Amazon.com, Inc. or its affiliates.
  *                         All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -63,11 +64,16 @@
  * packed form of MPI_BYTE type. This works for Gatherv but NOT for Scatterv provided that the Root
  * has a different architecture, e.g. endianness, integer representation, etc.
  */
-int mca_coll_han_scatterv_intra(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t displs,
-                                struct ompi_datatype_t *sdtype, void *rbuf, size_t rcount,
-                                struct ompi_datatype_t *rdtype, int root,
-                                struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
+int mca_coll_han_scatterv_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = args->src.info_v.buffer;
+    ompi_count_array_t scounts = args->src.info_v.counts;
+    ompi_disp_array_t displs = args->src.info_v.displacements;
+    struct ompi_datatype_t *sdtype = args->src.info_v.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
+    int root = args->root;
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *) module;
     int w_rank, w_size;              /* information about the global communicator */
     int root_low_rank, root_up_rank; /* root ranks for both sub-communicators */
@@ -86,8 +92,7 @@ int mca_coll_han_scatterv_intra(const void *sbuf, ompi_count_array_t scounts, om
             "han cannot handle scatterv with this communicator. Fall back on another component\n"));
         /* HAN cannot work with this communicator so fallback on all collectives */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
-        return han_module->previous_scatterv(sbuf, scounts, displs, sdtype, rbuf, rcount, rdtype,
-                                             root, comm, han_module->previous_scatterv_module);
+        return han_module->previous_scatterv(args, comm, han_module->previous_scatterv_module);
     }
 
     /* Topo must be initialized to know rank distribution which then is used to determine if han can
@@ -101,16 +106,14 @@ int mca_coll_han_scatterv_intra(const void *sbuf, ompi_count_array_t scounts, om
          * future calls will then be automatically redirected.
          */
         HAN_UNINSTALL_COLL_API(comm, han_module, scatterv);
-        return han_module->previous_scatterv(sbuf, scounts, displs, sdtype, rbuf, rcount, rdtype,
-                                             root, comm, han_module->previous_scatterv_module);
+        return han_module->previous_scatterv(args, comm, han_module->previous_scatterv_module);
     }
     if (han_module->is_heterogeneous) {
         OPAL_OUTPUT_VERBOSE((30, mca_coll_han_component.han_output,
                              "han cannot handle scatterv with this communicator (heterogeneous). Fall "
                              "back on another component\n"));
         HAN_UNINSTALL_COLL_API(comm, han_module, scatterv);
-        return han_module->previous_scatterv(sbuf, scounts, displs, sdtype, rbuf, rcount, rdtype,
-                                             root, comm, han_module->previous_scatterv_module);
+        return han_module->previous_scatterv(args, comm, han_module->previous_scatterv_module);
     }
 
     w_rank = ompi_comm_rank(comm);
@@ -265,17 +268,20 @@ int mca_coll_han_scatterv_intra(const void *sbuf, ompi_count_array_t scounts, om
         /* Up Iscatterv */
         OMPI_COUNT_ARRAY_INIT(&up_scounts_desc, up_scounts);
         OMPI_DISP_ARRAY_INIT(&up_displs_desc, up_displs);
-        up_comm->c_coll->coll_iscatterv((const char *) reorder_sbuf,
-                                        up_scounts_desc, up_displs_desc, sdtype,
-                                        rbuf, rcount, rdtype, root_up_rank, up_comm, &iscatterv_req,
+        ompi_coll_args_t _usv;
+        ompi_coll_args_scatterv(&_usv, (const char *) reorder_sbuf,
+                                up_scounts_desc, up_displs_desc, sdtype,
+                                rbuf, rcount, rdtype, root_up_rank);
+        up_comm->c_coll->coll_iscatterv(&_usv, up_comm, &iscatterv_req,
                                         up_comm->c_coll->coll_iscatterv_module);
 
         /* Low Scatterv */
         OMPI_COUNT_ARRAY_INIT(&low_scounts_desc, low_scounts);
         OMPI_DISP_ARRAY_INIT(&low_displs_desc, low_displs);
-        low_comm->c_coll->coll_scatterv(sbuf, low_scounts_desc, low_displs_desc,
-                                        sdtype, rbuf, rcount, rdtype,
-                                        root_low_rank, low_comm,
+        ompi_coll_args_t _lsv;
+        ompi_coll_args_scatterv(&_lsv, sbuf, low_scounts_desc, low_displs_desc,
+                                sdtype, rbuf, rcount, rdtype, root_low_rank);
+        low_comm->c_coll->coll_scatterv(&_lsv, low_comm,
                                         low_comm->c_coll->coll_scatterv_module);
 
         ompi_request_wait(&iscatterv_req, MPI_STATUS_IGNORE);
@@ -306,8 +312,11 @@ int mca_coll_han_scatterv_intra(const void *sbuf, ompi_count_array_t scounts, om
     /* #################### Root's local peers ########################### */
     if (root_up_rank == up_rank) {
         /* Low Scatterv */
-        low_comm->c_coll->coll_scatterv(NULL, 0, 0, NULL, rbuf, rcount, rdtype, root_low_rank,
-                                        low_comm, low_comm->c_coll->coll_scatterv_module);
+        ompi_coll_args_t _lsv;
+        ompi_coll_args_scatterv(&_lsv, NULL, OMPI_COUNT_ARRAY_NULL, OMPI_DISP_ARRAY_NULL, NULL,
+                                rbuf, rcount, rdtype, root_low_rank);
+        low_comm->c_coll->coll_scatterv(&_lsv, low_comm,
+                                        low_comm->c_coll->coll_scatterv_module);
         return OMPI_SUCCESS;
     }
 
@@ -320,12 +329,17 @@ int mca_coll_han_scatterv_intra(const void *sbuf, ompi_count_array_t scounts, om
     /* #################### Other node followers ########################### */
     if (root_low_rank != low_rank) {
         /* Low Gather - Gather each local peer's receive data size */
-        low_comm->c_coll->coll_gather((const void *) &receive_size, sizeof(size_t), MPI_BYTE, NULL,
-                                      sizeof(size_t), MPI_BYTE, root_low_rank, low_comm,
+        ompi_coll_args_t _lg;
+        ompi_coll_args_gather(&_lg, (const void *) &receive_size, sizeof(size_t), MPI_BYTE, NULL,
+                              sizeof(size_t), MPI_BYTE, root_low_rank);
+        low_comm->c_coll->coll_gather(&_lg, low_comm,
                                       low_comm->c_coll->coll_gather_module);
         /* Low Scatterv */
-        low_comm->c_coll->coll_scatterv(NULL, 0, 0, NULL, rbuf, rcount, rdtype, root_low_rank,
-                                        low_comm, low_comm->c_coll->coll_scatterv_module);
+        ompi_coll_args_t _lsv;
+        ompi_coll_args_scatterv(&_lsv, NULL, OMPI_COUNT_ARRAY_NULL, OMPI_DISP_ARRAY_NULL, NULL,
+                                rbuf, rcount, rdtype, root_low_rank);
+        low_comm->c_coll->coll_scatterv(&_lsv, low_comm,
+                                        low_comm->c_coll->coll_scatterv_module);
         return OMPI_SUCCESS;
     }
 
@@ -342,8 +356,10 @@ int mca_coll_han_scatterv_intra(const void *sbuf, ompi_count_array_t scounts, om
     }
 
     /* Low Gather -  Gather local peers' receive data sizes */
-    low_comm->c_coll->coll_gather((const void *) &receive_size, sizeof(size_t), MPI_BYTE,
-                                  (void *) low_scounts, sizeof(size_t), MPI_BYTE, root_low_rank, low_comm,
+    ompi_coll_args_t _lg;
+    ompi_coll_args_gather(&_lg, (const void *) &receive_size, sizeof(size_t), MPI_BYTE,
+                          (void *) low_scounts, sizeof(size_t), MPI_BYTE, root_low_rank);
+    low_comm->c_coll->coll_gather(&_lg, low_comm,
                                   low_comm->c_coll->coll_gather_module);
 
     low_displs = malloc(low_size * sizeof(ptrdiff_t));
@@ -368,8 +384,10 @@ int mca_coll_han_scatterv_intra(const void *sbuf, ompi_count_array_t scounts, om
     }
 
     /* Up Iscatterv */
-    up_comm->c_coll->coll_iscatterv(NULL, 0, 0, NULL, (void *) tmp_buf, total_rsize,
-                                    MPI_BYTE, root_up_rank, up_comm, &iscatterv_req,
+    ompi_coll_args_t _usv;
+    ompi_coll_args_scatterv(&_usv, NULL, OMPI_COUNT_ARRAY_NULL, OMPI_DISP_ARRAY_NULL, NULL,
+                            (void *) tmp_buf, total_rsize, MPI_BYTE, root_up_rank);
+    up_comm->c_coll->coll_iscatterv(&_usv, up_comm, &iscatterv_req,
                                     up_comm->c_coll->coll_iscatterv_module);
 
     ompi_request_wait(&iscatterv_req, MPI_STATUS_IGNORE);
@@ -377,8 +395,10 @@ int mca_coll_han_scatterv_intra(const void *sbuf, ompi_count_array_t scounts, om
     /* Low Scatterv */
     OMPI_COUNT_ARRAY_INIT(&low_scounts_desc, low_scounts);
     OMPI_DISP_ARRAY_INIT(&low_displs_desc, low_displs);
-    low_comm->c_coll->coll_scatterv((void *) tmp_buf, low_scounts_desc, low_displs_desc, MPI_BYTE, rbuf,
-                                    rcount, rdtype, root_low_rank, low_comm,
+    ompi_coll_args_t _lsv;
+    ompi_coll_args_scatterv(&_lsv, (void *) tmp_buf, low_scounts_desc, low_displs_desc, MPI_BYTE,
+                            rbuf, rcount, rdtype, root_low_rank);
+    low_comm->c_coll->coll_scatterv(&_lsv, low_comm,
                                     low_comm->c_coll->coll_scatterv_module);
 
 node_leader_out:

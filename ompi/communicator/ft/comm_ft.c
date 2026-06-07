@@ -7,6 +7,7 @@
  *
  * Copyright (c) 2021      Nanook Consulting.  All rights reserved.
  * Copyright (c) 2023      Jeffrey M. Squyres.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -224,6 +225,7 @@ int ompi_comm_shrink_internal(ompi_communicator_t* comm, ompi_communicator_t** n
     ompi_group_t *failed_group = NULL, *comm_group = NULL, *alive_group = NULL, *alive_rgroup = NULL;
     ompi_communicator_t *newcomp = NULL;
     int mode;
+    ompi_coll_args_t coll_args;
 #if OPAL_ENABLE_DEBUG
     double start, stop;
 #endif
@@ -255,11 +257,9 @@ int ompi_comm_shrink_internal(ompi_communicator_t* comm, ompi_communicator_t** n
          * the value of flag, instead we are only using the globally consistent
          * return value.
          */
-        rc = comm->c_coll->coll_agree( &flag,
-                                       1,
-                                       &ompi_mpi_int.dt,
-                                       &ompi_mpi_op_band.op,
-                                       &failed_group, true,
+        ompi_coll_args_agree( &coll_args, &flag, 1, &ompi_mpi_int.dt,
+                              &ompi_mpi_op_band.op, &failed_group, true );
+        rc = comm->c_coll->coll_agree( &coll_args,
                                        comm,
                                        comm->c_coll->coll_agree_module);
     } while( MPI_ERR_PROC_FAILED == rc );
@@ -436,6 +436,7 @@ int ompi_comm_ishrink_internal(ompi_communicator_t* comm, ompi_communicator_t** 
     ompi_comm_request_t *request;
     ompi_comm_ishrink_context_t *context;
     ompi_request_t *subreq[1];
+    ompi_coll_args_t coll_args;
 
     *newcomm = MPI_COMM_NULL;
 
@@ -480,11 +481,9 @@ int ompi_comm_ishrink_internal(ompi_communicator_t* comm, ompi_communicator_t** 
      * return value.
      */
     context->flag = 1;
-    rc = comm->c_coll->coll_iagree( &context->flag,
-                                    1,
-                                    &ompi_mpi_int.dt,
-                                    &ompi_mpi_op_band.op,
-                                    &context->failed_group, true,
+    ompi_coll_args_agree( &coll_args, &context->flag, 1, &ompi_mpi_int.dt,
+                          &ompi_mpi_op_band.op, &context->failed_group, true );
+    rc = comm->c_coll->coll_iagree( &coll_args,
                                     comm,
                                     subreq,
                                     comm->c_coll->coll_iagree_module );
@@ -510,6 +509,7 @@ static int ompi_comm_ishrink_check_agree(ompi_comm_request_t *request) {
     ompi_request_t *subreq[1];
     ompi_group_t *comm_group = NULL;
     int rc;
+    ompi_coll_args_t coll_args;
 #if OPAL_ENABLE_DEBUG
     double stop;
 #endif
@@ -533,11 +533,9 @@ static int ompi_comm_ishrink_check_agree(ompi_comm_request_t *request) {
         OBJ_RELEASE(context->failed_group);
         request->super.req_status.MPI_ERROR = MPI_SUCCESS;
         context->flag = 1;
-        rc = comm->c_coll->coll_iagree( &context->flag,
-                                        1,
-                                        &ompi_mpi_int.dt,
-                                        &ompi_mpi_op_band.op,
-                                        &context->failed_group, true,
+        ompi_coll_args_agree( &coll_args, &context->flag, 1, &ompi_mpi_int.dt,
+                              &ompi_mpi_op_band.op, &context->failed_group, true );
+        rc = comm->c_coll->coll_iagree( &coll_args,
                                         comm,
                                         subreq,
                                         comm->c_coll->coll_iagree_module );

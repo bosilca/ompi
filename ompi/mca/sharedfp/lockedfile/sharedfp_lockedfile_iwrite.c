@@ -14,6 +14,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -93,6 +94,7 @@ int mca_sharedfp_lockedfile_write_ordered_begin(ompio_file_t *fh,
     size_t numofBytes;
     int rank, size, i;
     struct mca_sharedfp_base_data_t *sh = NULL;
+    ompi_coll_args_t coll_args;
 
     if(fh->f_sharedfp_data==NULL){
         opal_output(ompi_sharedfp_base_framework.framework_output,
@@ -125,13 +127,9 @@ int mca_sharedfp_lockedfile_write_ordered_begin(ompio_file_t *fh,
 	}
     }
 
-    ret = fh->f_comm->c_coll->coll_gather ( &sendBuff, 
-                                            sendcnt, 
-                                            OMPI_OFFSET_DATATYPE, 
-                                            buff, 
-                                            recvcnt,
-                                            OMPI_OFFSET_DATATYPE, 
-                                            0, 
+    ompi_coll_args_gather(&coll_args, &sendBuff, sendcnt, OMPI_OFFSET_DATATYPE,
+                          buff, recvcnt, OMPI_OFFSET_DATATYPE, 0);
+    ret = fh->f_comm->c_coll->coll_gather ( &coll_args,
                                             fh->f_comm,
                                             fh->f_comm->c_coll->coll_gather_module );
     if ( OMPI_SUCCESS != ret ) {
@@ -171,14 +169,10 @@ int mca_sharedfp_lockedfile_write_ordered_begin(ompio_file_t *fh,
     }
 
     /* Scatter the results to the other processes*/
-    ret = fh->f_comm->c_coll->coll_scatter ( buff, 
-                                             sendcnt, 
-                                             OMPI_OFFSET_DATATYPE,
-                                             &offsetBuff, 
-                                             recvcnt, 
-                                             OMPI_OFFSET_DATATYPE, 
-                                             0,
-                                             fh->f_comm, 
+    ompi_coll_args_scatter(&coll_args, buff, sendcnt, OMPI_OFFSET_DATATYPE,
+                           &offsetBuff, recvcnt, OMPI_OFFSET_DATATYPE, 0);
+    ret = fh->f_comm->c_coll->coll_scatter ( &coll_args,
+                                             fh->f_comm,
                                              fh->f_comm->c_coll->coll_scatter_module );
     if ( OMPI_SUCCESS != ret ) {
 	goto exit;

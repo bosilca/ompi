@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -42,11 +43,20 @@
         } \
     } while (0)
 
-#define OMPI_FORTRAN_BIGCOUNT_ARRAY_CLEANUP_NONBLOCKING(array, tmp_array, c_request, c_ierr, idx) \
+/*
+ * Mark a converted (temporary) array to be freed when the non-blocking /
+ * persistent collective request completes. The array is the same pointer the
+ * back-end C binding stored in the request's coll args descriptor, so we just
+ * set the matching OMPI_COLL_ARGS_FREE_* bit and let the coll layer free it.
+ * free_bit identifies which slot of the descriptor (src/dst counts /
+ * displacements / datatypes) the array occupies. idx counts how many arrays
+ * were flagged so the caller knows whether to install the release callback.
+ */
+#define OMPI_FORTRAN_BIGCOUNT_ARRAY_CLEANUP_NONBLOCKING(array, tmp_array, c_request, c_ierr, idx, free_bit) \
     do { \
         if (MPI_SUCCESS == (c_ierr)) { \
             if ((void *)(array) != (void *)(tmp_array) && (tmp_array) != NULL) { \
-                ompi_coll_base_append_array_to_release((c_request), (tmp_array)); \
+                ((ompi_coll_base_nbc_request_t *) (c_request))->args.mask |= (free_bit); \
                 (idx)++;                                                         \
             } \
         } else { \

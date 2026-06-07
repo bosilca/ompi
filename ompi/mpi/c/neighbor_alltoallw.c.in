@@ -18,6 +18,7 @@
  * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -148,9 +149,11 @@ PROTOTYPE ERROR_CLASS neighbor_alltoallw(BUFFER sendbuf, COUNT_ARRAY sendcounts,
     OMPI_DISP_ARRAY_INIT(&sdispls_desc, sdispls);
     OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, recvcounts);
     OMPI_DISP_ARRAY_INIT(&rdispls_desc, rdispls);
-    err = comm->c_coll->coll_neighbor_alltoallw(sendbuf, sendcounts_desc, sdispls_desc, sendtypes,
-                                               recvbuf, recvcounts_desc, rdispls_desc, recvtypes,
-                                               comm, comm->c_coll->coll_neighbor_alltoallw_module);
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_neighbor_alltoallw(&coll_args, sendbuf, sendcounts_desc, sdispls_desc, sendtypes,
+                                      recvbuf, recvcounts_desc, rdispls_desc, recvtypes);
+    err = comm->c_coll->coll_neighbor_alltoallw(&coll_args, comm,
+                                               comm->c_coll->coll_neighbor_alltoallw_module);
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);
 }
 

@@ -19,6 +19,7 @@
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * Copyright (c) 2021      Amazon.com, Inc. or its affiliates.  All Rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -194,21 +195,19 @@ mca_coll_base_alltoallv_intra_basic_inplace(const void *rbuf, ompi_count_array_t
 }
 
 int
-ompi_coll_base_alltoallv_intra_pairwise(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps,
-                                         struct ompi_datatype_t *sdtype,
-                                         void* rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                                         struct ompi_datatype_t *rdtype,
-                                         struct ompi_communicator_t *comm,
-                                         mca_coll_base_module_t *module)
+ompi_coll_base_alltoallv_intra_pairwise(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    struct ompi_datatype_t *sdtype = args->src.info_v.datatype;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    struct ompi_datatype_t *rdtype = args->dst.info_v.datatype;
     int line = -1, err = 0, rank, size, step = 0, sendto, recvfrom;
     size_t sdtype_size, rdtype_size;
     void *psnd, *prcv;
     ompi_request_t *req;
     ptrdiff_t sext, rext;
 
-    if (MPI_IN_PLACE == sbuf) {
-        return mca_coll_base_alltoallv_intra_basic_inplace (rbuf, rcounts, rdisps,
+    if (MPI_IN_PLACE == args->src.info_v.buffer) {
+        return mca_coll_base_alltoallv_intra_basic_inplace (args->dst.info_v.buffer, rcounts, args->dst.info_v.displacements,
                                                              rdtype, comm, module);
     }
 
@@ -233,8 +232,8 @@ ompi_coll_base_alltoallv_intra_pairwise(const void *sbuf, ompi_count_array_t sco
         recvfrom = (rank + size - step) % size;
 
         /* Determine sending and receiving locations */
-        psnd = (char*)sbuf + ompi_disp_array_get(sdisps, sendto) * sext;
-        prcv = (char*)rbuf + ompi_disp_array_get(rdisps, recvfrom) * rext;
+        psnd = (char*)args->src.info_v.buffer + ompi_disp_array_get(args->src.info_v.displacements, sendto) * sext;
+        prcv = (char*)args->dst.info_v.buffer + ompi_disp_array_get(args->dst.info_v.displacements, recvfrom) * rext;
 
         /* send and receive */
         if (0 < ompi_count_array_get(rcounts, recvfrom) && 0 < rdtype_size) {
@@ -246,8 +245,8 @@ ompi_coll_base_alltoallv_intra_pairwise(const void *sbuf, ompi_count_array_t sco
             }
         }
 
-        if (0 < ompi_count_array_get(scounts, sendto) && 0 < sdtype_size) {
-            err = MCA_PML_CALL(send(psnd, ompi_count_array_get(scounts, sendto), sdtype, sendto,
+        if (0 < ompi_count_array_get(args->src.info_v.counts, sendto) && 0 < sdtype_size) {
+            err = MCA_PML_CALL(send(psnd, ompi_count_array_get(args->src.info_v.counts, sendto), sdtype, sendto,
                                     MCA_COLL_BASE_TAG_ALLTOALLV, MCA_PML_BASE_SEND_STANDARD, comm));
             if (MPI_SUCCESS != err) {
                 line = __LINE__;
@@ -283,13 +282,15 @@ ompi_coll_base_alltoallv_intra_pairwise(const void *sbuf, ompi_count_array_t sco
  * differently and so will not have to duplicate code.
  */
 int
-ompi_coll_base_alltoallv_intra_basic_linear(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps,
-                                            struct ompi_datatype_t *sdtype,
-                                            void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                                            struct ompi_datatype_t *rdtype,
-                                            struct ompi_communicator_t *comm,
-                                            mca_coll_base_module_t *module)
+ompi_coll_base_alltoallv_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info_v.buffer;
+    ompi_count_array_t scounts = args->src.info_v.counts;
+    struct ompi_datatype_t *sdtype = args->src.info_v.datatype;
+    void *rbuf = args->dst.info_v.buffer;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
+    ompi_disp_array_t rdisps = args->dst.info_v.displacements;
+    struct ompi_datatype_t *rdtype = args->dst.info_v.datatype;
     int i, size, rank, err, nreqs;
     size_t sdtype_size = 0, rdtype_size = 0;
     char *psnd, *prcv;
@@ -316,7 +317,7 @@ ompi_coll_base_alltoallv_intra_basic_linear(const void *sbuf, ompi_count_array_t
     ompi_datatype_type_extent(rdtype, &rext);
 
     /* Simple optimization - handle send to self first */
-    psnd = ((char *) sbuf) + ompi_disp_array_get(sdisps, rank) * sext;
+    psnd = ((char *) sbuf) + ompi_disp_array_get(args->src.info_v.displacements, rank) * sext;
     prcv = ((char *) rbuf) + ompi_disp_array_get(rdisps, rank) * rext;
     if (0 < ompi_count_array_get(scounts, rank) && 0 < sdtype_size) {
         err = ompi_datatype_sndrcv(psnd, ompi_count_array_get(scounts, rank), sdtype,
@@ -360,7 +361,7 @@ ompi_coll_base_alltoallv_intra_basic_linear(const void *sbuf, ompi_count_array_t
 
         if (0 < ompi_count_array_get(scounts, i) && 0 < sdtype_size) {
             ++nreqs;
-            psnd = ((char *) sbuf) + ompi_disp_array_get(sdisps, i) * sext;
+            psnd = ((char *) sbuf) + ompi_disp_array_get(args->src.info_v.displacements, i) * sext;
             err = MCA_PML_CALL(isend_init(psnd, ompi_count_array_get(scounts, i), sdtype,
                                          i, MCA_COLL_BASE_TAG_ALLTOALLV,
                                          MCA_PML_BASE_SEND_STANDARD, comm,

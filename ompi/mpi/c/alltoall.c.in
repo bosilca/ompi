@@ -19,6 +19,7 @@
  * Copyright (c) 2015      Mellanox Technologies. All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -108,9 +109,11 @@ PROTOTYPE ERROR_CLASS alltoall(BUFFER sendbuf, COUNT sendcount, DATATYPE sendtyp
     }
 
     /* Invoke the coll component to perform the back-end operation */
-    err = comm->c_coll->coll_alltoall(sendbuf, sendcount, sendtype,
-                                     recvbuf, recvcount, recvtype,
-                                     comm, comm->c_coll->coll_alltoall_module);
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_alltoall(&coll_args, sendbuf, sendcount, sendtype,
+                            recvbuf, recvcount, recvtype);
+    err = comm->c_coll->coll_alltoall(&coll_args, comm,
+                                     comm->c_coll->coll_alltoall_module);
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);
 }
 

@@ -13,6 +13,7 @@
  * Copyright (c) 2015      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2018      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -42,6 +43,7 @@ mca_sharedfp_sm_seek (ompio_file_t *fh,
     struct mca_sharedfp_base_data_t *sh = NULL;
     struct mca_sharedfp_sm_data * sm_data = NULL;
     struct mca_sharedfp_sm_offset * sm_offset_ptr = NULL;
+    ompi_coll_args_t coll_args;
 
     if( NULL == fh->f_sharedfp_data ) {
         opal_output(ompi_sharedfp_base_framework.framework_output,
@@ -135,7 +137,8 @@ mca_sharedfp_sm_seek (ompio_file_t *fh,
     /* since we are only letting process 0, update the current pointer
      * all of the other processes need to wait before proceeding.
      */
-    fh->f_comm->c_coll->coll_barrier ( fh->f_comm, fh->f_comm->c_coll->coll_barrier_module );
+    ompi_coll_args_barrier(&coll_args);
+    fh->f_comm->c_coll->coll_barrier ( &coll_args, fh->f_comm, fh->f_comm->c_coll->coll_barrier_module );
 
     return ret;
 }

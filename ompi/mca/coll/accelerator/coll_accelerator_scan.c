@@ -6,6 +6,7 @@
  * Copyright (c) 2022      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights reserved.
  * Copyright (c) 2024      Advanced Micro Devices, Inc. All Rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -28,20 +29,18 @@
  *	Accepts:	- same arguments as MPI_Scan()
  *	Returns:	- MPI_SUCCESS or error code
  */
-int mca_coll_accelerator_scan(const void *sbuf, void *rbuf, size_t count,
-                       struct ompi_datatype_t *dtype,
-                       struct ompi_op_t *op,
-                       struct ompi_communicator_t *comm,
-                       mca_coll_base_module_t *module)
+int mca_coll_accelerator_scan(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_accelerator_module_t *s = (mca_coll_accelerator_module_t*) module;
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
     ptrdiff_t gap;
     char *rbuf1 = NULL, *sbuf1 = NULL, *rbuf2 = NULL;
     int sbuf_dev, rbuf_dev;
     size_t bufsize;
     int rc;
 
-    bufsize = opal_datatype_span(&dtype->super, count, &gap);
+    bufsize = opal_datatype_span(&args->dst.info.datatype->super, args->dst.info.count, &gap);
     rc = mca_coll_accelerator_check_buf((void *)sbuf, &sbuf_dev);
     if (rc < 0) {
         return rc;
@@ -70,8 +69,9 @@ int mca_coll_accelerator_scan(const void *sbuf, void *rbuf, size_t count,
         rbuf2 = rbuf; /* save away original buffer */
         rbuf = rbuf1 - gap;
     }
-    rc = s->c_coll.coll_scan(sbuf, rbuf, count, dtype, op, comm,
-                             s->c_coll.coll_scan_module);
+    ompi_coll_args_t _fwd;
+    ompi_coll_args_scan(&_fwd, sbuf, rbuf, args->dst.info.count, args->dst.info.datatype, args->op);
+    rc = s->c_coll.coll_scan(&_fwd, comm, s->c_coll.coll_scan_module);
     if (NULL != sbuf1) {
         free(sbuf1);
     }

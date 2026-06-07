@@ -9,6 +9,7 @@
  *
  * Copyright (c) 2024-2026 NVIDIA Corporation.  All rights reserved.
  * Copyright (c) 2026      Stony Brook University. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -103,8 +104,9 @@ int mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
      * call HAN's allreduce again).
      */
     int local_procs = ompi_group_count_local_peers(comm->c_local_group);
-    rc = comm->c_coll->coll_allreduce(MPI_IN_PLACE, &local_procs, 1, MPI_INT,
-                                      MPI_MAX, comm,
+    ompi_coll_args_t _ar;
+    ompi_coll_args_allreduce(&_ar, MPI_IN_PLACE, &local_procs, 1, MPI_INT, MPI_MAX);
+    rc = comm->c_coll->coll_allreduce(&_ar, comm,
                                       comm->c_coll->coll_allreduce_module);
     if( OMPI_SUCCESS != rc ) {
         goto return_with_error;
@@ -177,9 +179,9 @@ int mca_coll_han_comm_create_new(struct ompi_communicator_t *comm,
      * gather vrank from each process so every process will know other processes
      * vrank
      */
-    rc = comm->c_coll->coll_allgather(&vrank, 1, MPI_INT,
-                                 vranks, 1, MPI_INT,
-                                 comm, comm->c_coll->coll_allgather_module);
+    ompi_coll_args_t _ag;
+    ompi_coll_args_allgather(&_ag, &vrank, 1, MPI_INT, vranks, 1, MPI_INT);
+    rc = comm->c_coll->coll_allgather(&_ag, comm, comm->c_coll->coll_allgather_module);
     if( OMPI_SUCCESS != rc ) {
         /* cannot create subcommunicators. Return the error upstream */
         goto return_with_error;
@@ -284,8 +286,9 @@ int mca_coll_han_comm_create(struct ompi_communicator_t *comm,
      * all participants.
      */
     int local_procs = ompi_group_count_local_peers(comm->c_local_group);
-    rc = comm->c_coll->coll_allreduce(MPI_IN_PLACE, &local_procs, 1, MPI_INT,
-                                      MPI_MAX, comm,
+    ompi_coll_args_t _ar;
+    ompi_coll_args_allreduce(&_ar, MPI_IN_PLACE, &local_procs, 1, MPI_INT, MPI_MAX);
+    rc = comm->c_coll->coll_allreduce(&_ar, comm,
                                       comm->c_coll->coll_allreduce_module);
     if (OMPI_SUCCESS != rc) {
         goto final_agree;
@@ -391,8 +394,9 @@ int mca_coll_han_comm_create(struct ompi_communicator_t *comm,
      * gather vrank from each process so every process will know other processes
      * vrank
      */
-    rc = comm->c_coll->coll_allgather(&vrank, 1, MPI_INT, vranks, 1, MPI_INT, comm,
-                                 comm->c_coll->coll_allgather_module);
+    ompi_coll_args_t _ag;
+    ompi_coll_args_allgather(&_ag, &vrank, 1, MPI_INT, vranks, 1, MPI_INT);
+    rc = comm->c_coll->coll_allgather(&_ag, comm, comm->c_coll->coll_allgather_module);
     if (OMPI_SUCCESS != rc) {
         goto final_agree;
     }
@@ -429,12 +433,10 @@ final_agree:
 
     int agree_flag = (OMPI_SUCCESS == rc) ? 1 : 0;
     ompi_group_t *failed_group = &ompi_mpi_group_empty.group;
-    int agree_rc = comm->c_coll->coll_agree( &agree_flag,
-                                    1,
-                                    &ompi_mpi_int.dt,
-                                    &ompi_mpi_op_band.op,
-                                    &failed_group, false,
-                                    comm,
+    ompi_coll_args_t _agree;
+    ompi_coll_args_agree(&_agree, &agree_flag, 1, &ompi_mpi_int.dt,
+                         &ompi_mpi_op_band.op, &failed_group, false);
+    int agree_rc = comm->c_coll->coll_agree(&_agree, comm,
                                     comm->c_coll->coll_agree_module);
 
     if (OMPI_SUCCESS != agree_rc) {

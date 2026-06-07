@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018      DataDirect Networks. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -28,6 +29,7 @@ int mca_fs_ime_file_set_size (ompio_file_t *fh,
                               OMPI_MPI_OFFSET_TYPE size)
 {
     int ret = 0;
+    ompi_coll_args_t coll_args;
 
     /* reset errno */
     errno = 0;
@@ -36,10 +38,8 @@ int mca_fs_ime_file_set_size (ompio_file_t *fh,
         ret = ime_native_ftruncate(fh->fd, size);
     }
 
-    fh->f_comm->c_coll->coll_bcast(&ret,
-                                   1,
-                                   MPI_INT,
-                                   OMPIO_ROOT,
+    ompi_coll_args_bcast(&coll_args, &ret, 1, MPI_INT, OMPIO_ROOT);
+    fh->f_comm->c_coll->coll_bcast(&coll_args,
                                    fh->f_comm,
                                    fh->f_comm->c_coll->coll_bcast_module);
 

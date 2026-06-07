@@ -15,6 +15,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -57,7 +58,9 @@ PROTOTYPE ERROR_CLASS comm_disconnect(COMM_OUT comm)
         }
     }
     else {
-        (*comm)->c_coll->coll_barrier(*comm, (*comm)->c_coll->coll_barrier_module);
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_barrier(&coll_args);
+        (*comm)->c_coll->coll_barrier(&coll_args, *comm, (*comm)->c_coll->coll_barrier_module);
     }
 
     ompi_comm_free(comm);

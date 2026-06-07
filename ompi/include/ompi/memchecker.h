@@ -11,6 +11,7 @@
  * Copyright (c) 2014      Intel, Inc. All rights reserved.
  *
  * Copyright (c) 2016      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -233,8 +234,7 @@ static inline int memchecker_comm(MPI_Comm comm)
     opal_memchecker_base_isdefined (&comm->errhandler_type, sizeof(ompi_errhandler_type_t));
     opal_memchecker_base_isdefined (&comm->c_pml_comm, sizeof(struct mca_pml_comm_t *));
     /* c_coll */
-    opal_memchecker_base_isdefined (&comm->c_coll->coll_module_init, sizeof(mca_coll_base_module_init_1_0_0_fn_t));
-    opal_memchecker_base_isdefined (&comm->c_coll->coll_module_finalize, sizeof(mca_coll_base_module_finalize_fn_t));
+    opal_memchecker_base_isdefined (&comm->c_coll->coll_module_enable, sizeof(mca_coll_base_module_enable_1_1_0_fn_t));
     opal_memchecker_base_isdefined (&comm->c_coll->coll_allgather, sizeof(mca_coll_base_module_allgather_fn_t));
     opal_memchecker_base_isdefined (&comm->c_coll->coll_allgatherv, sizeof(mca_coll_base_module_allgatherv_fn_t));
     opal_memchecker_base_isdefined (&comm->c_coll->coll_allreduce, sizeof(mca_coll_base_module_allreduce_fn_t));
@@ -252,11 +252,11 @@ static inline int memchecker_comm(MPI_Comm comm)
     opal_memchecker_base_isdefined (&comm->c_coll->coll_scatter, sizeof(mca_coll_base_module_scatter_fn_t));
     opal_memchecker_base_isdefined (&comm->c_coll->coll_scatterv, sizeof(mca_coll_base_module_scatterv_fn_t));
 
-    opal_memchecker_base_isdefined (&comm->c_coll_selected_component, sizeof(const mca_coll_base_component_2_4_0_t *));
-    opal_memchecker_base_isdefined (&comm->c_coll_selected_module, sizeof(const mca_coll_base_module_1_0_0_t *));
+    opal_memchecker_base_isdefined (&comm->c_coll_selected_component, sizeof(const mca_coll_base_component_t *));
+    opal_memchecker_base_isdefined (&comm->c_coll_selected_module, sizeof(const mca_coll_base_module_t *));
     /* Somehow, this often shows up in petsc with comm_dup'ed communicators*/
     /* opal_memchecker_base_isdefined (&comm->c_coll_selected_data, sizeof(struct mca_coll_base_comm_t *)); */
-    opal_memchecker_base_isdefined (&comm->c_coll_basic_module, sizeof(const mca_coll_base_module_1_0_0_t *));
+    opal_memchecker_base_isdefined (&comm->c_coll_basic_module, sizeof(const mca_coll_base_module_t *));
     opal_memchecker_base_isdefined (&comm->c_coll_basic_data, sizeof(struct mca_coll_base_comm_t *));
 
     return OMPI_SUCCESS;

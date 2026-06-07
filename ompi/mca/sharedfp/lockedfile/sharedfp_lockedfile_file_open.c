@@ -13,6 +13,7 @@
  * Copyright (c) 2015-2018 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2016-2017 IBM Corporation. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -55,6 +56,7 @@ int mca_sharedfp_lockedfile_file_open (struct ompi_communicator_t *comm,
     struct mca_sharedfp_base_data_t* sh;
     pid_t my_pid;
     int int_pid;
+    ompi_coll_args_t coll_args;
     
     /*Memory is allocated here for the sh structure*/
     sh = (struct mca_sharedfp_base_data_t*)malloc(sizeof(struct mca_sharedfp_base_data_t));
@@ -86,7 +88,8 @@ int mca_sharedfp_lockedfile_file_open (struct ompi_communicator_t *comm,
         ompi_proc_t *masterproc = ompi_group_peer_lookup(comm->c_local_group, 0 );
         masterjobid = OMPI_CAST_RTE_NAME(&masterproc->super.proc_name)->jobid;
     }
-    err = comm->c_coll->coll_bcast ( &masterjobid, 1, MPI_UNSIGNED, 0, comm, 
+    ompi_coll_args_bcast(&coll_args, &masterjobid, 1, MPI_UNSIGNED, 0);
+    err = comm->c_coll->coll_bcast ( &coll_args, comm,
                                      comm->c_coll->coll_bcast_module );
     if ( OMPI_SUCCESS != err ) {
         opal_output(0, "[%d]mca_sharedfp_lockedfile_file_open: Error in bcast operation\n", fh->f_rank);
@@ -99,7 +102,8 @@ int mca_sharedfp_lockedfile_file_open (struct ompi_communicator_t *comm,
         my_pid = getpid();
         int_pid = (int) my_pid;
     }
-    err = comm->c_coll->coll_bcast (&int_pid, 1, MPI_INT, 0, comm, comm->c_coll->coll_bcast_module );
+    ompi_coll_args_bcast(&coll_args, &int_pid, 1, MPI_INT, 0);
+    err = comm->c_coll->coll_bcast (&coll_args, comm, comm->c_coll->coll_bcast_module );
     if ( OMPI_SUCCESS != err ) {
         opal_output(0, "[%d]mca_sharedfp_lockedfile_file_open: Error in bcast operation\n", fh->f_rank);
 	free (sh);
@@ -162,7 +166,8 @@ int mca_sharedfp_lockedfile_file_open (struct ompi_communicator_t *comm,
         }
 	close (handle);
     }
-    err = comm->c_coll->coll_barrier ( comm, comm->c_coll->coll_barrier_module );
+    ompi_coll_args_barrier(&coll_args);
+    err = comm->c_coll->coll_barrier ( &coll_args, comm, comm->c_coll->coll_barrier_module );
     if ( OMPI_SUCCESS != err ) {
         opal_output(0, "[%d]mca_sharedfp_lockedfile_file_open: Error in barrier operation\n", fh->f_rank);
 	free (sh);
@@ -188,7 +193,8 @@ int mca_sharedfp_lockedfile_file_open (struct ompi_communicator_t *comm,
     /*remember the shared file handle*/
     fh->f_sharedfp_data = sh;
 
-    return comm->c_coll->coll_barrier ( comm, comm->c_coll->coll_barrier_module );
+    ompi_coll_args_barrier(&coll_args);
+    return comm->c_coll->coll_barrier ( &coll_args, comm, comm->c_coll->coll_barrier_module );
 }
 
 int mca_sharedfp_lockedfile_file_close (ompio_file_t *fh)

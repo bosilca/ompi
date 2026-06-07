@@ -2,6 +2,7 @@
  * Copyright (c) 2014-2020 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -44,7 +45,7 @@ typedef enum {
  */
 typedef struct mca_coll_adapt_component_t {
     /* Base coll component */
-    mca_coll_base_component_3_0_0_t super;
+    mca_coll_base_component_4_0_0_t super;
 
     /* MCA parameter: Priority of this component */
     int adapt_priority;
@@ -92,8 +93,8 @@ typedef struct mca_coll_adapt_component_t {
  */
 typedef struct mca_coll_adapt_collective_fallback_s {
     union {
-        mca_coll_base_module_reduce_fn_t   reduce;
-        mca_coll_base_module_ireduce_fn_t ireduce;
+        mca_coll_base_module_coll_fn_t   reduce;
+        mca_coll_base_module_icoll_fn_t ireduce;
     } previous_routine;
     mca_coll_base_module_t *previous_module;
 } mca_coll_adapt_collective_fallback_t;

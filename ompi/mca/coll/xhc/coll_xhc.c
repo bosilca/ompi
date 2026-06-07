@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021-2024 Computer Architecture and VLSI Systems (CARV)
  *                         Laboratory, ICS Forth. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -247,8 +248,10 @@ static int xhc_alloc_bcast_cico(xhc_module_t *module, ompi_communicator_t *comm)
      * (assuming linux's default first-touch-alloc policy). */
     memset(cico_buffer, 0, cico_size);
 
-    err = comm->c_coll->coll_allgather(&cico_ds, sizeof(opal_shmem_ds_t),
-        MPI_BYTE, ds_list, sizeof(opal_shmem_ds_t), MPI_BYTE, comm,
+    ompi_coll_args_t _ag;
+    ompi_coll_args_allgather(&_ag, &cico_ds, sizeof(opal_shmem_ds_t),
+        MPI_BYTE, ds_list, sizeof(opal_shmem_ds_t), MPI_BYTE);
+    err = comm->c_coll->coll_allgather(&_ag, comm,
         comm->c_coll->coll_allgather_module);
     if(OMPI_SUCCESS != err) {RETURN_WITH_ERROR(return_code, err, end);}
 
@@ -630,8 +633,9 @@ static int xhc_print_op_hierarchy_dot(xhc_module_t *module,
 
     xhc_module_set_coll_fns(comm, &module->prev_colls, &xhc_fns);
 
-    int err = comm->c_coll->coll_gather(&my_src,
-        1, MPI_INT, src_rank, 1, MPI_INT, 0,
+    ompi_coll_args_t _ga;
+    ompi_coll_args_gather(&_ga, &my_src, 1, MPI_INT, src_rank, 1, MPI_INT, 0);
+    int err = comm->c_coll->coll_gather(&_ga,
         comm, comm->c_coll->coll_gather_module);
 
     xhc_module_set_coll_fns(comm, &xhc_fns, NULL);

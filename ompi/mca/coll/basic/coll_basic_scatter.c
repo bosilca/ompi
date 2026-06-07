@@ -13,6 +13,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -40,13 +41,9 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_scatter_inter(const void *sbuf, size_t scount,
-                             struct ompi_datatype_t *sdtype,
-                             void *rbuf, size_t rcount,
-                             struct ompi_datatype_t *rdtype,
-                             int root, struct ompi_communicator_t *comm,
-                             mca_coll_base_module_t *module)
+mca_coll_basic_scatter_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    int root = args->root;
     int i, size, err;
     char *ptmp;
     ptrdiff_t lb, incr;
@@ -60,12 +57,13 @@ mca_coll_basic_scatter_inter(const void *sbuf, size_t scount,
         err = OMPI_SUCCESS;
     } else if (MPI_ROOT != root) {
         /* If not root, receive data. */
-        err = MCA_PML_CALL(recv(rbuf, rcount, rdtype, root,
+        err = MCA_PML_CALL(recv(args->dst.info.buffer, args->dst.info.count,
+                                args->dst.info.datatype, root,
                                 MCA_COLL_BASE_TAG_SCATTER,
                                 comm, MPI_STATUS_IGNORE));
     } else {
         /* I am the root, loop sending data. */
-        err = ompi_datatype_get_extent(sdtype, &lb, &incr);
+        err = ompi_datatype_get_extent(args->src.info.datatype, &lb, &incr);
         if (OMPI_SUCCESS != err) {
             return OMPI_ERROR;
         }
@@ -73,9 +71,9 @@ mca_coll_basic_scatter_inter(const void *sbuf, size_t scount,
         reqs = ompi_coll_base_comm_get_reqs(module->base_data, size);
         if( NULL == reqs ) { return OMPI_ERR_OUT_OF_RESOURCE; }
 
-        incr *= scount;
-        for (i = 0, ptmp = (char *) sbuf; i < size; ++i, ptmp += incr) {
-            err = MCA_PML_CALL(isend(ptmp, scount, sdtype, i,
+        incr *= args->src.info.count;
+        for (i = 0, ptmp = (char *) args->src.info.buffer; i < size; ++i, ptmp += incr) {
+            err = MCA_PML_CALL(isend(ptmp, args->src.info.count, args->src.info.datatype, i,
                                      MCA_COLL_BASE_TAG_SCATTER,
                                      MCA_PML_BASE_SEND_STANDARD, comm,
                                      &(reqs[i])));

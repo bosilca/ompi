@@ -6,6 +6,7 @@
  * Copyright (c) 2022      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights reserved.
  * Copyright (c) 2024      Advanced Micro Devices, Inc. All Rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -33,13 +34,12 @@
  *     up at some point)
  */
 int
-mca_coll_accelerator_reduce_scatter(const void *sbuf, void *rbuf, ompi_count_array_t rcounts,
-                                   struct ompi_datatype_t *dtype,
-                                   struct ompi_op_t *op,
-                                   struct ompi_communicator_t *comm,
-                                   mca_coll_base_module_t *module)
+mca_coll_accelerator_reduce_scatter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_accelerator_module_t *s = (mca_coll_accelerator_module_t*) module;
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info_v.buffer;
+    ompi_count_array_t rcounts = args->dst.info_v.counts;
     ptrdiff_t gap;
     char *rbuf1 = NULL, *sbuf1 = NULL, *rbuf2 = NULL;
     int sbuf_dev, rbuf_dev;
@@ -48,7 +48,7 @@ mca_coll_accelerator_reduce_scatter(const void *sbuf, void *rbuf, ompi_count_arr
     int comm_size = ompi_comm_size(comm);
     int total_count = 0;
     
-    elemsize = opal_datatype_span(&dtype->super, 1, &gap);
+    elemsize = opal_datatype_span(&args->dst.info_v.datatype->super, 1, &gap);
     for (i = 0; i < comm_size; i++) {
 	total_count += ompi_count_array_get(rcounts, i);
     }
@@ -88,7 +88,9 @@ mca_coll_accelerator_reduce_scatter(const void *sbuf, void *rbuf, ompi_count_arr
         rbuf2 = rbuf; /* save away original buffer */
         rbuf = rbuf1 - gap;
     }
-    rc = s->c_coll.coll_reduce_scatter(sbuf, rbuf, rcounts, dtype, op, comm,
+    ompi_coll_args_t _fwd;
+    ompi_coll_args_reduce_scatter(&_fwd, sbuf, rbuf, rcounts, args->dst.info_v.datatype, args->op);
+    rc = s->c_coll.coll_reduce_scatter(&_fwd, comm,
                                        s->c_coll.coll_reduce_scatter_block_module);
     if (0 > rc) {
         goto exit;

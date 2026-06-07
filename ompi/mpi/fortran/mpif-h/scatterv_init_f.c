@@ -14,6 +14,7 @@
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2025      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -108,8 +109,8 @@ void ompi_scatterv_init_f(char *sendbuf, MPI_Fint *sendcounts,
     if (MPI_SUCCESS == c_ierr) {
         *request = PMPI_Request_c2f(c_request);
         if ((void *)sendcounts != (void *)OMPI_ARRAY_NAME_CONVERT(sendcounts)) {
-            ompi_coll_base_append_array_to_release(c_request, OMPI_ARRAY_NAME_CONVERT(sendcounts));
-            ompi_coll_base_append_array_to_release(c_request, OMPI_ARRAY_NAME_CONVERT(displs));
+            ((ompi_coll_base_nbc_request_t *) c_request)->args.mask |= OMPI_COLL_ARGS_FREE_SRC_COUNTS;
+            ((ompi_coll_base_nbc_request_t *) c_request)->args.mask |= OMPI_COLL_ARGS_FREE_SRC_DISPS;
             ompi_coll_base_add_release_arrays_cb(c_request);
         }
      } else {

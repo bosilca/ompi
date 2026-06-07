@@ -4,6 +4,7 @@
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  *
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -34,6 +35,7 @@ int MPIX_Comm_agree(MPI_Comm comm, int *flag)
 {
     int rc = MPI_SUCCESS;
     ompi_group_t* acked;
+    ompi_coll_args_t coll_args;
 
     /* Argument checking */
     if (MPI_PARAM_CHECK) {
@@ -49,11 +51,10 @@ int MPIX_Comm_agree(MPI_Comm comm, int *flag)
 
     ompi_comm_failure_get_acked_internal( comm, &acked );
 
-    rc = comm->c_coll->coll_agree( flag,
-                                   1,
-                                   &ompi_mpi_int.dt,
-                                   &ompi_mpi_op_band.op,
-                                   &acked, false, /* Acked failures are ignored */
+    /* Acked failures are ignored */
+    ompi_coll_args_agree( &coll_args, flag, 1, &ompi_mpi_int.dt,
+                          &ompi_mpi_op_band.op, &acked, false );
+    rc = comm->c_coll->coll_agree( &coll_args,
                                    (ompi_communicator_t*)comm,
                                    comm->c_coll->coll_agree_module);
     OBJ_RELEASE( acked );

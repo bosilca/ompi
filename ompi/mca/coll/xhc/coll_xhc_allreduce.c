@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021-2024 Computer Architecture and VLSI Systems (CARV)
  *                         Laboratory, ICS Forth. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -1400,18 +1401,20 @@ _fallback_permanent:
 _fallback:
 
     if(require_bcast) {
+        ompi_coll_args_t _ar;
+        ompi_coll_args_allreduce(&_ar, sbuf, rbuf, count, datatype, op);
         return XHC_CALL_FALLBACK(module->prev_colls, XHC_ALLREDUCE,
-            allreduce, sbuf, rbuf, count, datatype, op, ompi_comm);
+            allreduce, &_ar, ompi_comm);
     } else {
+        ompi_coll_args_t _rd;
+        ompi_coll_args_reduce(&_rd, sbuf, rbuf, count, datatype, op, 0);
         return XHC_CALL_FALLBACK(module->prev_colls, XHC_REDUCE,
-            reduce, sbuf, rbuf, count, datatype, op, 0, ompi_comm);
+            reduce, &_rd, ompi_comm);
     }
 }
 
-int mca_coll_xhc_allreduce(const void *sbuf, void *rbuf,
-        size_t count, ompi_datatype_t *datatype, ompi_op_t *op,
-        ompi_communicator_t *ompi_comm, mca_coll_base_module_t *ompi_module) {
+int mca_coll_xhc_allreduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module) {
 
-    return xhc_allreduce_internal(sbuf, rbuf, count,
-        datatype, op, ompi_comm, ompi_module, true);
+    return xhc_allreduce_internal(args->src.info.buffer, args->dst.info.buffer, args->dst.info.count,
+        args->dst.info.datatype, args->op, comm, module, true);
 }

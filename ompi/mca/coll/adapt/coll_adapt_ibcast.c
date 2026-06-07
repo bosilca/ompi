@@ -4,6 +4,7 @@
  *                         reserved.
  * Copyright (c) 2022      IBM Corporation. All rights reserved
  * Copyright (c) 2024      NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -23,7 +24,7 @@
 #include "opal/sys/atomic.h"
 #include "ompi/mca/pml/ob1/pml_ob1.h"
 
-static int ompi_coll_adapt_ibcast_generic(IBCAST_ARGS,
+static int ompi_coll_adapt_ibcast_generic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module,
                                    ompi_coll_tree_t * tree, size_t seg_size);
 
 /*
@@ -321,13 +322,11 @@ static int recv_cb(ompi_request_t * req)
     return 1;
 }
 
-int ompi_coll_adapt_ibcast(void *buff, size_t count, struct ompi_datatype_t *datatype, int root,
-                          struct ompi_communicator_t *comm, ompi_request_t ** request,
-                          mca_coll_base_module_t * module)
+int ompi_coll_adapt_ibcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     OPAL_OUTPUT_VERBOSE((10, mca_coll_adapt_component.adapt_output,
                          "ibcast root %d, algorithm %d, coll_adapt_ibcast_segment_size %zu, coll_adapt_ibcast_max_send_requests %d, coll_adapt_ibcast_max_recv_requests %d\n",
-                         root, mca_coll_adapt_component.adapt_ibcast_algorithm,
+                         args->root, mca_coll_adapt_component.adapt_ibcast_algorithm,
                          mca_coll_adapt_component.adapt_ibcast_segment_size,
                          mca_coll_adapt_component.adapt_ibcast_max_send_requests,
                          mca_coll_adapt_component.adapt_ibcast_max_recv_requests));
@@ -337,17 +336,18 @@ int ompi_coll_adapt_ibcast(void *buff, size_t count, struct ompi_datatype_t *dat
         return OMPI_ERR_NOT_IMPLEMENTED;
     }
 
-    return ompi_coll_adapt_ibcast_generic(buff, count, datatype, root, comm, request, module,
-                                          ompi_coll_adapt_module_cached_topology(module, comm, root, mca_coll_adapt_component.adapt_ibcast_algorithm),
+    return ompi_coll_adapt_ibcast_generic(args, comm, request, module,
+                                          ompi_coll_adapt_module_cached_topology(module, comm, args->root, mca_coll_adapt_component.adapt_ibcast_algorithm),
                                           mca_coll_adapt_component.adapt_ibcast_segment_size);
 }
 
 
-int ompi_coll_adapt_ibcast_generic(void *buff, size_t count, struct ompi_datatype_t *datatype, int root,
-                                   struct ompi_communicator_t *comm, ompi_request_t ** request,
-                                   mca_coll_base_module_t * module, ompi_coll_tree_t * tree,
+int ompi_coll_adapt_ibcast_generic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module, ompi_coll_tree_t * tree,
                                    size_t seg_size)
 {
+    size_t count = args->src.info.count;
+    struct ompi_datatype_t *datatype = args->src.info.datatype;
+    int root = args->root;
     int i, j, rank, err;
     /* The min of num_segs and SEND_NUM or RECV_NUM, in case the num_segs is less than SEND_NUM or RECV_NUM */
     int min;
@@ -484,7 +484,7 @@ int ompi_coll_adapt_ibcast_generic(void *buff, size_t count, struct ompi_datatyp
                 ompi_coll_adapt_bcast_context_t *context =
                     (ompi_coll_adapt_bcast_context_t *) opal_free_list_wait(mca_coll_adapt_component.
                                                                            adapt_ibcast_context_free_list);
-                context->buff = (char *) buff + i * real_seg_size;
+                context->buff = (char *) args->src.info.buffer + i * real_seg_size;
                 context->frag_id = i;
                 /* The id of peer in in children_list */
                 context->child_id = j;
@@ -545,7 +545,7 @@ int ompi_coll_adapt_ibcast_generic(void *buff, size_t count, struct ompi_datatyp
             ompi_coll_adapt_bcast_context_t *context =
                 (ompi_coll_adapt_bcast_context_t *) opal_free_list_wait(mca_coll_adapt_component.
                                                                        adapt_ibcast_context_free_list);
-            context->buff = (char *) buff + i * real_seg_size;
+            context->buff = (char *) args->src.info.buffer + i * real_seg_size;
             context->frag_id = i;
             context->peer = tree->tree_prev;
             context->con = con;

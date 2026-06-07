@@ -2,6 +2,7 @@
 /*
  * Copyright (c) 2025 Bull SAS.  All rights reserved.
  *
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -95,12 +96,16 @@ int osc_ubcl_sync_disp_unit(mca_osc_ubcl_module_t *module, ptrdiff_t disp_unit, 
             goto exit;
         }
         module->disp_unit.all[my_rank] = disp_unit;
-        ret = module->comm->c_coll->coll_allgather(&disp_unit, 1, MPI_AINT, module->disp_unit.all,
-                                                   1, MPI_AINT, module->comm,
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_allgather(&coll_args, &disp_unit, 1, MPI_AINT, module->disp_unit.all,
+                                 1, MPI_AINT);
+        ret = module->comm->c_coll->coll_allgather(&coll_args, module->comm,
                                                    module->comm->c_coll->coll_allgather_module);
     } else if (need_synchro) {
         module->disp_unit.uniq = disp_unit;
-        ret = module->comm->c_coll->coll_barrier(module->comm,
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_barrier(&coll_args);
+        ret = module->comm->c_coll->coll_barrier(&coll_args, module->comm,
                                                  module->comm->c_coll->coll_barrier_module);
     }
 

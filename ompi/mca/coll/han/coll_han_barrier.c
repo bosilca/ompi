@@ -4,6 +4,7 @@
  *                         reserved.
  * Copyright (c) 2020      Bull S.A.S. All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -27,8 +28,7 @@
  * communications without tasks.
  */
 int
-mca_coll_han_barrier_intra_simple(struct ompi_communicator_t *comm,
-                                  mca_coll_base_module_t *module)
+mca_coll_han_barrier_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_han_module_t *han_module = (mca_coll_han_module_t *)module;
     ompi_communicator_t *low_comm, *up_comm;
@@ -39,7 +39,7 @@ mca_coll_han_barrier_intra_simple(struct ompi_communicator_t *comm,
                              "han cannot handle barrier with this communicator. Fall back on another component\n"));
         /* Try to put back the fallback collective support and call it once.  */
         HAN_LOAD_FALLBACK_COLLECTIVES(comm, han_module);
-        return han_module->previous_barrier(comm, han_module->previous_barrier_module);
+        return han_module->previous_barrier(args, comm, han_module->previous_barrier_module);
     }
 
     low_comm = han_module->sub_comm[INTRA_NODE];
@@ -48,14 +48,17 @@ mca_coll_han_barrier_intra_simple(struct ompi_communicator_t *comm,
     int low_rank = ompi_comm_rank(low_comm);
     int root_low_rank = 0; /* rank leader will be 0 on each node */
 
+    ompi_coll_args_t _ba;
+    ompi_coll_args_barrier(&_ba);
+
     /* TODO: extend coll interface with half barrier */
-    low_comm->c_coll->coll_barrier(low_comm,low_comm->c_coll->coll_barrier_module);
+    low_comm->c_coll->coll_barrier(&_ba, low_comm, low_comm->c_coll->coll_barrier_module);
 
     if (low_rank == root_low_rank) {
-        up_comm->c_coll->coll_barrier(up_comm, up_comm->c_coll->coll_barrier_module);
+        up_comm->c_coll->coll_barrier(&_ba, up_comm, up_comm->c_coll->coll_barrier_module);
     }
 
-    low_comm->c_coll->coll_barrier(low_comm,low_comm->c_coll->coll_barrier_module);
+    low_comm->c_coll->coll_barrier(&_ba, low_comm, low_comm->c_coll->coll_barrier_module);
 
     return OMPI_SUCCESS;
 }

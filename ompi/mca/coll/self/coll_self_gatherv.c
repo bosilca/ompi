@@ -11,6 +11,7 @@
  *                         All rights reserved.
  * Copyright (c) 2015      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -32,24 +33,19 @@
  *	Accepts:	- same arguments as MPI_Gatherv()
  *	Returns:	- MPI_SUCCESS or error code
  */
-int mca_coll_self_gatherv_intra(const void *sbuf, size_t scount,
-                                struct ompi_datatype_t *sdtype,
-                                void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t disps,
-                                struct ompi_datatype_t *rdtype, int root,
-                                struct ompi_communicator_t *comm,
-                                mca_coll_base_module_t *module)
+int mca_coll_self_gatherv_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
-    if (MPI_IN_PLACE == sbuf) {
+    if (MPI_IN_PLACE == args->src.info.buffer) {
         return MPI_SUCCESS;
     } else {
         int err;
         ptrdiff_t lb, extent;
-        err = ompi_datatype_get_extent(rdtype, &lb, &extent);
+        err = ompi_datatype_get_extent(args->dst.info_v.datatype, &lb, &extent);
         if (OMPI_SUCCESS != err) {
             return OMPI_ERROR;
         }
-        return ompi_datatype_sndrcv(sbuf, scount, sdtype,
-                               ((char *) rbuf) + ompi_disp_array_get(disps, 0)*extent,
-                               ompi_count_array_get(rcounts, 0), rdtype);
+        return ompi_datatype_sndrcv(args->src.info.buffer, args->src.info.count, args->src.info.datatype,
+                               ((char *) args->dst.info_v.buffer) + ompi_disp_array_get(args->dst.info_v.displacements, 0)*extent,
+                               ompi_count_array_get(args->dst.info_v.counts, 0), args->dst.info_v.datatype);
     }
 }

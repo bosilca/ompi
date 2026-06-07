@@ -2,6 +2,7 @@
 /**
  * Copyright (c) 2021 Mellanox Technologies. All rights reserved.
  * Copyright (c) 2025      Fujitsu Limited. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -66,38 +67,25 @@ fallback:
     return UCC_ERR_NOT_SUPPORTED;
 }
 
-int mca_coll_ucc_allgatherv(const void *sbuf, size_t scount,
-                            struct ompi_datatype_t *sdtype,
-                            void* rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                            struct ompi_datatype_t *rdtype,
-                            struct ompi_communicator_t *comm,
-                            mca_coll_base_module_t *module)
+int mca_coll_ucc_allgatherv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*)module;
     ucc_coll_req_h         req;
 
     UCC_VERBOSE(3, "running ucc allgatherv");
 
-    COLL_UCC_CHECK(mca_coll_ucc_allgatherv_init_common(sbuf, scount, sdtype,
-                                                       rbuf, rcounts, rdisps, rdtype,
+    COLL_UCC_CHECK(mca_coll_ucc_allgatherv_init_common(args->src.info.buffer, args->src.info.count, args->src.info.datatype,
+                                                       args->dst.info_v.buffer, args->dst.info_v.counts, args->dst.info_v.displacements, args->dst.info_v.datatype,
                                                        false, ucc_module, &req, NULL));
     COLL_UCC_POST_AND_CHECK(req);
     COLL_UCC_CHECK(coll_ucc_req_wait(req));
     return OMPI_SUCCESS;
 fallback:
     UCC_VERBOSE(3, "running fallback allgatherv");
-    return ucc_module->previous_allgatherv(sbuf, scount, sdtype,
-                                           rbuf, rcounts, rdisps, rdtype,
-                                           comm, ucc_module->previous_allgatherv_module);
+    return ucc_module->previous_allgatherv(args, comm, ucc_module->previous_allgatherv_module);
 }
 
-int mca_coll_ucc_iallgatherv(const void *sbuf, size_t scount,
-                             struct ompi_datatype_t *sdtype,
-                             void* rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                             struct ompi_datatype_t *rdtype,
-                             struct ompi_communicator_t *comm,
-                             ompi_request_t** request,
-                             mca_coll_base_module_t *module)
+int mca_coll_ucc_iallgatherv(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*)module;
     ucc_coll_req_h         req;
@@ -105,8 +93,8 @@ int mca_coll_ucc_iallgatherv(const void *sbuf, size_t scount,
 
     UCC_VERBOSE(3, "running ucc iallgatherv");
     COLL_UCC_GET_REQ(coll_req, comm);
-    COLL_UCC_CHECK(mca_coll_ucc_allgatherv_init_common(sbuf, scount, sdtype,
-                                                       rbuf, rcounts, rdisps, rdtype,
+    COLL_UCC_CHECK(mca_coll_ucc_allgatherv_init_common(args->src.info.buffer, args->src.info.count, args->src.info.datatype,
+                                                       args->dst.info_v.buffer, args->dst.info_v.counts, args->dst.info_v.displacements, args->dst.info_v.datatype,
                                                        false, ucc_module, &req, coll_req));
     COLL_UCC_POST_AND_CHECK(req);
     *request = &coll_req->super;
@@ -116,16 +104,11 @@ fallback:
     if (coll_req) {
         mca_coll_ucc_req_free((ompi_request_t **)&coll_req);
     }
-    return ucc_module->previous_iallgatherv(sbuf, scount, sdtype,
-                                            rbuf, rcounts, rdisps, rdtype,
-                                            comm, request, ucc_module->previous_iallgatherv_module);
+    return ucc_module->previous_iallgatherv(args, comm, request,
+                                            ucc_module->previous_iallgatherv_module);
 }
 
-int mca_coll_ucc_allgatherv_init(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                                 void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                                 struct ompi_datatype_t *rdtype, struct ompi_communicator_t *comm,
-                                 struct ompi_info_t *info, ompi_request_t **request,
-                                 mca_coll_base_module_t *module)
+int mca_coll_ucc_allgatherv_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t *) module;
     ucc_coll_req_h req;
@@ -133,8 +116,8 @@ int mca_coll_ucc_allgatherv_init(const void *sbuf, size_t scount, struct ompi_da
 
     COLL_UCC_GET_REQ_PERSISTENT(coll_req, comm);
     UCC_VERBOSE(3, "allgatherv_init init %p", coll_req);
-    COLL_UCC_CHECK(mca_coll_ucc_allgatherv_init_common(sbuf, scount, sdtype,
-                                                       rbuf, rcounts, rdisps, rdtype,
+    COLL_UCC_CHECK(mca_coll_ucc_allgatherv_init_common(args->src.info.buffer, args->src.info.count, args->src.info.datatype,
+                                                       args->dst.info_v.buffer, args->dst.info_v.counts, args->dst.info_v.displacements, args->dst.info_v.datatype,
                                                        true, ucc_module, &req, coll_req));
     *request = &coll_req->super;
     return OMPI_SUCCESS;
@@ -143,7 +126,6 @@ fallback:
     if (coll_req) {
         mca_coll_ucc_req_free((ompi_request_t **) &coll_req);
     }
-    return ucc_module->previous_allgatherv_init(sbuf, scount, sdtype, rbuf, rcounts, rdisps, rdtype,
-                                                comm, info, request,
+    return ucc_module->previous_allgatherv_init(args, comm, info, request,
                                                 ucc_module->previous_allgatherv_init_module);
 }

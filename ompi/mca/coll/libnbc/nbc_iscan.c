@@ -11,6 +11,7 @@
  *                         reserved.
  * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * Copyright (c) 2018      FUJITSU LIMITED.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -312,10 +313,9 @@ static inline int scan_sched_recursivedoubling(
     return res;
 }
 
-int ompi_coll_libnbc_iscan(const void* sendbuf, void* recvbuf, size_t count, MPI_Datatype datatype, MPI_Op op,
-                           struct ompi_communicator_t *comm, ompi_request_t ** request,
-                           mca_coll_base_module_t *module) {
-    int res = nbc_scan_init(sendbuf, recvbuf, count, datatype, op,
+int ompi_coll_libnbc_iscan(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_scan_init(args->src.info.buffer, args->dst.info.buffer,
+                            args->dst.info.count, args->dst.info.datatype, args->op,
                             comm, request, module, false);
     if (OPAL_LIKELY(OMPI_SUCCESS != res)) {
         return res;
@@ -330,10 +330,9 @@ int ompi_coll_libnbc_iscan(const void* sendbuf, void* recvbuf, size_t count, MPI
     return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_scan_init(const void* sendbuf, void* recvbuf, size_t count, MPI_Datatype datatype, MPI_Op op,
-                               struct ompi_communicator_t *comm, MPI_Info info, ompi_request_t ** request,
-                               mca_coll_base_module_t *module) {
-    int res = nbc_scan_init(sendbuf, recvbuf, count, datatype, op,
+int ompi_coll_libnbc_scan_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_scan_init(args->src.info.buffer, args->dst.info.buffer,
+                            args->dst.info.count, args->dst.info.datatype, args->op,
                             comm, request, module, true);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
         return res;

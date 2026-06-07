@@ -4,6 +4,7 @@
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  *
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -61,14 +62,12 @@ typedef struct {
  */
 
 int
-mca_coll_ftagree_eta_intra(void *contrib,
-                           size_t dt_count,
-                           ompi_datatype_t *dt,
-                           ompi_op_t *op,
-                           ompi_group_t **group, bool update_grp,
-                           ompi_communicator_t* comm,
-                           mca_coll_base_module_t *module)
+mca_coll_ftagree_eta_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *contrib = args->src.info.buffer;
+    size_t dt_count = args->src.info.count;
+    ompi_group_t **group = args->failedgroup;
+    bool update_grp = 0 != (args->flags & OMPI_COLL_ARGS_FLAG_UPDATE_FAILEDGROUP);
     ftagree_eta_agreement_msg_t *out, *in;
     size_t dt_size, msg_size;
     int *proc_status; /**< char would be enough, but we use the same area to build the group of dead processes at the end */
@@ -80,7 +79,7 @@ mca_coll_ftagree_eta_intra(void *contrib,
     me = ompi_comm_rank(comm);
     proc_status = (int *)calloc( np, sizeof(int) );
 
-    ompi_datatype_type_size(dt, &dt_size);
+    ompi_datatype_type_size(args->src.info.datatype, &dt_size);
     msg_size = sizeof(ftagree_eta_agreement_msg_t) + dt_count * dt_size;
 
     /* This should go in the module query, and a module member should be used here */
@@ -214,7 +213,7 @@ mca_coll_ftagree_eta_intra(void *contrib,
                         assert(MPI_REQUEST_NULL == reqs[ri]);
 
                         /* Implements the binary and of answers */
-                        ompi_op_reduce(op, in[i].est_value, out->est_value, dt_count, dt);
+                        ompi_op_reduce(args->op, in[i].est_value, out->est_value, dt_count, args->src.info.datatype);
 
                         /* Implements the logical or of ERR_PROC_FAILED returns */
                         out->pf |= in[i].pf;

@@ -10,6 +10,7 @@
  * Copyright (c) 2004-2005 The Regents of the University of California.
  *                         All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -34,18 +35,11 @@
  *	Accepts:	- same as MPI_Alltoall()
  *	Returns:	- MPI_SUCCESS or an MPI error code
  */
-int mca_coll_demo_alltoall_intra(const void *sbuf, size_t scount,
-                                 struct ompi_datatype_t *sdtype,
-                                 void *rbuf, size_t rcount,
-                                 struct ompi_datatype_t *rdtype,
-                                 struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module)
+int mca_coll_demo_alltoall_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_demo_module_t *demo_module = (mca_coll_demo_module_t*) module;
     opal_output_verbose(10, ompi_coll_base_framework.framework_output, "In demo alltoall_intra\n");
-    return demo_module->c_coll.coll_alltoall(sbuf, scount, sdtype,
-                                             rbuf, rcount, rdtype,
-                                             comm,
+    return demo_module->c_coll.coll_alltoall(args, comm,
                                              demo_module->c_coll.coll_alltoall_module);
 }
 
@@ -57,17 +51,10 @@ int mca_coll_demo_alltoall_intra(const void *sbuf, size_t scount,
  *	Accepts:	- same as MPI_Alltoall()
  *	Returns:	- MPI_SUCCESS or an MPI error code
  */
-int mca_coll_demo_alltoall_inter(const void *sbuf, size_t scount,
-                                 struct ompi_datatype_t *sdtype,
-                                 void *rbuf, size_t rcount,
-                                 struct ompi_datatype_t *rdtype,
-                                 struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module)
+int mca_coll_demo_alltoall_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_demo_module_t *demo_module = (mca_coll_demo_module_t*) module;
     opal_output_verbose(10, ompi_coll_base_framework.framework_output, "In demo alltoall_inter\n");
-    return demo_module->c_coll.coll_alltoall(sbuf, scount, sdtype,
-                                             rbuf, rcount, rdtype,
-                                             comm,
+    return demo_module->c_coll.coll_alltoall(args, comm,
                                              demo_module->c_coll.coll_alltoall_module);
 }

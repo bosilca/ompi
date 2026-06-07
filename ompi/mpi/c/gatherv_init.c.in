@@ -17,6 +17,7 @@
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -196,9 +197,10 @@ PROTOTYPE ERROR_CLASS gatherv_init(BUFFER sendbuf, COUNT sendcount, DATATYPE sen
     /* Invoke the coll component to perform the back-end operation */
     OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, recvcounts);
     OMPI_DISP_ARRAY_INIT(&displs_desc, displs);
-    err = comm->c_coll->coll_gatherv_init(sendbuf, sendcount, sendtype, updated_recvbuf,
-                                          recvcounts_desc, displs_desc, recvtype,
-                                          root, comm, info, request,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_gatherv(&coll_args, sendbuf, sendcount, sendtype, updated_recvbuf,
+                           recvcounts_desc, displs_desc, recvtype, root);
+    err = comm->c_coll->coll_gatherv_init(&coll_args, comm, info, request,
                                           comm->c_coll->coll_gatherv_init_module);
     if (OPAL_LIKELY(OMPI_SUCCESS == err)) {
         if (OMPI_COMM_IS_INTRA(comm)) {
@@ -217,6 +219,7 @@ PROTOTYPE ERROR_CLASS gatherv_init(BUFFER sendbuf, COUNT sendcount, DATATYPE sen
                 recvtype = NULL;
             }
         }
+        ((ompi_coll_base_nbc_request_t *) *request)->args = coll_args;
         ompi_coll_base_retain_datatypes(*request, sendtype, recvtype);
     }
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);

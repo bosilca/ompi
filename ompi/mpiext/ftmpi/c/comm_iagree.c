@@ -2,6 +2,7 @@
  * Copyright (c) 2014-2020 The University of Tennessee and The University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -33,6 +34,7 @@ int MPIX_Comm_iagree(MPI_Comm comm, int *flag, MPI_Request *request)
 {
     int rc = MPI_SUCCESS;
     ompi_group_t* acked;
+    ompi_coll_args_t coll_args;
 
     /* Argument checking */
     if (MPI_PARAM_CHECK) {
@@ -50,11 +52,9 @@ int MPIX_Comm_iagree(MPI_Comm comm, int *flag, MPI_Request *request)
     }
 
     ompi_comm_failure_get_acked_internal( comm, &acked );
-    rc = comm->c_coll->coll_iagree( flag,
-                                    1,
-                                    &ompi_mpi_int.dt,
-                                    &ompi_mpi_op_band.op,
-                                    &acked, false,
+    ompi_coll_args_agree( &coll_args, flag, 1, &ompi_mpi_int.dt,
+                          &ompi_mpi_op_band.op, &acked, false );
+    rc = comm->c_coll->coll_iagree( &coll_args,
                                     (ompi_communicator_t*)comm,
                                     request,
                                     comm->c_coll->coll_iagree_module);

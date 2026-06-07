@@ -1,6 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode:nil -*- */
 /*
  * Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -256,15 +257,16 @@ static inline int mca_coll_acoll_reduce_smsc(const void *sbuf, void *rbuf, size_
 
     int ret;
 
-    ret = comm->c_coll->coll_allgather(sbuf_vaddr, sizeof(void *), MPI_BYTE, data->allshm_sbuf,
-                                       sizeof(void *), MPI_BYTE, comm,
-                                       comm->c_coll->coll_allgather_module);
+    ompi_coll_args_t _ag;
+    ompi_coll_args_allgather(&_ag, sbuf_vaddr, sizeof(void *), MPI_BYTE, data->allshm_sbuf,
+                             sizeof(void *), MPI_BYTE);
+    ret = comm->c_coll->coll_allgather(&_ag, comm, comm->c_coll->coll_allgather_module);
     if (MPI_SUCCESS != ret) {
         return ret;
     }
-    ret = comm->c_coll->coll_allgather(rbuf_vaddr, sizeof(void *), MPI_BYTE, data->allshm_rbuf,
-                                       sizeof(void *), MPI_BYTE, comm,
-                                       comm->c_coll->coll_allgather_module);
+    ompi_coll_args_allgather(&_ag, rbuf_vaddr, sizeof(void *), MPI_BYTE, data->allshm_rbuf,
+                             sizeof(void *), MPI_BYTE);
+    ret = comm->c_coll->coll_allgather(&_ag, comm, comm->c_coll->coll_allgather_module);
 
     if (MPI_SUCCESS != ret) {
         return ret;
@@ -274,6 +276,9 @@ static inline int mca_coll_acoll_reduce_smsc(const void *sbuf, void *rbuf, size_
     if (MPI_SUCCESS != ret) {
         return ret;
     }
+
+    ompi_coll_args_t _bar;
+    ompi_coll_args_barrier(&_bar);
 
     /* reduce to the group leader */
     size_t chunk = count / l1_gp_size;
@@ -301,7 +306,7 @@ static inline int mca_coll_acoll_reduce_smsc(const void *sbuf, void *rbuf, size_
                            my_count_size, dtype);
         }
     }
-    ompi_coll_base_barrier_intra_tree(comm, module);
+    ompi_coll_base_barrier_intra_tree(&_bar, comm, module);
 
     /* perform reduce to 0 */
     int local_size = l2_gp_size;
@@ -329,7 +334,7 @@ static inline int mca_coll_acoll_reduce_smsc(const void *sbuf, void *rbuf, size_
                            my_count_size, dtype);
         }
     }
-    ompi_coll_base_barrier_intra_tree(comm, module);
+    ompi_coll_base_barrier_intra_tree(&_bar, comm, module);
     if (0 == subc->smsc_use_sr_buf) {
         if (rank == root) {
             memcpy(rbuf, tmp_rbuf, total_dsize);
@@ -343,10 +348,14 @@ static inline int mca_coll_acoll_reduce_smsc(const void *sbuf, void *rbuf, size_
     return MPI_SUCCESS;
 }
 
-int mca_coll_acoll_reduce_intra(const void *sbuf, void *rbuf, size_t count,
-                                struct ompi_datatype_t *dtype, struct ompi_op_t *op, int root,
-                                struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
+int mca_coll_acoll_reduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
+    int root = args->root;
     int size, alg;
     int num_nodes, ret;
     size_t total_dsize, dsize;
@@ -354,17 +363,14 @@ int mca_coll_acoll_reduce_intra(const void *sbuf, void *rbuf, size_t count,
 
     size = ompi_comm_size(comm);
     if (size < 4)
-        return ompi_coll_base_reduce_intra_basic_linear(sbuf, rbuf, count, dtype, op, root, comm,
-                                                        module);
+        return ompi_coll_base_reduce_intra_basic_linear(args, comm, module);
 
     /* Falling back to inorder binary for non-commutative operators to be safe */
     if (!ompi_op_is_commute(op)) {
-        return ompi_coll_base_reduce_intra_in_order_binary(sbuf, rbuf, count, dtype, op, root, comm,
-                                                           module, 0, 0);
+        return ompi_coll_base_reduce_intra_in_order_binary(args, comm, module, 0, 0);
     }
     if (0 != root) { // ToDo: support non-zero root
-        return ompi_coll_base_reduce_intra_binomial(sbuf, rbuf, count, dtype, op, root, comm,
-                                                    module, 0, 0);
+        return ompi_coll_base_reduce_intra_binomial(args, comm, module, 0, 0);
     }
 
     /* Disable shm/xpmem based optimizations if: */
@@ -395,8 +401,7 @@ int mca_coll_acoll_reduce_intra(const void *sbuf, void *rbuf, size_t count,
 
     /* Fallback to knomial if subc is not obtained */
     if (NULL == subc) {
-        return ompi_coll_base_reduce_intra_binomial(sbuf, rbuf, count, dtype, op, root, comm,
-                                                    module, 0, 0);
+        return ompi_coll_base_reduce_intra_binomial(args, comm, module, 0, 0);
     }
 
     if (!subc->initialized || (root != subc->prev_init_root)) {
@@ -418,14 +423,11 @@ int mca_coll_acoll_reduce_intra(const void *sbuf, void *rbuf, size_t count,
                 return coll_acoll_reduce_topo(sbuf, rbuf, count, dtype, op, root, comm, module,
                                               subc);
             } else if (1 == alg) {
-                return ompi_coll_base_reduce_intra_basic_linear(sbuf, rbuf, count, dtype, op, root,
-                                                                comm, module);
+                return ompi_coll_base_reduce_intra_basic_linear(args, comm, module);
             } else if (2 == alg) {
-                return ompi_coll_base_reduce_intra_binomial(sbuf, rbuf, count, dtype, op, root,
-                                                            comm, module, 0, 0);
+                return ompi_coll_base_reduce_intra_binomial(args, comm, module, 0, 0);
             } else { /* either 3 == alg or acoll_module->red_algo is not 0, 1, 2*/
-                return ompi_coll_base_reduce_intra_in_order_binary(sbuf, rbuf, count, dtype, op,
-                                                                   root, comm, module, 0, 0);
+                return ompi_coll_base_reduce_intra_in_order_binary(args, comm, module, 0, 0);
             }
         } else {
             if ((((0 != subc->smsc_use_sr_buf)
@@ -436,8 +438,7 @@ int mca_coll_acoll_reduce_intra(const void *sbuf, void *rbuf, size_t count,
                 return mca_coll_acoll_reduce_smsc(sbuf, rbuf, count, dtype, op, root, comm,
                                                    module, subc);
             } else {
-                return ompi_coll_base_reduce_intra_binomial(sbuf, rbuf, count, dtype, op,
-                                                                   root, comm, module, 0, 0);
+                return ompi_coll_base_reduce_intra_binomial(args, comm, module, 0, 0);
             }
         }
     } else {
@@ -445,8 +446,7 @@ int mca_coll_acoll_reduce_intra(const void *sbuf, void *rbuf, size_t count,
             return coll_acoll_reduce_topo(sbuf, rbuf, count, dtype, op, root, comm, module,
                                           subc);
         } else {
-            return ompi_coll_base_reduce_intra_binomial(sbuf, rbuf, count, dtype, op, root, comm,
-                                                        module, 0, 0);
+            return ompi_coll_base_reduce_intra_binomial(args, comm, module, 0, 0);
         }
     }
     return MPI_SUCCESS;

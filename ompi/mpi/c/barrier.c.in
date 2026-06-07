@@ -14,6 +14,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -63,9 +64,12 @@ PROTOTYPE ERROR_CLASS barrier(COMM comm)
   /* Intracommunicators: Only invoke the back-end coll module barrier
      function if there's more than one process in the communicator */
 
+  ompi_coll_args_t coll_args;
+  ompi_coll_args_barrier(&coll_args);
+
   if (OMPI_COMM_IS_INTRA(comm)) {
     if (ompi_comm_size(comm) > 1) {
-      err = comm->c_coll->coll_barrier(comm, comm->c_coll->coll_barrier_module);
+      err = comm->c_coll->coll_barrier(&coll_args, comm, comm->c_coll->coll_barrier_module);
     }
   }
 
@@ -73,7 +77,7 @@ PROTOTYPE ERROR_CLASS barrier(COMM comm)
      there's always at least 2 processes in an intercommunicator. */
 
   else {
-      err = comm->c_coll->coll_barrier(comm, comm->c_coll->coll_barrier_module);
+      err = comm->c_coll->coll_barrier(&coll_args, comm, comm->c_coll->coll_barrier_module);
   }
 
   /* All done */

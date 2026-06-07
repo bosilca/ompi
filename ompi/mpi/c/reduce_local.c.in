@@ -18,6 +18,7 @@
  * Copyright (c) 2016-2017 IBM Corporation.  All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -72,7 +73,9 @@ PROTOTYPE ERROR_CLASS reduce_local(BUFFER inbuf, BUFFER_OUT inoutbuf, COUNT coun
     // Since there is no 'comm' parameter to this interface use 'self' since
     // this is a local operation to this process.
     ompi_communicator_t *comm = &ompi_mpi_comm_self.comm;
-    err = comm->c_coll->coll_reduce_local(inbuf, inoutbuf, count, datatype, op,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_reduce_local(&coll_args, inbuf, inoutbuf, count, datatype, op);
+    err = comm->c_coll->coll_reduce_local(&coll_args, comm,
                                          comm->c_coll->coll_reduce_local_module);
     OBJ_RELEASE(datatype);
     OBJ_RELEASE(op);

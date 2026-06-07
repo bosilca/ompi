@@ -4,6 +4,7 @@
  *                         and Information Science. All rights reserved.
  * Copyright (c) 2018      Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -32,12 +33,12 @@
  * Returns:   MPI_SUCCESS or error code
  */
 int
-ompi_coll_base_exscan_intra_linear(const void *sbuf, void *rbuf, size_t count,
-                                  struct ompi_datatype_t *dtype,
-                                  struct ompi_op_t *op,
-                                  struct ompi_communicator_t *comm,
-                                  mca_coll_base_module_t *module)
+ompi_coll_base_exscan_intra_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
     int size, rank, err;
     ptrdiff_t dsize, gap;
     char *free_buffer = NULL;
@@ -92,7 +93,7 @@ ompi_coll_base_exscan_intra_linear(const void *sbuf, void *rbuf, size_t count,
 
     /* Now reduce the prior rank's result with my source buffer.  The source
      * buffer had been previously copied into the temporary reduce_buffer. */
-    ompi_op_reduce(op, rbuf, reduce_buffer, count, dtype);
+    ompi_op_reduce(args->op, rbuf, reduce_buffer, count, dtype);
 
     /* Send my result off to the next rank */
     err = MCA_PML_CALL(send(reduce_buffer, count, dtype, rank + 1,
@@ -139,11 +140,12 @@ ompi_coll_base_exscan_intra_linear(const void *sbuf, void *rbuf, size_t count,
  * Memory requirements (per process): 2 * count * typesize = O(count)
  * Limitations: intra-communicators only
  */
-int ompi_coll_base_exscan_intra_recursivedoubling(
-    const void *sendbuf, void *recvbuf, size_t count, struct ompi_datatype_t *datatype,
-    struct ompi_op_t *op, struct ompi_communicator_t *comm,
-    mca_coll_base_module_t *module)
+int ompi_coll_base_exscan_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *recvbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *datatype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
     int err = MPI_SUCCESS;
     char *tmpsend_raw = NULL, *tmprecv_raw = NULL;
     int comm_size = ompi_comm_size(comm);
@@ -166,8 +168,8 @@ int ompi_coll_base_exscan_intra_recursivedoubling(
     }
     char *psend = tmpsend_raw - gap;
     char *precv = tmprecv_raw - gap;
-    if (sendbuf != MPI_IN_PLACE) {
-        err = ompi_datatype_copy_content_same_ddt(datatype, count, psend, (char *)sendbuf);
+    if (args->src.info.buffer != MPI_IN_PLACE) {
+        err = ompi_datatype_copy_content_same_ddt(datatype, count, psend, (char *) args->src.info.buffer);
         if (MPI_SUCCESS != err) { goto cleanup_and_return; }
     } else {
         err = ompi_datatype_copy_content_same_ddt(datatype, count, psend, recvbuf);

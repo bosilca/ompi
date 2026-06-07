@@ -18,6 +18,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -124,9 +125,11 @@ PROTOTYPE ERROR_CLASS alltoallw(BUFFER sendbuf, COUNT_ARRAY sendcounts,
     OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, recvcounts);
     OMPI_DISP_ARRAY_INIT(&sdispls_desc, sdispls);
     OMPI_DISP_ARRAY_INIT(&rdispls_desc, rdispls);
-    err = comm->c_coll->coll_alltoallw(sendbuf, sendcounts_desc, sdispls_desc, (ompi_datatype_t **) sendtypes,
-                                      recvbuf, recvcounts_desc, rdispls_desc, (ompi_datatype_t **) recvtypes,
-                                      comm, comm->c_coll->coll_alltoallw_module);
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_alltoallw(&coll_args, sendbuf, sendcounts_desc, sdispls_desc, (ompi_datatype_t **) sendtypes,
+                             recvbuf, recvcounts_desc, rdispls_desc, (ompi_datatype_t **) recvtypes);
+    err = comm->c_coll->coll_alltoallw(&coll_args, comm,
+                                      comm->c_coll->coll_alltoallw_module);
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);
 }
 

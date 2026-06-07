@@ -2,6 +2,7 @@
  * Copyright (c) 2016-2018 Inria. All rights reserved.
  * Copyright (c) 2019      Research Organization for Information Science
  *                         and Technology (RIST).  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -15,14 +16,7 @@
 #include "ompi/communicator/communicator.h"
 #include "coll_monitoring.h"
 
-int mca_coll_monitoring_alltoallw(const void *sbuf, ompi_count_array_t scounts,
-                                  ompi_disp_array_t sdisps,
-                                  struct ompi_datatype_t * const *sdtypes,
-                                  void *rbuf, ompi_count_array_t rcounts,
-                                  ompi_disp_array_t rdisps,
-                                  struct ompi_datatype_t * const *rdtypes,
-                                  struct ompi_communicator_t *comm,
-                                  mca_coll_base_module_t *module)
+int mca_coll_monitoring_alltoallw(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     size_t type_size, data_size, data_size_aggreg = 0;
@@ -31,8 +25,8 @@ int mca_coll_monitoring_alltoallw(const void *sbuf, ompi_count_array_t scounts,
     int i, rank;
     for( i = 0; i < comm_size; ++i ) {
         if( my_rank == i ) continue; /* No communication for self */
-        ompi_datatype_type_size(sdtypes[i], &type_size);
-        data_size = ompi_count_array_get(scounts, i) * type_size;
+            ompi_datatype_type_size(args->src.info_v.datatypes[i], &type_size);
+            data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
         /**
          * If this fails the destination is not part of my MPI_COM_WORLD
          * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -43,18 +37,10 @@ int mca_coll_monitoring_alltoallw(const void *sbuf, ompi_count_array_t scounts,
         }
     }
     mca_common_monitoring_coll_a2a(data_size_aggreg, monitoring_module->data);
-    return monitoring_module->real.coll_alltoallw(sbuf, scounts, sdisps, sdtypes, rbuf, rcounts, rdisps, rdtypes, comm, monitoring_module->real.coll_alltoallw_module);
+    return monitoring_module->real.coll_alltoallw(args, comm, monitoring_module->real.coll_alltoallw_module);
 }
 
-int mca_coll_monitoring_ialltoallw(const void *sbuf, ompi_count_array_t scounts,
-                                   ompi_disp_array_t sdisps,
-                                   struct ompi_datatype_t * const *sdtypes,
-                                   void *rbuf, ompi_count_array_t rcounts,
-                                   ompi_disp_array_t rdisps,
-                                   struct ompi_datatype_t * const *rdtypes,
-                                   struct ompi_communicator_t *comm,
-                                   ompi_request_t ** request,
-                                   mca_coll_base_module_t *module)
+int mca_coll_monitoring_ialltoallw(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module)
 {
     mca_coll_monitoring_module_t*monitoring_module = (mca_coll_monitoring_module_t*) module;
     size_t type_size, data_size, data_size_aggreg = 0;
@@ -63,8 +49,8 @@ int mca_coll_monitoring_ialltoallw(const void *sbuf, ompi_count_array_t scounts,
     int i, rank;
     for( i = 0; i < comm_size; ++i ) {
         if( my_rank == i ) continue; /* No communication for self */
-        ompi_datatype_type_size(sdtypes[i], &type_size);
-        data_size = ompi_count_array_get(scounts, i) * type_size;
+            ompi_datatype_type_size(args->src.info_v.datatypes[i], &type_size);
+            data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
         /**
          * If this fails the destination is not part of my MPI_COM_WORLD
          * Lookup its name in the rank hashtable to get its MPI_COMM_WORLD rank
@@ -75,5 +61,5 @@ int mca_coll_monitoring_ialltoallw(const void *sbuf, ompi_count_array_t scounts,
         }
     }
     mca_common_monitoring_coll_a2a(data_size_aggreg, monitoring_module->data);
-    return monitoring_module->real.coll_ialltoallw(sbuf, scounts, sdisps, sdtypes, rbuf, rcounts, rdisps, rdtypes, comm, request, monitoring_module->real.coll_ialltoallw_module);
+    return monitoring_module->real.coll_ialltoallw(args, comm, request, monitoring_module->real.coll_ialltoallw_module);
 }

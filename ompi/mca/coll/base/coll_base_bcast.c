@@ -15,6 +15,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
  * Copyright (c) 2025      Triad National Security, LLC. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -36,7 +37,7 @@
 #include "coll_base_util.h"
 
 /*
- * if a > b return a- b otherwise 0
+ * if a > b return a - b otherwise 0
  */
 static inline size_t
 rectify_diff(size_t a, size_t b)
@@ -45,15 +46,12 @@ rectify_diff(size_t a, size_t b)
 }
 
 int
-ompi_coll_base_bcast_intra_generic( void* buffer,
-                                     size_t original_count,
-                                     struct ompi_datatype_t* datatype,
-                                     int root,
-                                     struct ompi_communicator_t* comm,
-                                     mca_coll_base_module_t *module,
+ompi_coll_base_bcast_intra_generic( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                      uint32_t count_by_segment,
                                      ompi_coll_tree_t* tree )
 {
+    size_t original_count = args->src.info.count;
+    struct ompi_datatype_t* datatype = args->src.info.datatype;
     int err = 0, line, i, rank, segindex, req_index;
     int num_segments; /* Number of segments */
     size_t sendcount;    /* number of elements sent in this segment */
@@ -76,7 +74,7 @@ ompi_coll_base_bcast_intra_generic( void* buffer,
     realsegsize = (ptrdiff_t)count_by_segment * extent;
 
     /* Set the buffer pointers */
-    tmpbuf = (char *) buffer;
+    tmpbuf = (char *) args->src.info.buffer;
 
     if( tree->tree_nextsize != 0 ) {
         send_reqs = ompi_coll_base_comm_get_reqs(module->base_data, tree->tree_nextsize);
@@ -84,7 +82,7 @@ ompi_coll_base_bcast_intra_generic( void* buffer,
     }
 
     /* Root code */
-    if( rank == root ) {
+    if( rank == args->root ) {
         /*
            For each segment:
            - send segment to all children.
@@ -256,126 +254,100 @@ ompi_coll_base_bcast_intra_generic( void* buffer,
 }
 
 int
-ompi_coll_base_bcast_intra_bintree ( void* buffer,
-                                      size_t count,
-                                      struct ompi_datatype_t* datatype,
-                                      int root,
-                                      struct ompi_communicator_t* comm,
-                                      mca_coll_base_module_t *module,
-                                      uint32_t segsize )
+ompi_coll_base_bcast_intra_bintree ( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize )
 {
-    size_t segcount = count;
+    size_t segcount = args->src.info.count;
     size_t typelng;
     mca_coll_base_comm_t *data = module->base_data;
 
-    COLL_BASE_UPDATE_BINTREE( comm, module, root );
+    COLL_BASE_UPDATE_BINTREE( comm, module, args->root );
 
     /**
      * Determine number of elements sent per operation.
      */
-    ompi_datatype_type_size( datatype, &typelng );
+    ompi_datatype_type_size( args->src.info.datatype, &typelng );
     COLL_BASE_COMPUTED_SEGCOUNT( segsize, typelng, segcount );
 
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"coll:base:bcast_intra_binary rank %d ss %5d typelng %zu segcount %zu",
                  ompi_comm_rank(comm), segsize, (unsigned long)typelng, segcount));
 
-    return ompi_coll_base_bcast_intra_generic( buffer, count, datatype, root, comm, module,
+    return ompi_coll_base_bcast_intra_generic( args, comm, module,
                                                 segcount, data->cached_bintree );
 }
 
 int
-ompi_coll_base_bcast_intra_pipeline( void* buffer,
-                                      size_t count,
-                                      struct ompi_datatype_t* datatype,
-                                      int root,
-                                      struct ompi_communicator_t* comm,
-                                      mca_coll_base_module_t *module,
-                                      uint32_t segsize )
+ompi_coll_base_bcast_intra_pipeline( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize )
 {
-    size_t segcount = count;
+    size_t segcount = args->src.info.count;
     size_t typelng;
     mca_coll_base_comm_t *data = module->base_data;
 
-    COLL_BASE_UPDATE_PIPELINE( comm, module, root );
+    COLL_BASE_UPDATE_PIPELINE( comm, module, args->root );
 
     /**
      * Determine number of elements sent per operation.
      */
-    ompi_datatype_type_size( datatype, &typelng );
+    ompi_datatype_type_size( args->src.info.datatype, &typelng );
     COLL_BASE_COMPUTED_SEGCOUNT( segsize, typelng, segcount );
 
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"coll:base:bcast_intra_pipeline rank %d ss %5d typelng %zu segcount %zu",
                  ompi_comm_rank(comm), segsize, (unsigned long)typelng, segcount));
 
-    return ompi_coll_base_bcast_intra_generic( buffer, count, datatype, root, comm, module,
+    return ompi_coll_base_bcast_intra_generic( args, comm, module,
                                                 segcount, data->cached_pipeline );
 }
 
 int
-ompi_coll_base_bcast_intra_chain( void* buffer,
-                                   size_t count,
-                                   struct ompi_datatype_t* datatype,
-                                   int root,
-                                   struct ompi_communicator_t* comm,
-                                   mca_coll_base_module_t *module,
-                                   uint32_t segsize, int32_t chains )
+ompi_coll_base_bcast_intra_chain( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize, int32_t chains )
 {
-    size_t segcount = count;
+    size_t segcount = args->src.info.count;
     size_t typelng;
     mca_coll_base_comm_t *data = module->base_data;
 
-    COLL_BASE_UPDATE_CHAIN( comm, module, root, chains );
+    COLL_BASE_UPDATE_CHAIN( comm, module, args->root, chains );
 
     /**
      * Determine number of elements sent per operation.
      */
-    ompi_datatype_type_size( datatype, &typelng );
+    ompi_datatype_type_size( args->src.info.datatype, &typelng );
     COLL_BASE_COMPUTED_SEGCOUNT( segsize, typelng, segcount );
 
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"coll:base:bcast_intra_chain rank %d fo %d ss %5d typelng %zu segcount %zu",
                  ompi_comm_rank(comm), chains, segsize, (unsigned long)typelng, segcount));
 
-    return ompi_coll_base_bcast_intra_generic( buffer, count, datatype, root, comm, module,
+    return ompi_coll_base_bcast_intra_generic( args, comm, module,
                                                 segcount, data->cached_chain );
 }
 
 int
-ompi_coll_base_bcast_intra_binomial( void* buffer,
-                                      size_t count,
-                                      struct ompi_datatype_t* datatype,
-                                      int root,
-                                      struct ompi_communicator_t* comm,
-                                      mca_coll_base_module_t *module,
-                                      uint32_t segsize )
+ompi_coll_base_bcast_intra_binomial( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize )
 {
-    size_t segcount = count;
+    size_t segcount = args->src.info.count;
     size_t typelng;
     mca_coll_base_comm_t *data = module->base_data;
 
-    COLL_BASE_UPDATE_BMTREE( comm, module, root );
+    COLL_BASE_UPDATE_BMTREE( comm, module, args->root );
 
     /**
      * Determine number of elements sent per operation.
      */
-    ompi_datatype_type_size( datatype, &typelng );
+    ompi_datatype_type_size( args->src.info.datatype, &typelng );
     COLL_BASE_COMPUTED_SEGCOUNT( segsize, typelng, segcount );
 
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,"coll:base:bcast_intra_binomial rank %d ss %5d typelng %zu segcount %zu",
                  ompi_comm_rank(comm), segsize, (unsigned long)typelng, segcount));
 
-    return ompi_coll_base_bcast_intra_generic( buffer, count, datatype, root, comm, module,
+    return ompi_coll_base_bcast_intra_generic( args, comm, module,
                                                 segcount, data->cached_bmtree );
 }
 
 int
-ompi_coll_base_bcast_intra_split_bintree ( void* buffer,
-                                            size_t count,
-                                            struct ompi_datatype_t* datatype,
-                                            int root,
-                                            struct ompi_communicator_t* comm,
-                                            mca_coll_base_module_t *module,
-                                            uint32_t segsize )
+ompi_coll_base_bcast_intra_split_bintree ( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize )
 {
+    void *buffer = args->src.info.buffer;
+    size_t count = args->src.info.count;
+    struct ompi_datatype_t *datatype = args->src.info.datatype;
+    int root = args->root;
     int err=0, line, rank, size, segindex, i, lr, pair;
     size_t counts[2];
     size_t segcount[2];       /* Number of elements sent with each segment */
@@ -429,8 +401,7 @@ ompi_coll_base_bcast_intra_split_bintree ( void* buffer,
         (segsize > ((ptrdiff_t)counts[0] * type_size)) ||
         (segsize > ((ptrdiff_t)counts[1] * type_size)) ) {
         /* call linear version here ! */
-        return (ompi_coll_base_bcast_intra_chain ( buffer, count, datatype,
-                                                    root, comm, module,
+        return (ompi_coll_base_bcast_intra_chain ( args, comm, module,
                                                     segsize, 1 ));
     }
 
@@ -484,7 +455,7 @@ ompi_coll_base_bcast_intra_split_bintree ( void* buffer,
         /* Intermediate nodes:
          * It will receive segments only from one half of the data.
          * Which one is determined by whether the node belongs to the "left" or "right"
-         * subtree. Topoloby building function builds binary tree such that
+         * subtree. Topology building function builds binary tree such that
          * odd "shifted ranks" ((rank + size - root)%size) are on the left subtree,
          * and even on the right subtree.
          *
@@ -635,11 +606,9 @@ ompi_coll_base_bcast_intra_split_bintree ( void* buffer,
  *  Returns:    - MPI_SUCCESS or error code
  */
 int
-ompi_coll_base_bcast_intra_basic_linear(void *buff, size_t count,
-                                        struct ompi_datatype_t *datatype, int root,
-                                        struct ompi_communicator_t *comm,
-                                        mca_coll_base_module_t *module)
+ompi_coll_base_bcast_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    int root = args->root;
     int i, size, rank, err;
     ompi_request_t **preq, **reqs;
 
@@ -653,7 +622,7 @@ ompi_coll_base_bcast_intra_basic_linear(void *buff, size_t count,
     /* Non-root receive the data. */
 
     if (rank != root) {
-        return MCA_PML_CALL(recv(buff, count, datatype, root,
+        return MCA_PML_CALL(recv(args->src.info.buffer, args->src.info.count, args->src.info.datatype, root,
                                  MCA_COLL_BASE_TAG_BCAST, comm,
                                  MPI_STATUS_IGNORE));
     }
@@ -669,7 +638,7 @@ ompi_coll_base_bcast_intra_basic_linear(void *buff, size_t count,
             continue;
         }
 
-        err = MCA_PML_CALL(isend(buff, count, datatype, i,
+        err = MCA_PML_CALL(isend(args->src.info.buffer, args->src.info.count, args->src.info.datatype, i,
                                  MCA_COLL_BASE_TAG_BCAST,
                                  MCA_PML_BASE_SEND_STANDARD,
                                  comm, preq++));
@@ -728,32 +697,30 @@ ompi_coll_base_bcast_intra_basic_linear(void *buff, size_t count,
  *     7
  */
 int ompi_coll_base_bcast_intra_knomial(
-    void *buf, size_t count, struct ompi_datatype_t *datatype, int root,
-    struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
-    uint32_t segsize, int radix)
+    ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize, int radix)
 {
-    int segcount = count;
+    int segcount = args->src.info.count;
     size_t typesize;
     mca_coll_base_comm_t *data = module->base_data;
 
-    COLL_BASE_UPDATE_KMTREE(comm, module, root, radix);
+    COLL_BASE_UPDATE_KMTREE(comm, module, args->root, radix);
     if (NULL == data->cached_kmtree) {
         /* Failed to build k-nomial tree for given radix */
-        return ompi_coll_base_bcast_intra_binomial(buf, count, datatype, root, comm, module,
+        return ompi_coll_base_bcast_intra_binomial(args, comm, module,
                                                    segcount);
     }
 
     /**
      * Determine number of elements sent per operation.
      */
-    ompi_datatype_type_size(datatype, &typesize);
+    ompi_datatype_type_size(args->src.info.datatype, &typesize);
     COLL_BASE_COMPUTED_SEGCOUNT(segsize, typesize, segcount);
 
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
                  "coll:base:bcast_intra_knomial rank %d segsize %5d typesize %zu segcount %d",
                  ompi_comm_rank(comm), segsize, (unsigned long)typesize, segcount));
 
-    return ompi_coll_base_bcast_intra_generic(buf, count, datatype, root, comm, module,
+    return ompi_coll_base_bcast_intra_generic(args, comm, module,
                                               segcount, data->cached_kmtree);
 }
 
@@ -782,10 +749,12 @@ int ompi_coll_base_bcast_intra_knomial(
  * 7:           <-+  [*******7]  <-+ [******67]  <--|-+ [****4567] <--------+
  */
 int ompi_coll_base_bcast_intra_scatter_allgather(
-    void *buf, size_t count, struct ompi_datatype_t *datatype, int root,
-    struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
-    uint32_t segsize)
+    ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize)
 {
+    void *buf = args->src.info.buffer;
+    size_t count = args->src.info.count;
+    struct ompi_datatype_t *datatype = args->src.info.datatype;
+    int root = args->root;
     int err = MPI_SUCCESS;
     ptrdiff_t lb, extent;
     size_t datatype_size;
@@ -806,8 +775,7 @@ int ompi_coll_base_bcast_intra_scatter_allgather(
                      "coll:base:bcast_intra_scatter_allgather: rank %d/%d "
                      "count %zu switching to basic linear bcast",
                      rank, comm_size, count));
-        return ompi_coll_base_bcast_intra_basic_linear(buf, count, datatype,
-                                                       root, comm, module);
+        return ompi_coll_base_bcast_intra_basic_linear(args, comm, module);
     }
 
     int vrank = (rank - root + comm_size) % comm_size;
@@ -955,10 +923,11 @@ cleanup_and_return:
  * 7:           <-+  [*******7]  [******67] [*****567] [****4567] ... [01234567]
  */
 int ompi_coll_base_bcast_intra_scatter_allgather_ring(
-    void *buf, size_t count, struct ompi_datatype_t *datatype, int root,
-    struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
-    uint32_t segsize)
+    ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize)
 {
+    void *buf = args->src.info.buffer;
+    size_t count = args->src.info.count;
+    struct ompi_datatype_t *datatype = args->src.info.datatype;
     int err = MPI_SUCCESS;
     ptrdiff_t lb, extent;
     size_t datatype_size;
@@ -979,14 +948,13 @@ int ompi_coll_base_bcast_intra_scatter_allgather_ring(
                      "coll:base:bcast_intra_scatter_allgather_ring: rank %d/%d "
                      "count %zu switching to basic linear bcast",
                      rank, comm_size, count));
-        return ompi_coll_base_bcast_intra_basic_linear(buf, count, datatype,
-                                                       root, comm, module);
+        return ompi_coll_base_bcast_intra_basic_linear(args, comm, module);
     }
 
-    int vrank = (rank - root + comm_size) % comm_size;
+    int vrank = (rank - args->root + comm_size) % comm_size;
     size_t recv_count = 0, send_count = 0;
     size_t scatter_count = (count + comm_size - 1) / comm_size; /* ceil(count / comm_size) */
-    size_t curr_count = (rank == root) ? count : 0;
+    size_t curr_count = (rank == args->root) ? count : 0;
 
     /* Scatter by binomial tree: receive data from parent */
     int mask = 1;

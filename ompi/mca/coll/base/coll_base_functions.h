@@ -19,6 +19,7 @@
  * Copyright (c) 2016-2017 IBM Corporation.  All rights reserved.
  * Copyright (c) 2017      FUJITSU LIMITED.  All rights reserved.
  * Copyright (c) 2019      Mellanox Technologies. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -67,166 +68,50 @@ typedef enum COLLTYPE {
     COLLCOUNT            /* 22 end counter keep it as last element */
 } COLLTYPE_T;
 
-/* defined arg lists to simply auto inclusion of user overriding decision functions */
-#define ALLGATHER_BASE_ARGS           const void *sendbuf, size_t sendcount, struct ompi_datatype_t *sendtype, void *recvbuf, size_t recvcount, struct ompi_datatype_t *recvtype, struct ompi_communicator_t *comm
-#define ALLGATHERV_BASE_ARGS          const void *sendbuf, size_t sendcount, struct ompi_datatype_t *sendtype, void *recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t displs, struct ompi_datatype_t *recvtype, struct ompi_communicator_t *comm
-#define ALLREDUCE_BASE_ARGS           const void *sendbuf, void *recvbuf, size_t count, struct ompi_datatype_t *datatype, struct ompi_op_t *op, struct ompi_communicator_t *comm
-#define ALLTOALL_BASE_ARGS            const void *sendbuf, size_t sendcount, struct ompi_datatype_t *sendtype, void *recvbuf, size_t recvcount, struct ompi_datatype_t *recvtype, struct ompi_communicator_t *comm
-#define ALLTOALLV_BASE_ARGS           const void *sendbuf, ompi_count_array_t sendcounts, ompi_disp_array_t sdispls, struct ompi_datatype_t *sendtype, void *recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t rdispls, struct ompi_datatype_t *recvtype, struct ompi_communicator_t *comm
-#define ALLTOALLW_BASE_ARGS           const void *sendbuf, ompi_count_array_t sendcounts, ompi_disp_array_t sdispls, struct ompi_datatype_t * const sendtypes[], void *recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t rdispls, struct ompi_datatype_t * const recvtypes[], struct ompi_communicator_t *comm
-#define BARRIER_BASE_ARGS             struct ompi_communicator_t *comm
-#define BCAST_BASE_ARGS               void *buffer, size_t count, struct ompi_datatype_t *datatype, int root, struct ompi_communicator_t *comm
-#define EXSCAN_BASE_ARGS              const void *sendbuf, void *recvbuf, size_t count, struct ompi_datatype_t *datatype, struct ompi_op_t *op, struct ompi_communicator_t *comm
-#define GATHER_BASE_ARGS              const void *sendbuf, size_t sendcount, struct ompi_datatype_t *sendtype, void *recvbuf, size_t recvcount, struct ompi_datatype_t *recvtype, int root, struct ompi_communicator_t *comm
-#define GATHERV_BASE_ARGS             const void *sendbuf, size_t sendcount, struct ompi_datatype_t *sendtype, void *recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t displs, struct ompi_datatype_t *recvtype, int root, struct ompi_communicator_t *comm
-#define REDUCE_BASE_ARGS              const void *sendbuf, void *recvbuf, size_t count, struct ompi_datatype_t *datatype, struct ompi_op_t *op, int root, struct ompi_communicator_t *comm
-#define REDUCESCATTER_BASE_ARGS       const void *sendbuf, void *recvbuf, ompi_count_array_t recvcounts, struct ompi_datatype_t *datatype, struct ompi_op_t *op, struct ompi_communicator_t *comm
-#define REDUCESCATTERBLOCK_BASE_ARGS  const void *sendbuf, void *recvbuf, size_t recvcount, struct ompi_datatype_t *datatype, struct ompi_op_t *op, struct ompi_communicator_t *comm
-#define SCAN_BASE_ARGS                const void *sendbuf, void *recvbuf, size_t count, struct ompi_datatype_t *datatype, struct ompi_op_t *op, struct ompi_communicator_t *comm
-#define SCATTER_BASE_ARGS             const void *sendbuf, size_t sendcount, struct ompi_datatype_t *sendtype, void *recvbuf, size_t recvcount, struct ompi_datatype_t *recvtype, int root, struct ompi_communicator_t *comm
-#define SCATTERV_BASE_ARGS            const void *sendbuf, ompi_count_array_t sendcounts, ompi_disp_array_t displs, struct ompi_datatype_t *sendtype, void *recvbuf, size_t recvcount, struct ompi_datatype_t *recvtype, int root, struct ompi_communicator_t *comm
-#define NEIGHBOR_ALLGATHER_BASE_ARGS  const void *sendbuf, size_t sendcount, struct ompi_datatype_t *sendtype, void *recvbuf, size_t recvcount, struct ompi_datatype_t *recvtype, struct ompi_communicator_t *comm
-#define NEIGHBOR_ALLGATHERV_BASE_ARGS const void *sendbuf, size_t sendcount, struct ompi_datatype_t *sendtype, void *recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t displs, struct ompi_datatype_t *recvtype, struct ompi_communicator_t *comm
-#define NEIGHBOR_ALLTOALL_BASE_ARGS   const void *sendbuf, size_t sendcount, struct ompi_datatype_t *sendtype, void *recvbuf, size_t recvcount, struct ompi_datatype_t *recvtype, struct ompi_communicator_t *comm
-#define NEIGHBOR_ALLTOALLV_BASE_ARGS  const void *sendbuf, ompi_count_array_t sendcounts, ompi_disp_array_t sdispls, struct ompi_datatype_t *sendtype, void *recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t rdispls, struct ompi_datatype_t *recvtype, struct ompi_communicator_t *comm
-#define NEIGHBOR_ALLTOALLW_BASE_ARGS  const void *sendbuf, ompi_count_array_t sendcounts, ompi_disp_array_t sdispls, struct ompi_datatype_t * const sendtypes[], void *recvbuf, ompi_count_array_t recvcounts, ompi_disp_array_t rdispls, struct ompi_datatype_t * const recvtypes[], struct ompi_communicator_t *comm
-
-#define ALLGATHER_ARGS           ALLGATHER_BASE_ARGS,           mca_coll_base_module_t *module
-#define ALLGATHERV_ARGS          ALLGATHERV_BASE_ARGS,          mca_coll_base_module_t *module
-#define ALLREDUCE_ARGS           ALLREDUCE_BASE_ARGS,           mca_coll_base_module_t *module
-#define ALLTOALL_ARGS            ALLTOALL_BASE_ARGS,            mca_coll_base_module_t *module
-#define ALLTOALLV_ARGS           ALLTOALLV_BASE_ARGS,           mca_coll_base_module_t *module
-#define ALLTOALLW_ARGS           ALLTOALLW_BASE_ARGS,           mca_coll_base_module_t *module
-#define BARRIER_ARGS             BARRIER_BASE_ARGS,             mca_coll_base_module_t *module
-#define BCAST_ARGS               BCAST_BASE_ARGS,               mca_coll_base_module_t *module
-#define EXSCAN_ARGS              EXSCAN_BASE_ARGS,              mca_coll_base_module_t *module
-#define GATHER_ARGS              GATHER_BASE_ARGS,              mca_coll_base_module_t *module
-#define GATHERV_ARGS             GATHERV_BASE_ARGS,             mca_coll_base_module_t *module
-#define REDUCE_ARGS              REDUCE_BASE_ARGS,              mca_coll_base_module_t *module
-#define REDUCESCATTER_ARGS       REDUCESCATTER_BASE_ARGS,       mca_coll_base_module_t *module
-#define REDUCESCATTERBLOCK_ARGS  REDUCESCATTERBLOCK_BASE_ARGS,  mca_coll_base_module_t *module
-#define SCAN_ARGS                SCAN_BASE_ARGS,                mca_coll_base_module_t *module
-#define SCATTER_ARGS             SCATTER_BASE_ARGS,             mca_coll_base_module_t *module
-#define SCATTERV_ARGS            SCATTERV_BASE_ARGS,            mca_coll_base_module_t *module
-#define NEIGHBOR_ALLGATHER_ARGS  NEIGHBOR_ALLGATHER_BASE_ARGS,  mca_coll_base_module_t *module
-#define NEIGHBOR_ALLGATHERV_ARGS NEIGHBOR_ALLGATHERV_BASE_ARGS, mca_coll_base_module_t *module
-#define NEIGHBOR_ALLTOALL_ARGS   NEIGHBOR_ALLTOALL_BASE_ARGS,   mca_coll_base_module_t *module
-#define NEIGHBOR_ALLTOALLV_ARGS  NEIGHBOR_ALLTOALLV_BASE_ARGS,  mca_coll_base_module_t *module
-#define NEIGHBOR_ALLTOALLW_ARGS  NEIGHBOR_ALLTOALLW_BASE_ARGS,  mca_coll_base_module_t *module
-
-#define IALLGATHER_ARGS           ALLGATHER_BASE_ARGS,           ompi_request_t **request, mca_coll_base_module_t *module
-#define IALLGATHERV_ARGS          ALLGATHERV_BASE_ARGS,          ompi_request_t **request, mca_coll_base_module_t *module
-#define IALLREDUCE_ARGS           ALLREDUCE_BASE_ARGS,           ompi_request_t **request, mca_coll_base_module_t *module
-#define IALLTOALL_ARGS            ALLTOALL_BASE_ARGS,            ompi_request_t **request, mca_coll_base_module_t *module
-#define IALLTOALLV_ARGS           ALLTOALLV_BASE_ARGS,           ompi_request_t **request, mca_coll_base_module_t *module
-#define IALLTOALLW_ARGS           ALLTOALLW_BASE_ARGS,           ompi_request_t **request, mca_coll_base_module_t *module
-#define IBARRIER_ARGS             BARRIER_BASE_ARGS,             ompi_request_t **request, mca_coll_base_module_t *module
-#define IBCAST_ARGS               BCAST_BASE_ARGS,               ompi_request_t **request, mca_coll_base_module_t *module
-#define IEXSCAN_ARGS              EXSCAN_BASE_ARGS,              ompi_request_t **request, mca_coll_base_module_t *module
-#define IGATHER_ARGS              GATHER_BASE_ARGS,              ompi_request_t **request, mca_coll_base_module_t *module
-#define IGATHERV_ARGS             GATHERV_BASE_ARGS,             ompi_request_t **request, mca_coll_base_module_t *module
-#define IREDUCE_ARGS              REDUCE_BASE_ARGS,              ompi_request_t **request, mca_coll_base_module_t *module
-#define IREDUCESCATTER_ARGS       REDUCESCATTER_BASE_ARGS,       ompi_request_t **request, mca_coll_base_module_t *module
-#define IREDUCESCATTERBLOCK_ARGS  REDUCESCATTERBLOCK_BASE_ARGS,  ompi_request_t **request, mca_coll_base_module_t *module
-#define ISCAN_ARGS                SCAN_BASE_ARGS,                ompi_request_t **request, mca_coll_base_module_t *module
-#define ISCATTER_ARGS             SCATTER_BASE_ARGS,             ompi_request_t **request, mca_coll_base_module_t *module
-#define ISCATTERV_ARGS            SCATTERV_BASE_ARGS,            ompi_request_t **request, mca_coll_base_module_t *module
-#define INEIGHBOR_ALLGATHER_ARGS  NEIGHBOR_ALLGATHER_BASE_ARGS,  ompi_request_t **request, mca_coll_base_module_t *module
-#define INEIGHBOR_ALLGATHERV_ARGS NEIGHBOR_ALLGATHERV_BASE_ARGS, ompi_request_t **request, mca_coll_base_module_t *module
-#define INEIGHBOR_ALLTOALL_ARGS   NEIGHBOR_ALLTOALL_BASE_ARGS,   ompi_request_t **request, mca_coll_base_module_t *module
-#define INEIGHBOR_ALLTOALLV_ARGS  NEIGHBOR_ALLTOALLV_BASE_ARGS,  ompi_request_t **request, mca_coll_base_module_t *module
-#define INEIGHBOR_ALLTOALLW_ARGS  NEIGHBOR_ALLTOALLW_BASE_ARGS,  ompi_request_t **request, mca_coll_base_module_t *module
-
-#define ALLGATHER_INIT_ARGS           ALLGATHER_BASE_ARGS,           ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define ALLGATHERV_INIT_ARGS          ALLGATHERV_BASE_ARGS,          ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define ALLREDUCE_INIT_ARGS           ALLREDUCE_BASE_ARGS,           ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define ALLTOALL_INIT_ARGS            ALLTOALL_BASE_ARGS,            ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define ALLTOALLV_INIT_ARGS           ALLTOALLV_BASE_ARGS,           ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define ALLTOALLW_INIT_ARGS           ALLTOALLW_BASE_ARGS,           ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define BARRIER_INIT_ARGS             BARRIER_BASE_ARGS,             ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define BCAST_INIT_ARGS               BCAST_BASE_ARGS,               ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define EXSCAN_INIT_ARGS              EXSCAN_BASE_ARGS,              ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define GATHER_INIT_ARGS              GATHER_BASE_ARGS,              ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define GATHERV_INIT_ARGS             GATHERV_BASE_ARGS,             ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define REDUCE_INIT_ARGS              REDUCE_BASE_ARGS,              ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define REDUCESCATTER_INIT_ARGS       REDUCESCATTER_BASE_ARGS,       ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define REDUCESCATTERBLOCK_INIT_ARGS  REDUCESCATTERBLOCK_BASE_ARGS,  ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define SCAN_INIT_ARGS                SCAN_BASE_ARGS,                ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define SCATTER_INIT_ARGS             SCATTER_BASE_ARGS,             ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define SCATTERV_INIT_ARGS            SCATTERV_BASE_ARGS,            ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define NEIGHBOR_ALLGATHER_INIT_ARGS  NEIGHBOR_ALLGATHER_BASE_ARGS,  ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define NEIGHBOR_ALLGATHERV_INIT_ARGS NEIGHBOR_ALLGATHERV_BASE_ARGS, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define NEIGHBOR_ALLTOALL_INIT_ARGS   NEIGHBOR_ALLTOALL_BASE_ARGS,   ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define NEIGHBOR_ALLTOALLV_INIT_ARGS  NEIGHBOR_ALLTOALLV_BASE_ARGS,  ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-#define NEIGHBOR_ALLTOALLW_INIT_ARGS  NEIGHBOR_ALLTOALLW_BASE_ARGS,  ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module
-
-#define ALLGATHER_BASE_ARG_NAMES           sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm
-#define ALLGATHERV_BASE_ARG_NAMES          sendbuf, sendcount, sendtype, recvbuf, recvcounts, displs, recvtype, comm
-#define ALLREDUCE_BASE_ARG_NAMES           sendbuf, recvbuf, count, datatype, op, comm
-#define ALLTOALL_BASE_ARG_NAMES            sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm
-#define ALLTOALLV_BASE_ARG_NAMES           sendbuf, sendcounts, sdispls, sendtype, recvbuf, recvcounts, rdispls, recvtype, comm
-#define ALLTOALLW_BASE_ARG_NAMES           sendbuf, sendcounts, sdispls, sendtypes, recvbuf, recvcounts, rdispls, recvtypes, comm
-#define BARRIER_BASE_ARG_NAMES             comm
-#define BCAST_BASE_ARG_NAMES               buffer, count, datatype, root, comm
-#define EXSCAN_BASE_ARG_NAMES              sendbuf, recvbuf, count, datatype, op, comm
-#define GATHER_BASE_ARG_NAMES              sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm
-#define GATHERV_BASE_ARG_NAMES             sendbuf, sendcount, sendtype, recvbuf, recvcounts, displs, recvtype, root, comm
-#define REDUCE_BASE_ARG_NAMES              sendbuf, recvbuf, count, datatype, op, root, comm
-#define REDUCESCATTER_BASE_ARG_NAMES       sendbuf, recvbuf, recvcounts, datatype, op, comm
-#define REDUCESCATTERBLOCK_BASE_ARG_NAMES  sendbuf, recvbuf, recvcount, datatype, op, comm
-#define SCAN_BASE_ARG_NAMES                sendbuf, recvbuf, count, datatype, op, comm
-#define SCATTER_BASE_ARG_NAMES             sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm
-#define SCATTERV_BASE_ARG_NAMES            sendbuf, sendcounts, displs, sendtype, recvbuf, recvcount, recvtype, root, comm
-#define NEIGHBOR_ALLGATHER_BASE_ARG_NAMES  sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm
-#define NEIGHBOR_ALLGATHERV_BASE_ARG_NAMES sendbuf, sendcount, sendtype, recvbuf, recvcounts, displs, recvtype, comm
-#define NEIGHBOR_ALLTOALL_BASE_ARG_NAMES   sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm
-#define NEIGHBOR_ALLTOALLV_BASE_ARG_NAMES  sendbuf, sendcounts, sdispls, sendtype, recvbuf, recvcounts, rdispls, recvtype, comm
-#define NEIGHBOR_ALLTOALLW_BASE_ARG_NAMES  sendbuf, sendcounts, sdispls, sendtypes, recvbuf, recvcounts, rdispls, recvtypes, comm
-/* end defined arg lists to simply auto inclusion of user overriding decision functions */
 
 BEGIN_C_DECLS
 
 /* All Gather */
-int ompi_coll_base_allgather_intra_recursivedoubling(ALLGATHER_ARGS);
-int ompi_coll_base_allgather_intra_sparbit(ALLGATHER_ARGS);
-int ompi_coll_base_allgather_intra_ring(ALLGATHER_ARGS);
-int ompi_coll_base_allgather_intra_neighborexchange(ALLGATHER_ARGS);
-int ompi_coll_base_allgather_intra_basic_linear(ALLGATHER_ARGS);
-int ompi_coll_base_allgather_intra_two_procs(ALLGATHER_ARGS);
-int ompi_coll_base_allgather_intra_k_bruck(ALLGATHER_ARGS, int radix);
-int ompi_coll_base_allgather_direct_messaging(ALLGATHER_ARGS);
+int ompi_coll_base_allgather_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgather_intra_sparbit(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgather_intra_ring(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgather_intra_neighborexchange(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgather_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgather_intra_two_procs(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgather_intra_k_bruck(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, int radix);
+int ompi_coll_base_allgather_direct_messaging(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* All GatherV */
-int ompi_coll_base_allgatherv_intra_bruck(ALLGATHERV_ARGS);
-int ompi_coll_base_allgatherv_intra_sparbit(ALLGATHERV_ARGS);
-int ompi_coll_base_allgatherv_intra_ring(ALLGATHERV_ARGS);
-int ompi_coll_base_allgatherv_intra_neighborexchange(ALLGATHERV_ARGS);
-int ompi_coll_base_allgatherv_intra_basic_default(ALLGATHERV_ARGS);
-int ompi_coll_base_allgatherv_intra_two_procs(ALLGATHERV_ARGS);
+int ompi_coll_base_allgatherv_intra_bruck(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgatherv_intra_sparbit(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgatherv_intra_ring(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgatherv_intra_neighborexchange(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgatherv_intra_basic_default(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allgatherv_intra_two_procs(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* All Reduce */
-int ompi_coll_base_allreduce_intra_nonoverlapping(ALLREDUCE_ARGS);
-int ompi_coll_base_allreduce_intra_recursivedoubling(ALLREDUCE_ARGS);
-int ompi_coll_base_allreduce_intra_ring(ALLREDUCE_ARGS);
-int ompi_coll_base_allreduce_intra_ring_segmented(ALLREDUCE_ARGS, uint32_t segsize);
-int ompi_coll_base_allreduce_intra_basic_linear(ALLREDUCE_ARGS);
-int ompi_coll_base_allreduce_intra_redscat_allgather(ALLREDUCE_ARGS);
-int ompi_coll_base_allreduce_intra_allgather_reduce(ALLREDUCE_ARGS);
+int ompi_coll_base_allreduce_intra_nonoverlapping(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allreduce_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allreduce_intra_ring(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allreduce_intra_ring_segmented(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize);
+int ompi_coll_base_allreduce_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allreduce_intra_redscat_allgather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_allreduce_intra_allgather_reduce(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* AlltoAll */
-int ompi_coll_base_alltoall_intra_pairwise(ALLTOALL_ARGS);
-int ompi_coll_base_alltoall_intra_bruck(ALLTOALL_ARGS);
-int ompi_coll_base_alltoall_intra_basic_linear(ALLTOALL_ARGS);
-int ompi_coll_base_alltoall_intra_linear_sync(ALLTOALL_ARGS, int max_requests);
-int ompi_coll_base_alltoall_intra_two_procs(ALLTOALL_ARGS);
+int ompi_coll_base_alltoall_intra_pairwise(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_alltoall_intra_bruck(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_alltoall_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_alltoall_intra_linear_sync(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, int max_requests);
+int ompi_coll_base_alltoall_intra_two_procs(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 int mca_coll_base_alltoall_intra_basic_inplace(const void *rbuf, size_t rcount,
                                                struct ompi_datatype_t *rdtype,
                                                struct ompi_communicator_t *comm,
                                                mca_coll_base_module_t *module);  /* special version for INPLACE */
 
 /* AlltoAllV */
-int ompi_coll_base_alltoallv_intra_pairwise(ALLTOALLV_ARGS);
-int ompi_coll_base_alltoallv_intra_basic_linear(ALLTOALLV_ARGS);
+int ompi_coll_base_alltoallv_intra_pairwise(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_alltoallv_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 int mca_coll_base_alltoallv_intra_basic_inplace(const void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
                                                 struct ompi_datatype_t *rdtype,
                                                 struct ompi_communicator_t *comm,
@@ -235,95 +120,84 @@ int mca_coll_base_alltoallv_intra_basic_inplace(const void *rbuf, ompi_count_arr
 /* AlltoAllW */
 
 /* Barrier */
-int ompi_coll_base_barrier_intra_doublering(BARRIER_ARGS);
-int ompi_coll_base_barrier_intra_recursivedoubling(BARRIER_ARGS);
-int ompi_coll_base_barrier_intra_bruck(BARRIER_ARGS);
-int ompi_coll_base_barrier_intra_two_procs(BARRIER_ARGS);
-int ompi_coll_base_barrier_intra_tree(BARRIER_ARGS);
-int ompi_coll_base_barrier_intra_basic_linear(BARRIER_ARGS);
+int ompi_coll_base_barrier_intra_doublering(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_barrier_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_barrier_intra_bruck(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_barrier_intra_two_procs(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_barrier_intra_tree(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_barrier_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Bcast */
-int ompi_coll_base_bcast_intra_generic(BCAST_ARGS, uint32_t count_by_segment, ompi_coll_tree_t* tree);
-int ompi_coll_base_bcast_intra_basic_linear(BCAST_ARGS);
-int ompi_coll_base_bcast_intra_chain(BCAST_ARGS, uint32_t segsize, int32_t chains);
-int ompi_coll_base_bcast_intra_pipeline(BCAST_ARGS, uint32_t segsize);
-int ompi_coll_base_bcast_intra_binomial(BCAST_ARGS, uint32_t segsize);
-int ompi_coll_base_bcast_intra_bintree(BCAST_ARGS, uint32_t segsize);
-int ompi_coll_base_bcast_intra_split_bintree(BCAST_ARGS, uint32_t segsize);
-int ompi_coll_base_bcast_intra_knomial(BCAST_ARGS, uint32_t segsize, int radix);
-int ompi_coll_base_bcast_intra_scatter_allgather(BCAST_ARGS, uint32_t segsize);
-int ompi_coll_base_bcast_intra_scatter_allgather_ring(BCAST_ARGS, uint32_t segsize);
+int ompi_coll_base_bcast_intra_generic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t count_by_segment, ompi_coll_tree_t* tree);
+int ompi_coll_base_bcast_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_bcast_intra_chain(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize, int32_t chains);
+int ompi_coll_base_bcast_intra_pipeline(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize);
+int ompi_coll_base_bcast_intra_binomial(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize);
+int ompi_coll_base_bcast_intra_bintree(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize);
+int ompi_coll_base_bcast_intra_split_bintree(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize);
+int ompi_coll_base_bcast_intra_knomial(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize, int radix);
+int ompi_coll_base_bcast_intra_scatter_allgather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize);
+int ompi_coll_base_bcast_intra_scatter_allgather_ring(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize);
 
 /* Exscan */
-int ompi_coll_base_exscan_intra_recursivedoubling(EXSCAN_ARGS);
-int ompi_coll_base_exscan_intra_linear(EXSCAN_ARGS);
-int ompi_coll_base_exscan_intra_recursivedoubling(EXSCAN_ARGS);
+int ompi_coll_base_exscan_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_exscan_intra_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_exscan_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Gather */
-int ompi_coll_base_gather_intra_basic_linear(GATHER_ARGS);
-int ompi_coll_base_gather_intra_binomial(GATHER_ARGS);
-int ompi_coll_base_gather_intra_linear_sync(GATHER_ARGS, int first_segment_size);
+int ompi_coll_base_gather_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_gather_intra_binomial(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_gather_intra_linear_sync(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, int first_segment_size);
 
 /* GatherV */
 
 /* Reduce */
-int ompi_coll_base_reduce_generic(REDUCE_ARGS, ompi_coll_tree_t* tree, size_t count_by_segment, int max_outstanding_reqs);
-int ompi_coll_base_reduce_intra_basic_linear(REDUCE_ARGS);
-int ompi_coll_base_reduce_intra_chain(REDUCE_ARGS, uint32_t segsize, int fanout, int max_outstanding_reqs );
-int ompi_coll_base_reduce_intra_pipeline(REDUCE_ARGS, uint32_t segsize, int max_outstanding_reqs );
-int ompi_coll_base_reduce_intra_binary(REDUCE_ARGS, uint32_t segsize, int max_outstanding_reqs );
-int ompi_coll_base_reduce_intra_binomial(REDUCE_ARGS, uint32_t segsize, int max_outstanding_reqs );
-int ompi_coll_base_reduce_intra_in_order_binary(REDUCE_ARGS, uint32_t segsize, int max_outstanding_reqs );
-int ompi_coll_base_reduce_intra_redscat_gather(REDUCE_ARGS);
-int ompi_coll_base_reduce_intra_knomial(REDUCE_ARGS, uint32_t segsize, int max_outstanding_reqs, int radix);
+int ompi_coll_base_reduce_generic(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, ompi_coll_tree_t* tree, size_t count_by_segment, int max_outstanding_reqs);
+int ompi_coll_base_reduce_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_reduce_intra_chain(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize, int fanout, int max_outstanding_reqs );
+int ompi_coll_base_reduce_intra_pipeline(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize, int max_outstanding_reqs );
+int ompi_coll_base_reduce_intra_binary(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize, int max_outstanding_reqs );
+int ompi_coll_base_reduce_intra_binomial(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize, int max_outstanding_reqs );
+int ompi_coll_base_reduce_intra_in_order_binary(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize, int max_outstanding_reqs );
+int ompi_coll_base_reduce_intra_redscat_gather(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_reduce_intra_knomial(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, uint32_t segsize, int max_outstanding_reqs, int radix);
 
 /* Reduce_scatter */
-int ompi_coll_base_reduce_scatter_intra_nonoverlapping(REDUCESCATTER_ARGS);
-int ompi_coll_base_reduce_scatter_intra_basic_recursivehalving(REDUCESCATTER_ARGS);
-int ompi_coll_base_reduce_scatter_intra_ring(REDUCESCATTER_ARGS);
-int ompi_coll_base_reduce_scatter_intra_butterfly(REDUCESCATTER_ARGS);
+int ompi_coll_base_reduce_scatter_intra_nonoverlapping(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_reduce_scatter_intra_basic_recursivehalving(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_reduce_scatter_intra_ring(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_reduce_scatter_intra_butterfly(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Reduce_scatter_block */
-int ompi_coll_base_reduce_scatter_block_basic_linear(REDUCESCATTERBLOCK_ARGS);
-int ompi_coll_base_reduce_scatter_block_intra_recursivedoubling(REDUCESCATTERBLOCK_ARGS);
-int ompi_coll_base_reduce_scatter_block_intra_recursivehalving(REDUCESCATTERBLOCK_ARGS);
-int ompi_coll_base_reduce_scatter_block_intra_butterfly(REDUCESCATTERBLOCK_ARGS);
+int ompi_coll_base_reduce_scatter_block_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_reduce_scatter_block_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_reduce_scatter_block_intra_recursivehalving(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_reduce_scatter_block_intra_butterfly(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Scan */
-int ompi_coll_base_scan_intra_recursivedoubling(SCAN_ARGS);
-int ompi_coll_base_scan_intra_linear(SCAN_ARGS);
-int ompi_coll_base_scan_intra_recursivedoubling(SCAN_ARGS);
+int ompi_coll_base_scan_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_scan_intra_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_scan_intra_recursivedoubling(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Scatter */
-int ompi_coll_base_scatter_intra_basic_linear(SCATTER_ARGS);
-int ompi_coll_base_scatter_intra_binomial(SCATTER_ARGS);
-int ompi_coll_base_scatter_intra_linear_nb(SCATTER_ARGS, int max_reqs);
+int ompi_coll_base_scatter_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_scatter_intra_binomial(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_scatter_intra_linear_nb(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, int max_reqs);
 
 /* ScatterV */
 
-/* Reduce_local */
-int mca_coll_base_reduce_local(const void *inbuf, void *inoutbuf, size_t count,
-                               struct ompi_datatype_t * dtype, struct ompi_op_t * op,
-                               mca_coll_base_module_t *module);
+/* Reduce_local: inbuf/inoutbuf/count/dtype in args->src/dst.info, op in
+ * args->op. comm is unused (callers pass comm_self). */
+int mca_coll_base_reduce_local(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 int mca_coll_base_revoke_local(struct ompi_communicator_t *comm);
 
 #if OPAL_ENABLE_FT_MPI
-/* Agreement */
-int ompi_coll_base_agree_noft(void *contrib,
-                              size_t dt_count,
-                              struct ompi_datatype_t *dt,
-                              struct ompi_op_t *op,
-                              struct ompi_group_t **group, bool update_grp,
-                              struct ompi_communicator_t* comm,
-                              mca_coll_base_module_t *module);
-int ompi_coll_base_iagree_noft(void *contrib,
-                               size_t dt_count,
-                               struct ompi_datatype_t *dt,
-                               struct ompi_op_t *op,
-                               struct ompi_group_t **group, bool update_grp,
-                               struct ompi_communicator_t* comm,
-                               ompi_request_t **request,
+/* Agreement: contrib/dt_count/dt live in args->src.info, op in args->op,
+ * the failed group in args->failedgroup, and update_grp is conveyed by
+ * OMPI_COLL_ARGS_FLAG_UPDATE_FAILEDGROUP in args->flags. */
+int ompi_coll_base_agree_noft(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int ompi_coll_base_iagree_noft(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request,
                                mca_coll_base_module_t *module);
 #endif /* OPAL_ENABLE_FT_MPI */
 

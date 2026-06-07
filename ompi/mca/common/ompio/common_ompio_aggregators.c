@@ -19,6 +19,7 @@
  * Copyright (c) 2023      Jeffrey M. Squyres.  All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -263,12 +264,10 @@ int mca_common_ompio_fview_based_grouping(ompio_file_t *fh,
     }
     
     //Allgather start offsets across processes in a group on aggregator
-    ret = fh->f_comm->c_coll->coll_allgather (start_offset_len,
-                                             3,
-                                             OMPI_OFFSET_DATATYPE,
-                                             start_offsets_lens,
-                                             3,
-                                             OMPI_OFFSET_DATATYPE,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_allgather(&coll_args, start_offset_len, 3, OMPI_OFFSET_DATATYPE,
+                             start_offsets_lens, 3, OMPI_OFFSET_DATATYPE);
+    ret = fh->f_comm->c_coll->coll_allgather (&coll_args,
                                              fh->f_comm,
                                              fh->f_comm->c_coll->coll_allgather_module);
     if ( OMPI_SUCCESS != ret ) {
@@ -613,11 +612,9 @@ int mca_common_ompio_create_groups(ompio_file_t *fh,
     if(fh->f_rank == fh->f_procs_in_group[0]){
 	   final_aggr = 1;
     }
-    ret = fh->f_comm->c_coll->coll_allreduce (&final_aggr,
-                                             &final_num_aggrs,
-                                             1,
-                                             MPI_INT,
-                                             MPI_SUM,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_allreduce(&coll_args, &final_aggr, &final_num_aggrs, 1, MPI_INT, MPI_SUM);
+    ret = fh->f_comm->c_coll->coll_allreduce (&coll_args,
                                              fh->f_comm,
                                              fh->f_comm->c_coll->coll_allreduce_module);
     if ( OMPI_SUCCESS != ret ) {
@@ -630,12 +627,9 @@ int mca_common_ompio_create_groups(ompio_file_t *fh,
         opal_output(1,"mca_common_ompio_create_groups: could not allocate memory\n");
         goto exit;
     }
-    ret = fh->f_comm->c_coll->coll_allgather (&final_aggr,
-                                              1, 
-                                              MPI_INT,
-                                              tmp_final_aggrs,
-                                              1,
-                                              MPI_INT,
+    ompi_coll_args_allgather(&coll_args, &final_aggr, 1, MPI_INT,
+                             tmp_final_aggrs, 1, MPI_INT);
+    ret = fh->f_comm->c_coll->coll_allgather (&coll_args,
                                               fh->f_comm,
                                               fh->f_comm->c_coll->coll_allgather_module);
     if ( OMPI_SUCCESS != ret ) {

@@ -3,6 +3,7 @@
  * Copyright (c) 2020-2022 Bull S.A.S. All rights reserved.
  * Copyright (c) 2024      Amazon.com, Inc. or its affiliates. All Rights Reserved.
  *
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -71,153 +72,66 @@ mca_coll_han_algorithm_id_to_name(int coll_id, int algorithm_id);
  * in coll_han_algorithms.c
  */
 
-int mca_coll_han_barrier_intra_simple(struct ompi_communicator_t *comm,
-                                      mca_coll_base_module_t *module);
+int mca_coll_han_barrier_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 /* Bcast */
-int mca_coll_han_bcast_intra_simple(void *buff,
-                                    size_t count,
-                                    struct ompi_datatype_t *dtype,
-                                    int root,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module);
-int mca_coll_han_bcast_intra(void *buff, size_t count, struct ompi_datatype_t *dtype, int root,
-                             struct ompi_communicator_t *comm, mca_coll_base_module_t * module);
+int mca_coll_han_bcast_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+int mca_coll_han_bcast_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Reduce */
 int
-mca_coll_han_reduce_intra_simple(const void *sbuf,
-                                 void* rbuf,
-                                 size_t count,
-                                 struct ompi_datatype_t *dtype,
-                                 ompi_op_t *op,
-                                 int root,
-                                 struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module);
+mca_coll_han_reduce_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 int
 mca_coll_han_reduce_reproducible_decision(struct ompi_communicator_t *comm,
                                           mca_coll_base_module_t *module);
 int
-mca_coll_han_reduce_reproducible(const void *sbuf,
-                                 void *rbuf,
-                                 size_t count,
-                                 struct ompi_datatype_t *dtype,
-                                 struct ompi_op_t *op,
-                                 int root,
-                                 struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module);
+mca_coll_han_reduce_reproducible(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_han_reduce_intra(const void *sbuf,
-                              void *rbuf,
-                              size_t count,
-                              struct ompi_datatype_t *dtype,
-                              ompi_op_t* op,
-                              int root,
-                              struct ompi_communicator_t *comm,
-                              mca_coll_base_module_t * module);
+int mca_coll_han_reduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Allreduce */
 int
-mca_coll_han_allreduce_intra_simple(const void *sbuf,
-                                    void *rbuf,
-                                    size_t count,
-                                    struct ompi_datatype_t *dtype,
-                                    struct ompi_op_t *op,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module);
+mca_coll_han_allreduce_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 int
 mca_coll_han_allreduce_reproducible_decision(struct ompi_communicator_t *comm,
                                              mca_coll_base_module_t *module);
 int
-mca_coll_han_allreduce_reproducible(const void *sbuf,
-                                    void *rbuf,
-                                    size_t count,
-                                    struct ompi_datatype_t *dtype,
-                                    struct ompi_op_t *op,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module);
+mca_coll_han_allreduce_reproducible(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
-int mca_coll_han_allreduce_intra(const void *sbuf,
-                                 void *rbuf,
-                                 size_t count,
-                                 struct ompi_datatype_t *dtype,
-                                 struct ompi_op_t *op,
-                                 struct ompi_communicator_t *comm, mca_coll_base_module_t * module);
+int mca_coll_han_allreduce_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Scatter */
 int
-mca_coll_han_scatter_intra(const void *sbuf, size_t scount,
-                           struct ompi_datatype_t *sdtype,
-                           void *rbuf, size_t rcount,
-                           struct ompi_datatype_t *rdtype,
-                           int root,
-                           struct ompi_communicator_t *comm, mca_coll_base_module_t * module);
+mca_coll_han_scatter_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 int
-mca_coll_han_scatter_intra_simple(const void *sbuf, size_t scount,
-                                  struct ompi_datatype_t *sdtype,
-                                  void *rbuf, size_t rcount,
-                                  struct ompi_datatype_t *rdtype,
-                                  int root,
-                                  struct ompi_communicator_t *comm,
-                                  mca_coll_base_module_t * module);
+mca_coll_han_scatter_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Scatterv */
 int
-mca_coll_han_scatterv_intra(const void *sbuf, ompi_count_array_t scounts,
-                            ompi_disp_array_t displs, struct ompi_datatype_t *sdtype,
-                            void *rbuf, size_t rcount,
-                            struct ompi_datatype_t *rdtype, 
-                            int root,
-                            struct ompi_communicator_t *comm,
-                            mca_coll_base_module_t *module);
+mca_coll_han_scatterv_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Gather */
 int
-mca_coll_han_gather_intra(const void *sbuf, size_t scount,
-                          struct ompi_datatype_t *sdtype,
-                          void *rbuf, size_t rcount,
-                          struct ompi_datatype_t *rdtype,
-                          int root,
-                          struct ompi_communicator_t *comm, mca_coll_base_module_t * module);
+mca_coll_han_gather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 int
-mca_coll_han_gather_intra_simple(const void *sbuf, size_t scount,
-                                 struct ompi_datatype_t *sdtype,
-                                 void *rbuf, size_t rcount,
-                                 struct ompi_datatype_t *rdtype,
-                                 int root,
-                                 struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module);
+mca_coll_han_gather_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Gatherv */
 int
-mca_coll_han_gatherv_intra(const void *sbuf, size_t scount, struct ompi_datatype_t *sdtype,
-                           void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t displs,
-                           struct ompi_datatype_t *rdtype, int root,
-                           struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
+mca_coll_han_gatherv_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Allgather */
 int
-mca_coll_han_allgather_intra(const void *sbuf, size_t scount,
-                             struct ompi_datatype_t *sdtype,
-                             void *rbuf, size_t rcount,
-                             struct ompi_datatype_t *rdtype,
-                             struct ompi_communicator_t *comm, mca_coll_base_module_t * module);
+mca_coll_han_allgather_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 int
-mca_coll_han_allgather_intra_simple(const void *sbuf, size_t scount,
-                                    struct ompi_datatype_t *sdtype,
-                                    void* rbuf, size_t rcount,
-                                    struct ompi_datatype_t *rdtype,
-                                    struct ompi_communicator_t *comm,
-                                    mca_coll_base_module_t *module);
+mca_coll_han_allgather_intra_simple(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Alltoall */
 int
-mca_coll_han_alltoall_using_smsc(ALLTOALL_BASE_ARGS,
-                                    mca_coll_base_module_t *module);
+mca_coll_han_alltoall_using_smsc(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 /* Alltoallv */
 int
-mca_coll_han_alltoallv_using_smsc(ALLTOALLV_BASE_ARGS,
-                                    mca_coll_base_module_t *module);
+mca_coll_han_alltoallv_using_smsc(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module);
 
 
 #endif

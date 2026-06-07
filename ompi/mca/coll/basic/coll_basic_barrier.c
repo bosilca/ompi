@@ -11,6 +11,7 @@
  *                         All rights reserved.
  * Copyright (c) 2012      Oak Ridge National Labs.  All rights reserved.
  * Copyright (c) 2015 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -38,8 +39,7 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_barrier_intra_log(struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module)
+mca_coll_basic_barrier_intra_log(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int i;
     int err;
@@ -120,13 +120,13 @@ mca_coll_basic_barrier_intra_log(struct ompi_communicator_t *comm,
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_barrier_inter_lin(struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module)
+mca_coll_basic_barrier_inter_lin(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int rank;
     int result;
 
     rank = ompi_comm_rank(comm);
-    return comm->c_coll->coll_allreduce(&rank, &result, 1, MPI_INT, MPI_MAX,
-                                       comm, comm->c_coll->coll_allreduce_module);
+    ompi_coll_args_t _ar;
+    ompi_coll_args_allreduce(&_ar, &rank, &result, 1, MPI_INT, MPI_MAX);
+    return comm->c_coll->coll_allreduce(&_ar, comm, comm->c_coll->coll_allreduce_module);
 }

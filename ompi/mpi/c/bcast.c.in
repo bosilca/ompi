@@ -14,6 +14,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -114,7 +115,9 @@ PROTOTYPE ERROR_CLASS bcast(BUFFER_OUT buffer, COUNT count, DATATYPE datatype,
 
     /* Invoke the coll component to perform the back-end operation */
 
-    err = comm->c_coll->coll_bcast(buffer, count, datatype, root, comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_bcast(&coll_args, buffer, count, datatype, root);
+    err = comm->c_coll->coll_bcast(&coll_args, comm,
                                   comm->c_coll->coll_bcast_module);
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);
 }

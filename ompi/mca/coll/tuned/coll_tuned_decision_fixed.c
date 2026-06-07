@@ -18,6 +18,7 @@
  * Copyright (c) 2019      Mellanox Technologies. All rights reserved.
  * Copyright (c) 2020-2025 Amazon.com, Inc. or its affiliates.
  *                         All Rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -52,11 +53,7 @@
  *  Returns:    - MPI_SUCCESS or error code
  */
 int
-ompi_coll_tuned_allreduce_intra_dec_fixed(const void *sbuf, void *rbuf, size_t count,
-                                          struct ompi_datatype_t *dtype,
-                                          struct ompi_op_t *op,
-                                          struct ompi_communicator_t *comm,
-                                          mca_coll_base_module_t *module)
+ompi_coll_tuned_allreduce_intra_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     size_t dsize, total_dsize;
     int communicator_size, alg;
@@ -64,8 +61,8 @@ ompi_coll_tuned_allreduce_intra_dec_fixed(const void *sbuf, void *rbuf, size_t c
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
         "ompi_coll_tuned_allreduce_intra_dec_fixed"));
 
-    ompi_datatype_type_size(dtype, &dsize);
-    total_dsize = dsize * (ptrdiff_t)count;
+    ompi_datatype_type_size(args->dst.info.datatype, &dsize);
+    total_dsize = dsize * (ptrdiff_t)args->dst.info.count;
 
     /** Algorithms:
      *  {1, "basic_linear"},
@@ -78,7 +75,7 @@ ompi_coll_tuned_allreduce_intra_dec_fixed(const void *sbuf, void *rbuf, size_t c
      * Currently, ring, segmented ring, and rabenseifner do not support
      * non-commutative operations.
      */
-    if( !ompi_op_is_commute(op) ) {
+    if( !ompi_op_is_commute(args->op) ) {
         if (communicator_size < 4) {
             if (total_dsize < 131072) {
                 alg = 3;
@@ -214,8 +211,7 @@ ompi_coll_tuned_allreduce_intra_dec_fixed(const void *sbuf, void *rbuf, size_t c
         }
     }
 
-    return ompi_coll_tuned_allreduce_intra_do_this (sbuf, rbuf, count, dtype, op,
-                                                    comm, module, alg, 0, 0);
+    return ompi_coll_tuned_allreduce_intra_do_this (args, comm, module, alg, 0, 0);
 }
 
 
@@ -231,21 +227,16 @@ ompi_coll_tuned_allreduce_intra_dec_fixed(const void *sbuf, void *rbuf, size_t c
  *  Returns:    - MPI_SUCCESS or error code
  */
 int
-ompi_coll_tuned_allreduce_intra_disjoint_dec_fixed(const void *sbuf, void *rbuf, size_t count,
-                                                   struct ompi_datatype_t *dtype,
-                                                   struct ompi_op_t *op,
-                                                   struct ompi_communicator_t *comm,
-                                                   mca_coll_base_module_t *module)
+ompi_coll_tuned_allreduce_intra_disjoint_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
-
     size_t dsize, total_dsize;
     int communicator_size, alg;
     communicator_size = ompi_comm_size(comm);
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
         "ompi_coll_tuned_allreduce_intra_disjoint_dec_fixed"));
 
-    ompi_datatype_type_size(dtype, &dsize);
-    total_dsize = dsize * (ptrdiff_t)count;
+    ompi_datatype_type_size(args->dst.info.datatype, &dsize);
+    total_dsize = dsize * (ptrdiff_t)args->dst.info.count;
 
     /** Algorithms:
      *  {1, "basic_linear"},
@@ -259,7 +250,7 @@ ompi_coll_tuned_allreduce_intra_disjoint_dec_fixed(const void *sbuf, void *rbuf,
      * Currently, ring, segmented ring, and rabenseifner do not support
      * non-commutative operations.
      */
-    if( !ompi_op_is_commute(op) ) {
+    if( !ompi_op_is_commute(args->op) ) {
         if (communicator_size == 2) {
             alg = 3;
         } else if (communicator_size < 4) {
@@ -401,8 +392,7 @@ ompi_coll_tuned_allreduce_intra_disjoint_dec_fixed(const void *sbuf, void *rbuf,
         }
     }
 
-    return ompi_coll_tuned_allreduce_intra_do_this (sbuf, rbuf, count, dtype, op,
-                                                    comm, module, alg, 0, 0);
+    return ompi_coll_tuned_allreduce_intra_do_this (args, comm, module, alg, 0, 0);
 }
 
                            
@@ -414,23 +404,18 @@ ompi_coll_tuned_allreduce_intra_disjoint_dec_fixed(const void *sbuf, void *rbuf,
  *	Returns:	- MPI_SUCCESS or error code
  */
 
-int ompi_coll_tuned_alltoall_intra_dec_fixed(const void *sbuf, size_t scount,
-                                             struct ompi_datatype_t *sdtype,
-                                             void* rbuf, size_t rcount,
-                                             struct ompi_datatype_t *rdtype,
-                                             struct ompi_communicator_t *comm,
-                                             mca_coll_base_module_t *module)
+int ompi_coll_tuned_alltoall_intra_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int communicator_size, alg;
     size_t dsize, total_dsize;
 
     communicator_size = ompi_comm_size(comm);
-    if (MPI_IN_PLACE != sbuf) {
-        ompi_datatype_type_size(sdtype, &dsize);
+    if (MPI_IN_PLACE != args->src.info.buffer) {
+        ompi_datatype_type_size(args->src.info.datatype, &dsize);
     } else {
-        ompi_datatype_type_size(rdtype, &dsize);
+        ompi_datatype_type_size(args->dst.info.datatype, &dsize);
     }
-    total_dsize = dsize * (ptrdiff_t)scount;
+    total_dsize = dsize * (ptrdiff_t)args->src.info.count;
 
     /** Algorithms:
      *  {1, "linear"},
@@ -593,9 +578,7 @@ int ompi_coll_tuned_alltoall_intra_dec_fixed(const void *sbuf, size_t scount,
         }
     }
 
-    return ompi_coll_tuned_alltoall_intra_do_this (sbuf, scount, sdtype,
-                                                   rbuf, rcount, rdtype,
-                                                   comm, module,
+    return ompi_coll_tuned_alltoall_intra_do_this (args, comm, module,
                                                    alg, 0, 0, ompi_coll_tuned_alltoall_max_requests);
 }
 
@@ -604,12 +587,7 @@ int ompi_coll_tuned_alltoall_intra_dec_fixed(const void *sbuf, size_t scount,
  *      Accepts:        - same arguments as MPI_Alltoallv()
  *      Returns:        - MPI_SUCCESS or error code
  */
-int ompi_coll_tuned_alltoallv_intra_dec_fixed(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps,
-                                              struct ompi_datatype_t *sdtype,
-                                              void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                                              struct ompi_datatype_t *rdtype,
-                                              struct ompi_communicator_t *comm,
-                                              mca_coll_base_module_t *module)
+int ompi_coll_tuned_alltoallv_intra_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int communicator_size, alg;
     communicator_size = ompi_comm_size(comm);
@@ -637,9 +615,7 @@ int ompi_coll_tuned_alltoallv_intra_dec_fixed(const void *sbuf, ompi_count_array
 		alg = 1;
     }
 
-    return ompi_coll_tuned_alltoallv_intra_do_this (sbuf, scounts, sdisps, sdtype,
-                                                    rbuf, rcounts, rdisps, rdtype,
-                                                    comm, module,
+    return ompi_coll_tuned_alltoallv_intra_do_this (args, comm, module,
                                                     alg);
 }
 
@@ -651,8 +627,7 @@ int ompi_coll_tuned_alltoallv_intra_dec_fixed(const void *sbuf, ompi_count_array
  *	Accepts:	- same arguments as MPI_Barrier()
  *	Returns:	- MPI_SUCCESS or error code (passed from the barrier implementation)
  */
-int ompi_coll_tuned_barrier_intra_dec_fixed(struct ompi_communicator_t *comm,
-                                            mca_coll_base_module_t *module)
+int ompi_coll_tuned_barrier_intra_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int communicator_size, alg;
     communicator_size = ompi_comm_size(comm);
@@ -688,7 +663,7 @@ int ompi_coll_tuned_barrier_intra_dec_fixed(struct ompi_communicator_t *comm,
         alg = 4;
     }
 
-    return ompi_coll_tuned_barrier_intra_do_this (comm, module,
+    return ompi_coll_tuned_barrier_intra_do_this (args, comm, module,
                                                   alg, 0, 0);
 }
 
@@ -700,21 +675,18 @@ int ompi_coll_tuned_barrier_intra_dec_fixed(struct ompi_communicator_t *comm,
  *	Accepts:	- same arguments as MPI_Bcast()
  *	Returns:	- MPI_SUCCESS or error code (passed from the bcast implementation)
  */
-int ompi_coll_tuned_bcast_intra_dec_fixed(void *buff, size_t count,
-                                          struct ompi_datatype_t *datatype, int root,
-                                          struct ompi_communicator_t *comm,
-                                          mca_coll_base_module_t *module)
+int ompi_coll_tuned_bcast_intra_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     size_t total_dsize, dsize;
     int communicator_size, alg;
 	communicator_size = ompi_comm_size(comm);
 
-    ompi_datatype_type_size(datatype, &dsize);
-    total_dsize = dsize * (unsigned long)count;
+    ompi_datatype_type_size(args->src.info.datatype, &dsize);
+    total_dsize = dsize * (unsigned long)args->src.info.count;
 
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
         "ompi_coll_tuned_bcast_intra_dec_fixed root %d rank %d com_size %d",
-        root, ompi_comm_rank(comm), communicator_size));
+        args->root, ompi_comm_rank(comm), communicator_size));
 
     /** Algorithms:
      *  {1, "basic_linear"},
@@ -837,8 +809,7 @@ int ompi_coll_tuned_bcast_intra_dec_fixed(void *buff, size_t count,
         }
     }
 
-    return ompi_coll_tuned_bcast_intra_do_this (buff, count, datatype, root,
-                                                comm, module,
+    return ompi_coll_tuned_bcast_intra_do_this (args, comm, module,
                                                 alg, 0, 0);
 }
 
@@ -850,21 +821,18 @@ int ompi_coll_tuned_bcast_intra_dec_fixed(void *buff, size_t count,
  *	Accepts:	- same arguments as MPI_Bcast()
  *	Returns:	- MPI_SUCCESS or error code (passed from the bcast implementation)
  */
-int ompi_coll_tuned_bcast_intra_disjoint_dec_fixed(void *buff, size_t count,
-                                                   struct ompi_datatype_t *datatype, int root,
-                                                   struct ompi_communicator_t *comm,
-                                                   mca_coll_base_module_t *module)
+int ompi_coll_tuned_bcast_intra_disjoint_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     size_t total_dsize, dsize;
     int communicator_size, alg;
 	communicator_size = ompi_comm_size(comm);
 
-    ompi_datatype_type_size(datatype, &dsize);
-    total_dsize = dsize * (unsigned long)count;
+    ompi_datatype_type_size(args->src.info.datatype, &dsize);
+    total_dsize = dsize * (unsigned long)args->src.info.count;
 
     OPAL_OUTPUT((ompi_coll_tuned_stream, "ompi_coll_tuned_bcast_intra_disjoint_dec_fixed"
                  " root %d rank %d com_size %d",
-                 root, ompi_comm_rank(comm), communicator_size));
+                 args->root, ompi_comm_rank(comm), communicator_size));
 
     /** Algorithms:
      *  {1, "basic_linear"},
@@ -909,8 +877,7 @@ int ompi_coll_tuned_bcast_intra_disjoint_dec_fixed(void *buff, size_t count,
         }
     }
 
-    return ompi_coll_tuned_bcast_intra_do_this (buff, count, datatype, root,
-                                                comm, module,
+    return ompi_coll_tuned_bcast_intra_do_this (args, comm, module,
                                                 alg, 0, 0);
 }
 
@@ -923,11 +890,7 @@ int ompi_coll_tuned_bcast_intra_disjoint_dec_fixed(void *buff, size_t count,
  *	Returns:	- MPI_SUCCESS or error code (passed from the reduce implementation)
  *
  */
-int ompi_coll_tuned_reduce_intra_dec_fixed( const void *sendbuf, void *recvbuf,
-                                            size_t count, struct ompi_datatype_t* datatype,
-                                            struct ompi_op_t* op, int root,
-                                            struct ompi_communicator_t* comm,
-                                            mca_coll_base_module_t *module)
+int ompi_coll_tuned_reduce_intra_dec_fixed( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module )
 {
     int communicator_size, alg;
     size_t total_dsize, dsize;
@@ -936,10 +899,10 @@ int ompi_coll_tuned_reduce_intra_dec_fixed( const void *sendbuf, void *recvbuf,
 
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
         "ompi_coll_tuned_reduce_intra_dec_fixed root %d rank %d com_size %d",
-        root, ompi_comm_rank(comm), communicator_size));
+        args->root, ompi_comm_rank(comm), communicator_size));
 
-    ompi_datatype_type_size(datatype, &dsize);
-    total_dsize = dsize * (ptrdiff_t)count;   /* needed for decision */
+    ompi_datatype_type_size(args->dst.info.datatype, &dsize);
+    total_dsize = dsize * (ptrdiff_t)args->dst.info.count;   /* needed for decision */
 
     /** Algorithms:
      *  {1, "linear"},
@@ -953,7 +916,7 @@ int ompi_coll_tuned_reduce_intra_dec_fixed( const void *sendbuf, void *recvbuf,
      * Currently, only linear and in-order binary tree algorithms are
      * capable of non commutative ops.
      */
-    if( !ompi_op_is_commute(op) ) {
+    if( !ompi_op_is_commute(args->op) ) {
         if (communicator_size < 4) {
             if (total_dsize < 8) {
                 alg = 6;
@@ -1074,8 +1037,7 @@ int ompi_coll_tuned_reduce_intra_dec_fixed( const void *sendbuf, void *recvbuf,
     }
 
     int faninout = 2;
-    return  ompi_coll_tuned_reduce_intra_do_this (sendbuf, recvbuf, count, datatype,
-                                                  op, root, comm, module,
+    return  ompi_coll_tuned_reduce_intra_do_this (args, comm, module,
                                                   alg, faninout, 0, 0);
 }
 
@@ -1087,12 +1049,7 @@ int ompi_coll_tuned_reduce_intra_dec_fixed( const void *sendbuf, void *recvbuf,
  *	Returns:	- MPI_SUCCESS or error code (passed from
  *                        the reduce scatter implementation)
  */
-int ompi_coll_tuned_reduce_scatter_intra_dec_fixed( const void *sbuf, void *rbuf,
-                                                    ompi_count_array_t rcounts,
-                                                    struct ompi_datatype_t *dtype,
-                                                    struct ompi_op_t *op,
-                                                    struct ompi_communicator_t *comm,
-                                                    mca_coll_base_module_t *module)
+int ompi_coll_tuned_reduce_scatter_intra_dec_fixed( ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module )
 {
     int communicator_size, i, alg;
     size_t total_dsize, dsize;
@@ -1101,10 +1058,10 @@ int ompi_coll_tuned_reduce_scatter_intra_dec_fixed( const void *sbuf, void *rbuf
         "ompi_coll_tuned_reduce_scatter_intra_dec_fixed"));
 
     communicator_size = ompi_comm_size(comm);
-    ompi_datatype_type_size(dtype, &dsize);
+    ompi_datatype_type_size(args->dst.info_v.datatype, &dsize);
     total_dsize = 0;
     for (i = 0; i < communicator_size; i++) {
-        total_dsize += ompi_count_array_get(rcounts, i);
+        total_dsize += ompi_count_array_get(args->dst.info_v.counts, i);
     }
     total_dsize *= dsize;
 
@@ -1117,7 +1074,7 @@ int ompi_coll_tuned_reduce_scatter_intra_dec_fixed( const void *sbuf, void *rbuf
      * Non commutative algorithm capability needs re-investigation.
      * Defaulting to non overlapping for non commutative ops.
      */
-    if (!ompi_op_is_commute(op)) {
+    if (!ompi_op_is_commute(args->op)) {
         alg = 1;
     } else {
         if (communicator_size < 4) {
@@ -1223,8 +1180,7 @@ int ompi_coll_tuned_reduce_scatter_intra_dec_fixed( const void *sbuf, void *rbuf
         }
     }
 
-    return  ompi_coll_tuned_reduce_scatter_intra_do_this (sbuf, rbuf, rcounts, dtype,
-                                                          op, comm, module,
+    return  ompi_coll_tuned_reduce_scatter_intra_do_this (args, comm, module,
                                                           alg, 0, 0);
 }
 
@@ -1236,12 +1192,7 @@ int ompi_coll_tuned_reduce_scatter_intra_dec_fixed( const void *sbuf, void *rbuf
  *	Returns:	- MPI_SUCCESS or error code (passed from
  *                        the reduce scatter implementation)
  */
-int ompi_coll_tuned_reduce_scatter_block_intra_dec_fixed(const void *sbuf, void *rbuf,
-                                                         size_t rcount,
-                                                         struct ompi_datatype_t *dtype,
-                                                         struct ompi_op_t *op,
-                                                         struct ompi_communicator_t *comm,
-                                                         mca_coll_base_module_t *module)
+int ompi_coll_tuned_reduce_scatter_block_intra_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int communicator_size, alg;
     size_t dsize, total_dsize;
@@ -1250,8 +1201,8 @@ int ompi_coll_tuned_reduce_scatter_block_intra_dec_fixed(const void *sbuf, void 
         "ompi_coll_tuned_reduce_scatter_block_intra_dec_fixed"));
 
 
-    ompi_datatype_type_size(dtype, &dsize);
-    total_dsize = dsize * (ptrdiff_t)rcount;
+    ompi_datatype_type_size(args->dst.info.datatype, &dsize);
+    total_dsize = dsize * (ptrdiff_t)args->dst.info.count;
 
     communicator_size = ompi_comm_size(comm);
 
@@ -1264,7 +1215,7 @@ int ompi_coll_tuned_reduce_scatter_block_intra_dec_fixed(const void *sbuf, void 
      * Non commutative algorithm capability needs re-investigation.
      * Defaulting to basic linear for non commutative ops.
      */
-    if( !ompi_op_is_commute(op) ) {
+    if( !ompi_op_is_commute(args->op) ) {
         alg = 1;
     } else {
         if (communicator_size < 4) {
@@ -1344,8 +1295,7 @@ int ompi_coll_tuned_reduce_scatter_block_intra_dec_fixed(const void *sbuf, void 
         }
     }
 
-    return  ompi_coll_tuned_reduce_scatter_block_intra_do_this (sbuf, rbuf, rcount, dtype,
-                                                                op, comm, module,
+    return  ompi_coll_tuned_reduce_scatter_block_intra_do_this (args, comm, module,
                                                                 alg, 0, 0);
 }
 
@@ -1358,21 +1308,16 @@ int ompi_coll_tuned_reduce_scatter_block_intra_dec_fixed(const void *sbuf, void 
  *                        internal allgather function.
  */
 
-int ompi_coll_tuned_allgather_intra_dec_fixed(const void *sbuf, size_t scount,
-                                              struct ompi_datatype_t *sdtype,
-                                              void* rbuf, size_t rcount,
-                                              struct ompi_datatype_t *rdtype,
-                                              struct ompi_communicator_t *comm,
-                                              mca_coll_base_module_t *module)
+int ompi_coll_tuned_allgather_intra_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int communicator_size, alg;
     size_t dsize, total_dsize;
-    if (MPI_IN_PLACE != sbuf) {
-        ompi_datatype_type_size(sdtype, &dsize);
+    if (MPI_IN_PLACE != args->src.info.buffer) {
+        ompi_datatype_type_size(args->src.info.datatype, &dsize);
     } else {
-        ompi_datatype_type_size(rdtype, &dsize);
+        ompi_datatype_type_size(args->dst.info.datatype, &dsize);
     }
-    total_dsize = dsize * (ptrdiff_t)scount;
+    total_dsize = dsize * (ptrdiff_t)args->src.info.count;
 
     communicator_size = ompi_comm_size(comm);
     /** Algorithms:
@@ -1492,9 +1437,7 @@ int ompi_coll_tuned_allgather_intra_dec_fixed(const void *sbuf, size_t scount,
         ompi_comm_rank(comm), communicator_size));
 
     int faninout = 2;
-    return ompi_coll_tuned_allgather_intra_do_this(sbuf, scount, sdtype,
-                                                   rbuf, rcount, rdtype,
-                                                   comm, module, alg, faninout, 0);
+    return ompi_coll_tuned_allgather_intra_do_this(args, comm, module, alg, faninout, 0);
 }
 
 /*
@@ -1506,27 +1449,21 @@ int ompi_coll_tuned_allgather_intra_dec_fixed(const void *sbuf, size_t scount,
  *                        internal allgatherv function.
  */
 
-int ompi_coll_tuned_allgatherv_intra_dec_fixed(const void *sbuf, size_t scount,
-                                               struct ompi_datatype_t *sdtype,
-                                               void* rbuf, ompi_count_array_t rcounts,
-                                               ompi_disp_array_t rdispls,
-                                               struct ompi_datatype_t *rdtype,
-                                               struct ompi_communicator_t *comm,
-                                               mca_coll_base_module_t *module)
+int ompi_coll_tuned_allgatherv_intra_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int communicator_size, alg, i;
     size_t dsize, total_dsize, per_rank_dsize;
 
     communicator_size = ompi_comm_size(comm);
 
-    if (MPI_IN_PLACE != sbuf) {
-        ompi_datatype_type_size(sdtype, &dsize);
+    if (MPI_IN_PLACE != args->src.info.buffer) {
+        ompi_datatype_type_size(args->src.info.datatype, &dsize);
     } else {
-        ompi_datatype_type_size(rdtype, &dsize);
+        ompi_datatype_type_size(args->dst.info_v.datatype, &dsize);
     }
 
     total_dsize = 0;
-    for (i = 0; i < communicator_size; i++) { total_dsize += dsize * ompi_count_array_get(rcounts, i); }
+    for (i = 0; i < communicator_size; i++) { total_dsize += dsize * ompi_count_array_get(args->dst.info_v.counts, i); }
 
     /* use the per-rank data size as basis, similar to allgather */
     per_rank_dsize = total_dsize / communicator_size;
@@ -1630,10 +1567,7 @@ int ompi_coll_tuned_allgatherv_intra_dec_fixed(const void *sbuf, size_t scount,
                  "ompi_coll_tuned_allgatherv_intra_dec_fixed"
                  " rank %d com_size %d", ompi_comm_rank(comm), communicator_size));
 
-    return ompi_coll_tuned_allgatherv_intra_do_this (sbuf, scount, sdtype,
-                                                     rbuf, rcounts,
-                                                     rdispls, rdtype,
-                                                     comm, module,
+    return ompi_coll_tuned_allgatherv_intra_do_this (args, comm, module,
                                                      alg, 0, 0);
 }
 
@@ -1646,13 +1580,7 @@ int ompi_coll_tuned_allgatherv_intra_dec_fixed(const void *sbuf, size_t scount,
  *                        internal allgather function.
  */
 
-int ompi_coll_tuned_gather_intra_dec_fixed(const void *sbuf, size_t scount,
-                                           struct ompi_datatype_t *sdtype,
-                                           void* rbuf, size_t rcount,
-                                           struct ompi_datatype_t *rdtype,
-                                           int root,
-                                           struct ompi_communicator_t *comm,
-                                           mca_coll_base_module_t *module)
+int ompi_coll_tuned_gather_intra_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int communicator_size, alg, rank;
     size_t dsize, total_dsize;
@@ -1664,12 +1592,12 @@ int ompi_coll_tuned_gather_intra_dec_fixed(const void *sbuf, size_t scount,
     rank = ompi_comm_rank(comm);
 
     /* Determine block size */
-    if ( (rank == root) || (MPI_IN_PLACE == sbuf) ) {
-        ompi_datatype_type_size(rdtype, &dsize);
-        total_dsize = dsize * (ptrdiff_t)rcount;
+    if ( (rank == args->root) || (MPI_IN_PLACE == args->src.info.buffer) ) {
+        ompi_datatype_type_size(args->dst.info.datatype, &dsize);
+        total_dsize = dsize * (ptrdiff_t)args->dst.info.count;
     } else {
-        ompi_datatype_type_size(sdtype, &dsize);
-        total_dsize = dsize * (ptrdiff_t)scount;
+        ompi_datatype_type_size(args->src.info.datatype, &dsize);
+        total_dsize = dsize * (ptrdiff_t)args->src.info.count;
     }
 
     /** Algorithms:
@@ -1720,9 +1648,7 @@ int ompi_coll_tuned_gather_intra_dec_fixed(const void *sbuf, size_t scount,
         alg = 2;
     }
 
-    return ompi_coll_tuned_gather_intra_do_this (sbuf, scount, sdtype,
-                                                 rbuf, rcount, rdtype,
-                                                 root, comm, module,
+    return ompi_coll_tuned_gather_intra_do_this (args, comm, module,
                                                  alg, 0, 0);
 }
 
@@ -1735,12 +1661,7 @@ int ompi_coll_tuned_gather_intra_dec_fixed(const void *sbuf, size_t scount,
  *                        internal allgather function.
  */
 
-int ompi_coll_tuned_scatter_intra_dec_fixed(const void *sbuf, size_t scount,
-                                            struct ompi_datatype_t *sdtype,
-                                            void* rbuf, size_t rcount,
-                                            struct ompi_datatype_t *rdtype,
-                                            int root, struct ompi_communicator_t *comm,
-                                            mca_coll_base_module_t *module)
+int ompi_coll_tuned_scatter_intra_dec_fixed(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     int communicator_size, alg, rank;
     size_t dsize, total_dsize;
@@ -1751,12 +1672,12 @@ int ompi_coll_tuned_scatter_intra_dec_fixed(const void *sbuf, size_t scount,
     communicator_size = ompi_comm_size(comm);
     rank = ompi_comm_rank(comm);
 
-    if (root == rank) {
-        ompi_datatype_type_size(sdtype, &dsize);
-        total_dsize = dsize * (ptrdiff_t)scount;
+    if (args->root == rank) {
+        ompi_datatype_type_size(args->src.info.datatype, &dsize);
+        total_dsize = dsize * (ptrdiff_t)args->src.info.count;
     } else {
-        ompi_datatype_type_size(rdtype, &dsize);
-        total_dsize = dsize * (ptrdiff_t)rcount;
+        ompi_datatype_type_size(args->dst.info.datatype, &dsize);
+        total_dsize = dsize * (ptrdiff_t)args->dst.info.count;
     }
 
     /** Algorithms:
@@ -1825,8 +1746,6 @@ int ompi_coll_tuned_scatter_intra_dec_fixed(const void *sbuf, size_t scount,
         }
     }
 
-    return ompi_coll_tuned_scatter_intra_do_this (sbuf, scount, sdtype,
-                                                  rbuf, rcount, rdtype,
-                                                  root, comm, module,
+    return ompi_coll_tuned_scatter_intra_do_this (args, comm, module,
                                                   alg, 0, 0);
 }

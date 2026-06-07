@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018      DataDirect Networks. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -70,10 +71,9 @@ mca_fs_ime_component_file_query (ompio_file_t *fh, int *priority)
             fh->f_fstype = mca_fs_base_get_fstype ( fh->f_filename );
         }
         if (fh->f_comm != MPI_COMM_NULL) {
-            fh->f_comm->c_coll->coll_bcast (&(fh->f_fstype),
-                                            1,
-                                            MPI_INT,
-                                            OMPIO_ROOT,
+            ompi_coll_args_t coll_args;
+            ompi_coll_args_bcast(&coll_args, &(fh->f_fstype), 1, MPI_INT, OMPIO_ROOT);
+            fh->f_comm->c_coll->coll_bcast (&coll_args,
                                             fh->f_comm,
                                             fh->f_comm->c_coll->coll_bcast_module);
         }

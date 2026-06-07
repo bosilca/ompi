@@ -16,6 +16,7 @@
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
  * Copyright (C) Mellanox Technologies Ltd. 2001-2017. ALL RIGHTS RESERVED.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -80,7 +81,9 @@ int ompi_osc_ucx_fence(int mpi_assert, struct ompi_win_t *win) {
         }
     }
 
-    return module->comm->c_coll->coll_barrier(module->comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_barrier(&coll_args);
+    return module->comm->c_coll->coll_barrier(&coll_args, module->comm,
                                               module->comm->c_coll->coll_barrier_module);
 }
 

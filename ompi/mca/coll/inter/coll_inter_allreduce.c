@@ -14,6 +14,7 @@
  * Copyright (c) 2015-2017 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2023      Jeffrey M. Squyres.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -42,12 +43,11 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_inter_allreduce_inter(const void *sbuf, void *rbuf, size_t count,
-                               struct ompi_datatype_t *dtype,
-                               struct ompi_op_t *op,
-                               struct ompi_communicator_t *comm,
-                               mca_coll_base_module_t *module)
+mca_coll_inter_allreduce_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
     int err, rank, root = 0;
     char *tmpbuf = NULL, *pml_buffer = NULL;
     const char *source;
@@ -63,11 +63,11 @@ mca_coll_inter_allreduce_inter(const void *sbuf, void *rbuf, size_t count,
         return OMPI_ERR_OUT_OF_RESOURCE;
     }
     pml_buffer = tmpbuf - gap;
-    source = (MPI_IN_PLACE == sbuf) ? rbuf : sbuf;
+    source = (MPI_IN_PLACE == args->src.info.buffer) ? rbuf : args->src.info.buffer;
 
-    err = comm->c_local_comm->c_coll->coll_reduce(source, pml_buffer, count,
-                                                  dtype, op, root,
-                                                  comm->c_local_comm,
+    ompi_coll_args_t _r;
+    ompi_coll_args_reduce(&_r, source, pml_buffer, count, dtype, args->op, root);
+    err = comm->c_local_comm->c_coll->coll_reduce(&_r, comm->c_local_comm,
                                                   comm->c_local_comm->c_coll->coll_reduce_module);
     if (OMPI_SUCCESS != err) {
         goto exit;
@@ -86,8 +86,9 @@ mca_coll_inter_allreduce_inter(const void *sbuf, void *rbuf, size_t count,
     }
 
     /* bcast the message to all the local processes */
-    err = comm->c_local_comm->c_coll->coll_bcast(rbuf, count, dtype,
-                                                 root, comm->c_local_comm,
+    ompi_coll_args_t _b;
+    ompi_coll_args_bcast(&_b, rbuf, count, dtype, root);
+    err = comm->c_local_comm->c_coll->coll_bcast(&_b, comm->c_local_comm,
                                                  comm->c_local_comm->c_coll->coll_bcast_module);
     if (OMPI_SUCCESS != err) {
             goto exit;

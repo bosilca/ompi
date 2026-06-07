@@ -13,6 +13,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
  * Copyright (c) 2024      NVIDIA Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -86,12 +87,14 @@
  *
  */
 int
-mca_coll_basic_reduce_log_intra(const void *sbuf, void *rbuf, size_t count,
-                                struct ompi_datatype_t *dtype,
-                                struct ompi_op_t *op,
-                                int root, struct ompi_communicator_t *comm,
-                                mca_coll_base_module_t *module)
+mca_coll_basic_reduce_log_intra(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    void *rbuf = args->dst.info.buffer;
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    struct ompi_op_t *op = args->op;
+    int root = args->root;
     int i, size, rank, vrank;
     int err, peer, dim, mask;
     ptrdiff_t lb, extent, dsize, gap;
@@ -108,8 +111,9 @@ mca_coll_basic_reduce_log_intra(const void *sbuf, void *rbuf, size_t count,
      * operations. */
 
     if (!ompi_op_is_commute(op)) {
-        return ompi_coll_base_reduce_intra_basic_linear(sbuf, rbuf, count, dtype,
-                                                        op, root, comm, module);
+        ompi_coll_args_t _r;
+        ompi_coll_args_reduce(&_r, sbuf, rbuf, count, dtype, op, root);
+        return ompi_coll_base_reduce_intra_basic_linear(&_r, comm, module);
     }
 
     /* Some variables */
@@ -286,12 +290,11 @@ mca_coll_basic_reduce_log_intra(const void *sbuf, void *rbuf, size_t count,
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_basic_reduce_lin_inter(const void *sbuf, void *rbuf, size_t count,
-                                struct ompi_datatype_t *dtype,
-                                struct ompi_op_t *op,
-                                int root, struct ompi_communicator_t *comm,
-                                mca_coll_base_module_t *module)
+mca_coll_basic_reduce_lin_inter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t count = args->dst.info.count;
+    struct ompi_datatype_t *dtype = args->dst.info.datatype;
+    int root = args->root;
     int i, err, size;
     ptrdiff_t dsize, gap;
     char *free_buffer = NULL;
@@ -305,7 +308,7 @@ mca_coll_basic_reduce_lin_inter(const void *sbuf, void *rbuf, size_t count,
         err = OMPI_SUCCESS;
     } else if (MPI_ROOT != root) {
         /* If not root, send data to the root. */
-        err = MCA_PML_CALL(send(sbuf, count, dtype, root,
+        err = MCA_PML_CALL(send(args->src.info.buffer, count, dtype, root,
                                 MCA_COLL_BASE_TAG_REDUCE,
                                 MCA_PML_BASE_SEND_STANDARD, comm));
     } else {
@@ -320,7 +323,7 @@ mca_coll_basic_reduce_lin_inter(const void *sbuf, void *rbuf, size_t count,
 
 
         /* Initialize the receive buffer. */
-        err = MCA_PML_CALL(recv(rbuf, count, dtype, 0,
+        err = MCA_PML_CALL(recv(args->dst.info.buffer, count, dtype, 0,
                                 MCA_COLL_BASE_TAG_REDUCE, comm,
                                 MPI_STATUS_IGNORE));
         if (MPI_SUCCESS != err) {
@@ -343,7 +346,7 @@ mca_coll_basic_reduce_lin_inter(const void *sbuf, void *rbuf, size_t count,
             }
 
             /* Perform the reduction */
-            ompi_op_reduce(op, pml_buffer, rbuf, count, dtype);
+            ompi_op_reduce(args->op, pml_buffer, args->dst.info.buffer, count, dtype);
         }
 
         if (NULL != free_buffer) {

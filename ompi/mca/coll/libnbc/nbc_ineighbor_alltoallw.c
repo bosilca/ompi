@@ -11,6 +11,7 @@
  *                         reserved.
  * Copyright (c) 2017      IBM Corporation.  All rights reserved.
  * Copyright (c) 2018      FUJITSU LIMITED.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -158,11 +159,11 @@ static int nbc_neighbor_alltoallw_init(const void *sbuf, ompi_count_array_t scou
   return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_ineighbor_alltoallw(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps, struct ompi_datatype_t * const *stypes,
-                                         void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps, struct ompi_datatype_t * const *rtypes,
-                                         struct ompi_communicator_t *comm, ompi_request_t ** request,
-                                         mca_coll_base_module_t *module) {
-    int res = nbc_neighbor_alltoallw_init(sbuf, scounts, sdisps, stypes, rbuf, rcounts, rdisps, rtypes,
+int ompi_coll_libnbc_ineighbor_alltoallw(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_neighbor_alltoallw_init(args->src.info_v.buffer, args->src.info_v.counts,
+                                          args->src.info_v.displacements, args->src.info_v.datatypes,
+                                          args->dst.info_v.buffer, args->dst.info_v.counts,
+                                          args->dst.info_v.displacements, args->dst.info_v.datatypes,
                                           comm, request, module, false);
     if (OPAL_LIKELY(OMPI_SUCCESS != res)) {
         return res;
@@ -177,11 +178,11 @@ int ompi_coll_libnbc_ineighbor_alltoallw(const void *sbuf, ompi_count_array_t sc
     return OMPI_SUCCESS;
 }
 
-int ompi_coll_libnbc_neighbor_alltoallw_init(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps, struct ompi_datatype_t * const *stypes,
-                                             void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps, struct ompi_datatype_t * const *rtypes,
-                                             struct ompi_communicator_t *comm, MPI_Info info, ompi_request_t ** request,
-                                             mca_coll_base_module_t *module) {
-    int res = nbc_neighbor_alltoallw_init(sbuf, scounts, sdisps, stypes, rbuf, rcounts, rdisps, rtypes,
+int ompi_coll_libnbc_neighbor_alltoallw_init(ompi_coll_args_t *args, struct ompi_communicator_t *comm, ompi_info_t *info, ompi_request_t **request, mca_coll_base_module_t *module) {
+    int res = nbc_neighbor_alltoallw_init(args->src.info_v.buffer, args->src.info_v.counts,
+                                          args->src.info_v.displacements, args->src.info_v.datatypes,
+                                          args->dst.info_v.buffer, args->dst.info_v.counts,
+                                          args->dst.info_v.displacements, args->dst.info_v.datatypes,
                                           comm, request, module, true);
     if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
         return res;

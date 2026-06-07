@@ -15,6 +15,7 @@
  * Copyright (c) 2015-2016 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2017      IBM Corporation. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -38,14 +39,15 @@
 /* Todo: gather_intra_generic, gather_intra_binary, gather_intra_chain,
  * gather_intra_pipeline, segmentation? */
 int
-ompi_coll_base_gather_intra_binomial(const void *sbuf, size_t scount,
-                                      struct ompi_datatype_t *sdtype,
-                                      void *rbuf, size_t rcount,
-                                      struct ompi_datatype_t *rdtype,
-                                      int root,
-                                      struct ompi_communicator_t *comm,
-                                      mca_coll_base_module_t *module)
+ompi_coll_base_gather_intra_binomial(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
+    int root = args->root;
     int line = -1, i, rank, vrank, size, err;
     size_t total_recv = 0;
     char *ptmp     = NULL, *tempbuf  = NULL;
@@ -206,15 +208,15 @@ ompi_coll_base_gather_intra_binomial(const void *sbuf, size_t scount,
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-ompi_coll_base_gather_intra_linear_sync(const void *sbuf, size_t scount,
-                                         struct ompi_datatype_t *sdtype,
-                                         void *rbuf, size_t rcount,
-                                         struct ompi_datatype_t *rdtype,
-                                         int root,
-                                         struct ompi_communicator_t *comm,
-                                         mca_coll_base_module_t *module,
-                                         int first_segment_size)
+ompi_coll_base_gather_intra_linear_sync(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module, int first_segment_size)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
+    int root = args->root;
     int i, ret, line, rank, size, first_segment_count;
     ompi_request_t **reqs = NULL;
     MPI_Aint extent, lb;
@@ -368,14 +370,11 @@ ompi_coll_base_gather_intra_linear_sync(const void *sbuf, size_t scount,
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-ompi_coll_base_gather_intra_basic_linear(const void *sbuf, size_t scount,
-                                          struct ompi_datatype_t *sdtype,
-                                          void *rbuf, size_t rcount,
-                                          struct ompi_datatype_t *rdtype,
-                                          int root,
-                                          struct ompi_communicator_t *comm,
-                                          mca_coll_base_module_t *module)
+ompi_coll_base_gather_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     int i, err, rank, size;
     char *ptmp;
     MPI_Aint incr, extent, lb;
@@ -387,8 +386,8 @@ ompi_coll_base_gather_intra_basic_linear(const void *sbuf, size_t scount,
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
                  "ompi_coll_base_gather_intra_basic_linear rank %d", rank));
 
-    if (rank != root) {
-        return MCA_PML_CALL(send(sbuf, scount, sdtype, root,
+    if (rank != args->root) {
+        return MCA_PML_CALL(send(sbuf, args->src.info.count, args->src.info.datatype, args->root,
                                  MCA_COLL_BASE_TAG_GATHER,
                                  MCA_PML_BASE_SEND_STANDARD, comm));
     }
@@ -397,10 +396,10 @@ ompi_coll_base_gather_intra_basic_linear(const void *sbuf, size_t scount,
 
     ompi_datatype_get_extent(rdtype, &lb, &extent);
     incr = extent * (ptrdiff_t)rcount;
-    for (i = 0, ptmp = (char *) rbuf; i < size; ++i, ptmp += incr) {
+    for (i = 0, ptmp = (char *) args->dst.info.buffer; i < size; ++i, ptmp += incr) {
         if (i == rank) {
             if (MPI_IN_PLACE != sbuf) {
-                err = ompi_datatype_sndrcv((void *)sbuf, scount, sdtype,
+                err = ompi_datatype_sndrcv((void *)sbuf, args->src.info.count, args->src.info.datatype,
                                            ptmp, rcount, rdtype);
             } else {
                 err = MPI_SUCCESS;

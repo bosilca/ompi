@@ -18,6 +18,7 @@
  * Copyright (c) 2021      Amazon.com, Inc. or its affiliates.  All Rights
  *                         reserved.
  * Copyright (c) 2022      BULL S.A.S. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -177,19 +178,16 @@ mca_coll_base_alltoall_intra_basic_inplace(const void *rbuf, size_t rcount,
     return err;
 }
 
-int ompi_coll_base_alltoall_intra_pairwise(const void *sbuf, size_t scount,
-                                            struct ompi_datatype_t *sdtype,
-                                            void* rbuf, size_t rcount,
-                                            struct ompi_datatype_t *rdtype,
-                                            struct ompi_communicator_t *comm,
-                                            mca_coll_base_module_t *module)
+int ompi_coll_base_alltoall_intra_pairwise(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     int line = -1, err = 0, rank, size, step, sendto, recvfrom;
     void * tmpsend, *tmprecv;
     ptrdiff_t lb, sext, rext;
 
-    if (MPI_IN_PLACE == sbuf) {
-        return mca_coll_base_alltoall_intra_basic_inplace (rbuf, rcount, rdtype,
+    if (MPI_IN_PLACE == args->src.info.buffer) {
+        return mca_coll_base_alltoall_intra_basic_inplace (args->dst.info.buffer, rcount, rdtype,
                                                             comm, module);
     }
 
@@ -199,7 +197,7 @@ int ompi_coll_base_alltoall_intra_pairwise(const void *sbuf, size_t scount,
     OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
                  "coll:base:alltoall_intra_pairwise rank %d", rank));
 
-    err = ompi_datatype_get_extent (sdtype, &lb, &sext);
+    err = ompi_datatype_get_extent (args->src.info.datatype, &lb, &sext);
     if (err != MPI_SUCCESS) { line = __LINE__; goto err_hndl; }
     err = ompi_datatype_get_extent (rdtype, &lb, &rext);
     if (err != MPI_SUCCESS) { line = __LINE__; goto err_hndl; }
@@ -213,11 +211,11 @@ int ompi_coll_base_alltoall_intra_pairwise(const void *sbuf, size_t scount,
         recvfrom = (rank + size - step) % size;
 
         /* Determine sending and receiving locations */
-        tmpsend = (char*)sbuf + (ptrdiff_t)sendto * sext * (ptrdiff_t)scount;
-        tmprecv = (char*)rbuf + (ptrdiff_t)recvfrom * rext * (ptrdiff_t)rcount;
+        tmpsend = (char*)args->src.info.buffer + (ptrdiff_t)sendto * sext * (ptrdiff_t)args->src.info.count;
+        tmprecv = (char*)args->dst.info.buffer + (ptrdiff_t)recvfrom * rext * (ptrdiff_t)rcount;
 
         /* send and receive */
-        err = ompi_coll_base_sendrecv( tmpsend, scount, sdtype, sendto,
+        err = ompi_coll_base_sendrecv( tmpsend, args->src.info.count, args->src.info.datatype, sendto,
                                         MCA_COLL_BASE_TAG_ALLTOALL,
                                         tmprecv, rcount, rdtype, recvfrom,
                                         MCA_COLL_BASE_TAG_ALLTOALL,
@@ -236,13 +234,14 @@ int ompi_coll_base_alltoall_intra_pairwise(const void *sbuf, size_t scount,
 }
 
 
-int ompi_coll_base_alltoall_intra_bruck(const void *sbuf, size_t scount,
-                                         struct ompi_datatype_t *sdtype,
-                                         void* rbuf, size_t rcount,
-                                         struct ompi_datatype_t *rdtype,
-                                         struct ompi_communicator_t *comm,
-                                         mca_coll_base_module_t *module)
+int ompi_coll_base_alltoall_intra_bruck(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     int i, line = -1, rank, size, err = 0;
     int sendto, recvfrom, distance, *displs = NULL;
     char *tmpbuf = NULL, *tmpbuf_free = NULL;
@@ -375,14 +374,15 @@ int ompi_coll_base_alltoall_intra_bruck(const void *sbuf, size_t scount,
  *                    - wait for any request to complete
  *                    - replace that request by the new one of the same type.
  */
-int ompi_coll_base_alltoall_intra_linear_sync(const void *sbuf, size_t scount,
-                                               struct ompi_datatype_t *sdtype,
-                                               void* rbuf, size_t rcount,
-                                               struct ompi_datatype_t *rdtype,
-                                               struct ompi_communicator_t *comm,
-                                               mca_coll_base_module_t *module,
+int ompi_coll_base_alltoall_intra_linear_sync(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                                int max_outstanding_reqs)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     int line, error, ri, si, rank, size, nrreqs, nsreqs, total_reqs;
     int nreqs = 0;
     char *psnd, *prcv;
@@ -534,13 +534,14 @@ int ompi_coll_base_alltoall_intra_linear_sync(const void *sbuf, size_t scount,
 }
 
 
-int ompi_coll_base_alltoall_intra_two_procs(const void *sbuf, size_t scount,
-                                             struct ompi_datatype_t *sdtype,
-                                             void* rbuf, size_t rcount,
-                                             struct ompi_datatype_t *rdtype,
-                                             struct ompi_communicator_t *comm,
-                                             mca_coll_base_module_t *module)
+int ompi_coll_base_alltoall_intra_two_procs(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     int line = -1, err = 0, rank, remote;
     void * tmpsend, *tmprecv;
     ptrdiff_t sext, rext, lb;
@@ -613,13 +614,14 @@ int ompi_coll_base_alltoall_intra_two_procs(const void *sbuf, size_t scount,
 
 /* copied function (with appropriate renaming) starts here */
 
-int ompi_coll_base_alltoall_intra_basic_linear(const void *sbuf, size_t scount,
-                                               struct ompi_datatype_t *sdtype,
-                                               void* rbuf, size_t rcount,
-                                               struct ompi_datatype_t *rdtype,
-                                               struct ompi_communicator_t *comm,
-                                               mca_coll_base_module_t *module)
+int ompi_coll_base_alltoall_intra_basic_linear(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = (const void *) args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     int i, rank, size, err, line;
     int nreqs = 0;
     char *psnd, *prcv;

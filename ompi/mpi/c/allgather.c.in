@@ -19,6 +19,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -124,8 +125,10 @@ PROTOTYPE ERROR_CLASS allgather(BUFFER sendbuf, COUNT sendcount, DATATYPE sendty
 
     /* Invoke the coll component to perform the back-end operation */
 
-    err = comm->c_coll->coll_allgather(sendbuf, sendcount, sendtype,
-                                      recvbuf, recvcount, recvtype, comm,
+    ompi_coll_args_t coll_args;
+    ompi_coll_args_allgather(&coll_args, sendbuf, sendcount, sendtype,
+                             recvbuf, recvcount, recvtype);
+    err = comm->c_coll->coll_allgather(&coll_args, comm,
                                       comm->c_coll->coll_allgather_module);
     OMPI_ERRHANDLER_RETURN(err, comm, err, FUNC_NAME);
 }

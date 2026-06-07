@@ -7,6 +7,7 @@
  * Copyright (c) 2022      Amazon.com, Inc. or its affiliates.  All Rights reserved.
  * Copyright (c) 2024      Triad National Security, LLC. All rights reserved.
  * Copyright (c) 2024      Advanced Micro Devices, Inc. All Rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -29,13 +30,10 @@
  *	Returns:	- MPI_SUCCESS or error code
  */
 int
-mca_coll_accelerator_bcast(void *orig_buf, size_t count,
-			   struct ompi_datatype_t *datatype,
-			   int root,
-			   struct ompi_communicator_t *comm,
-			   mca_coll_base_module_t *module)
+mca_coll_accelerator_bcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_accelerator_module_t *s = (mca_coll_accelerator_module_t*) module;
+    void *orig_buf = args->src.info.buffer;
     ptrdiff_t gap;
     char *buf1 = NULL;
     char *sbuf = (char*) orig_buf;
@@ -43,7 +41,7 @@ mca_coll_accelerator_bcast(void *orig_buf, size_t count,
     size_t bufsize;
     int rc;
 
-    bufsize = opal_datatype_span(&datatype->super, count, &gap);
+    bufsize = opal_datatype_span(&args->src.info.datatype->super, args->src.info.count, &gap);
 
     rc = mca_coll_accelerator_check_buf((void *)orig_buf, &buf_dev);
     if (rc < 0) {
@@ -59,8 +57,9 @@ mca_coll_accelerator_bcast(void *orig_buf, size_t count,
         sbuf = buf1 - gap;
     }
 
-    rc = s->c_coll.coll_bcast((void *) sbuf, count, datatype, root, comm,
-                               s->c_coll.coll_bcast_module);
+    ompi_coll_args_t _fwd;
+    ompi_coll_args_bcast(&_fwd, (void *) sbuf, args->src.info.count, args->src.info.datatype, args->root);
+    rc = s->c_coll.coll_bcast(&_fwd, comm, s->c_coll.coll_bcast_module);
     if (rc < 0) {
         goto exit;
     }

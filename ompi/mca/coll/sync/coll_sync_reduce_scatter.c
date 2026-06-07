@@ -11,6 +11,7 @@
  *                         All rights reserved.
  * Copyright (c) 2008      Sun Microsystems, Inc.  All rights reserved.
  * Copyright (c) 2009      Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -30,20 +31,14 @@
  *	Accepts:	- same as MPI_Reduce_scatter()
  *	Returns:	- MPI_SUCCESS or error code
  */
-int mca_coll_sync_reduce_scatter(const void *sbuf, void *rbuf, ompi_count_array_t rcounts,
-                                 struct ompi_datatype_t *dtype,
-                                 struct ompi_op_t *op,
-                                 struct ompi_communicator_t *comm,
-                                 mca_coll_base_module_t *module)
+int mca_coll_sync_reduce_scatter(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
     mca_coll_sync_module_t *s = (mca_coll_sync_module_t*) module;
 
     if (s->in_operation) {
-        return s->c_coll.coll_reduce_scatter(sbuf, rbuf, rcounts,
-                                             dtype, op, comm,
+        return s->c_coll.coll_reduce_scatter(args, comm,
                                              s->c_coll.coll_reduce_scatter_module);
     }
-    COLL_SYNC(s, s->c_coll.coll_reduce_scatter(sbuf, rbuf, rcounts,
-                                               dtype, op, comm,
+    COLL_SYNC(s, s->c_coll.coll_reduce_scatter(args, comm,
                                                s->c_coll.coll_reduce_scatter_module));
 }

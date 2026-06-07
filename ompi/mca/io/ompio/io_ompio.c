@@ -17,6 +17,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
  * Copyright (c) 2026      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -146,13 +147,10 @@ int ompi_io_ompio_generate_current_file_view (struct ompio_file_t *fh,
             return OMPI_ERR_OUT_OF_RESOURCE;
 	}
 
-        fh->f_comm->c_coll->coll_gather (&k,
-                                        1,
-                                        MPI_INT,
-                                        recvcounts,
-                                        1,
-					MPI_INT,
-                                        OMPIO_ROOT,
+        ompi_coll_args_t coll_args;
+        ompi_coll_args_gather(&coll_args, &k, 1, MPI_INT,
+                              recvcounts, 1, MPI_INT, OMPIO_ROOT);
+        fh->f_comm->c_coll->coll_gather (&coll_args,
                                         fh->f_comm,
                                         fh->f_comm->c_coll->coll_gather_module);
 
@@ -254,14 +252,10 @@ int ompi_io_ompio_generate_current_file_view (struct ompio_file_t *fh,
 	}
 	OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, recvcounts);
 	OMPI_DISP_ARRAY_INIT(&displs_desc, displs);
-	fh->f_comm->c_coll->coll_gatherv (per_process,
-					 k,
-					 io_array_type,
-					 all_process,
-					 recvcounts_desc,
-					 displs_desc,
-					 io_array_type,
-					 OMPIO_ROOT,
+	ompi_coll_args_gatherv(&coll_args, per_process, k, io_array_type,
+			       all_process, recvcounts_desc, displs_desc,
+			       io_array_type, OMPIO_ROOT);
+	fh->f_comm->c_coll->coll_gatherv (&coll_args,
 					 fh->f_comm,
 					 fh->f_comm->c_coll->coll_gatherv_module);
 

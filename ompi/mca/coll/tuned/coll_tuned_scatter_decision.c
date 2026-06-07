@@ -8,6 +8,7 @@
  * Copyright (c) 2019      Mellanox Technologies. All rights reserved.
  * Copyright (c) 2025      Amazon.com, Inc. or its affiliates.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -156,13 +157,7 @@ ompi_coll_tuned_scatter_intra_check_forced_init(coll_tuned_force_algorithm_mca_p
 }
 
 int
-ompi_coll_tuned_scatter_intra_do_this(const void *sbuf, size_t scount,
-                                      struct ompi_datatype_t *sdtype,
-                                      void* rbuf, size_t rcount,
-                                      struct ompi_datatype_t *rdtype,
-                                      int root,
-                                      struct ompi_communicator_t *comm,
-                                      mca_coll_base_module_t *module,
+ompi_coll_tuned_scatter_intra_do_this(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module,
                                       int algorithm, int faninout, int segsize)
 {
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,
@@ -171,21 +166,13 @@ ompi_coll_tuned_scatter_intra_do_this(const void *sbuf, size_t scount,
 
     switch (algorithm) {
     case (0):
-        return ompi_coll_tuned_scatter_intra_dec_fixed(sbuf, scount, sdtype,
-                                                       rbuf, rcount, rdtype,
-                                                       root, comm, module);
+        return ompi_coll_tuned_scatter_intra_dec_fixed(args, comm, module);
     case (1):
-        return ompi_coll_base_scatter_intra_basic_linear(sbuf, scount, sdtype,
-                                                         rbuf, rcount, rdtype,
-                                                         root, comm, module);
+        return ompi_coll_base_scatter_intra_basic_linear(args, comm, module);
     case (2):
-        return ompi_coll_base_scatter_intra_binomial(sbuf, scount, sdtype,
-                                                     rbuf, rcount, rdtype,
-                                                     root, comm, module);
+        return ompi_coll_base_scatter_intra_binomial(args, comm, module);
     case (3):
-        return ompi_coll_base_scatter_intra_linear_nb(sbuf, scount, sdtype,
-                                                      rbuf, rcount, rdtype,
-                                                      root, comm, module,
+        return ompi_coll_base_scatter_intra_linear_nb(args, comm, module,
                                                       ompi_coll_tuned_scatter_blocking_send_ratio);
     } /* switch */
     OPAL_OUTPUT_VERBOSE((COLL_TUNED_TRACING_VERBOSE, ompi_coll_tuned_stream,

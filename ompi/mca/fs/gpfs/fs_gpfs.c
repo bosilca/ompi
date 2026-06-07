@@ -12,6 +12,7 @@
  * Copyright (c) 2008-2018 University of Houston. All rights reserved.
  * Copyright (c) 2018      Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -93,10 +94,9 @@ mca_fs_gpfs_component_file_query (ompio_file_t *fh, int *priority)
             fh->f_fstype = mca_fs_base_get_fstype ( (char *) fh->f_filename );
         }
         if (MPI_COMM_NULL != fh->f_comm) {
-            fh->f_comm->c_coll->coll_bcast (&(fh->f_fstype),
-                              				       1,
-                              				       MPI_INT,
-                              				       OMPIO_ROOT,
+            ompi_coll_args_t coll_args;
+            ompi_coll_args_bcast(&coll_args, &(fh->f_fstype), 1, MPI_INT, OMPIO_ROOT);
+            fh->f_comm->c_coll->coll_bcast (&coll_args,
                               				       fh->f_comm,
                               				       fh->f_comm->c_coll->coll_bcast_module);
         }

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2024 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -336,16 +337,12 @@ static inline int mca_coll_acoll_base_alltoall_dispatcher
 {
     int error;
 
+    ompi_coll_args_t _a;
+    ompi_coll_args_alltoall(&_a, (char *) sbuf, scount, sdtype, (char *) rbuf, rcount, rdtype);
     if (sync_enable) {
-        error = ompi_coll_base_alltoall_intra_linear_sync
-                        ((char*)sbuf, scount, sdtype,
-                         (char*)rbuf, rcount, rdtype,
-                         comm, &acoll_module->super, 0);
+        error = ompi_coll_base_alltoall_intra_linear_sync(&_a, comm, &acoll_module->super, 0);
     } else {
-        error = ompi_coll_base_alltoall_intra_basic_linear
-                        ((char*)sbuf, scount, sdtype,
-                         (char*)rbuf, rcount, rdtype,
-                         comm, &acoll_module->super);
+        error = ompi_coll_base_alltoall_intra_basic_linear(&_a, comm, &acoll_module->super);
     }
     return error;
 }
@@ -442,14 +439,14 @@ error_handler:
         -Rank r is part of exchange group i if r / split_factor == i.
  * 4. Exchange data among the ranks in each exchange group to complete
  *    all_to_all. */
-int mca_coll_acoll_alltoall
-                        (const void *sbuf, size_t scount,
-                        struct ompi_datatype_t *sdtype,
-                        void* rbuf, size_t rcount,
-                        struct ompi_datatype_t *rdtype,
-                        struct ompi_communicator_t *comm,
-                        mca_coll_base_module_t *module)
+int mca_coll_acoll_alltoall(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    const void *sbuf = args->src.info.buffer;
+    size_t scount = args->src.info.count;
+    struct ompi_datatype_t *sdtype = args->src.info.datatype;
+    void *rbuf = args->dst.info.buffer;
+    size_t rcount = args->dst.info.count;
+    struct ompi_datatype_t *rdtype = args->dst.info.datatype;
     int rank = ompi_comm_rank(comm);
     int size = ompi_comm_size(comm);
     int error = MPI_SUCCESS;

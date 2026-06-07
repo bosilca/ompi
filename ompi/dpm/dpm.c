@@ -25,6 +25,7 @@
  *                         reserved.
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
  * Copyright (c) 2023      Jeffrey M. Squyres.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -116,6 +117,7 @@ int ompi_dpm_connect_accept(ompi_communicator_t *comm, int root,
     size_t nprocs, n;
     pmix_status_t pret;
     opal_proclist_t *plt;
+    ompi_coll_args_t coll_args;
 
     ompi_communicator_t *newcomp=MPI_COMM_NULL;
     ompi_proc_t *proc;
@@ -237,7 +239,8 @@ bcast_rportlen:
      * side's participants */
 
     /* bcast the list-length to all processes in the local comm */
-    rc = comm->c_coll->coll_bcast(&rportlen, 1, MPI_INT, root, comm,
+    ompi_coll_args_bcast(&coll_args, &rportlen, 1, MPI_INT, root);
+    rc = comm->c_coll->coll_bcast(&coll_args, comm,
                                  comm->c_coll->coll_bcast_module);
     if (OMPI_SUCCESS != rc) {
         free(rport);
@@ -262,7 +265,8 @@ bcast_rportlen:
         }
     }
     /* now share the list of remote participants */
-    rc = comm->c_coll->coll_bcast(rport, rportlen, MPI_BYTE, root, comm,
+    ompi_coll_args_bcast(&coll_args, rport, rportlen, MPI_BYTE, root);
+    rc = comm->c_coll->coll_bcast(&coll_args, comm,
                                  comm->c_coll->coll_bcast_module);
     if (OMPI_SUCCESS != rc) {
         free(rport);

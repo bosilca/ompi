@@ -1,6 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode:nil -*- */
 /*
  * Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -650,9 +651,12 @@ int mca_coll_acoll_bcast_shm(void *buff, size_t count, struct ompi_datatype_t *d
  * Memory:      No additional memory requirements beyond user-supplied buffers.
  *
  */
-int mca_coll_acoll_bcast(void *buff, size_t count, struct ompi_datatype_t *datatype, int root,
-                         struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
+int mca_coll_acoll_bcast(ompi_coll_args_t *args, struct ompi_communicator_t *comm, mca_coll_base_module_t *module)
 {
+    void *buff = args->src.info.buffer;
+    size_t count = args->src.info.count;
+    struct ompi_datatype_t *datatype = args->src.info.datatype;
+    int root = args->root;
     int size;
     int rank;
     int err;
@@ -674,23 +678,23 @@ int mca_coll_acoll_bcast(void *buff, size_t count, struct ompi_datatype_t *datat
     /* For small communicators, use linear bcast */
     size = ompi_comm_size(comm);
     if (size < 8) {
-        return ompi_coll_base_bcast_intra_basic_linear(buff, count, datatype, root, comm, module);
+        return ompi_coll_base_bcast_intra_basic_linear(args, comm, module);
     }
 
     /* Obtain the subcomms structure */
     err = check_and_create_subc(comm, acoll_module, &subc);
     /* Fallback to knomial if subcomms is not obtained */
     if (NULL == subc) {
-        return ompi_coll_base_bcast_intra_knomial(buff, count, datatype, root, comm, module, 0, 4);
+        return ompi_coll_base_bcast_intra_knomial(args, comm, module, 0, 4);
     }
 
     /* Fallback to knomial if no. of root changes is beyond a threshold */
     if ((subc->num_root_change > MCA_COLL_ACOLL_ROOT_CHANGE_THRESH)
         && (root != subc->prev_init_root)) {
         if (acoll_module->disable_fallback) {
-            return ompi_coll_base_bcast_intra_basic_linear(buff, count, datatype, root, comm, module);
+            return ompi_coll_base_bcast_intra_basic_linear(args, comm, module);
         } else {
-            return ompi_coll_base_bcast_intra_knomial(buff, count, datatype, root, comm, module, 0, 4);
+            return ompi_coll_base_bcast_intra_knomial(args, comm, module, 0, 4);
         }
     }
     if (!subc->initialized || (root != subc->prev_init_root)) {
@@ -711,7 +715,7 @@ int mca_coll_acoll_bcast(void *buff, size_t count, struct ompi_datatype_t *datat
     if (((num_nodes >= 8 && total_dsize <= 65536)
         || (1 == num_nodes && size >= 256 && total_dsize < 16384)) &&
         !acoll_module->disable_fallback) {
-        return ompi_coll_base_bcast_intra_knomial(buff, count, datatype, root, comm, module, 0, 4);
+        return ompi_coll_base_bcast_intra_knomial(args, comm, module, 0, 4);
     }
 
     /* Determine the algorithm to be used based on size and count */

@@ -4,6 +4,7 @@
  *                         reserved.
  * Copyright (c) 2020-2021 Bull S.A.S. All rights reserved.
  *
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -125,8 +126,9 @@ mca_coll_han_topo_init(struct ompi_communicator_t *comm,
 
         int reduce_vals[] = {ranks_non_consecutive, low_size, -low_size, is_heterogeneous};
 
-        up_comm->c_coll->coll_allreduce(MPI_IN_PLACE, &reduce_vals, 4,
-                                        MPI_INT, MPI_MAX, up_comm,
+        ompi_coll_args_t _ar;
+        ompi_coll_args_allreduce(&_ar, MPI_IN_PLACE, &reduce_vals, 4, MPI_INT, MPI_MAX);
+        up_comm->c_coll->coll_allreduce(&_ar, up_comm,
                                         up_comm->c_coll->coll_allreduce_module);
 
         /* is the distribution of processes balanced per node? */
@@ -137,8 +139,10 @@ mca_coll_han_topo_init(struct ompi_communicator_t *comm,
         if ( ranks_non_consecutive && !is_imbalanced ) {
             /* kick off up_comm allgather to collect non-consecutive rank information at node leaders */
             ranks_map = malloc(sizeof(int)*size);
-            up_comm->c_coll->coll_iallgather(my_low_rank_map, low_size, MPI_INT,
-                                             ranks_map, low_size, MPI_INT, up_comm, &request,
+            ompi_coll_args_t _ag;
+            ompi_coll_args_allgather(&_ag, my_low_rank_map, low_size, MPI_INT,
+                                     ranks_map, low_size, MPI_INT);
+            up_comm->c_coll->coll_iallgather(&_ag, up_comm, &request,
                                              up_comm->c_coll->coll_iallgather_module);
         }
     }
@@ -146,8 +150,9 @@ mca_coll_han_topo_init(struct ompi_communicator_t *comm,
 
     /* broadcast balanced, consecutive and homogeneity properties from node leaders to remaining ranks */
     int bcast_vals[] = {is_imbalanced, ranks_non_consecutive, is_heterogeneous};
-    low_comm->c_coll->coll_bcast(bcast_vals, 3, MPI_INT, 0,
-                                 low_comm, low_comm->c_coll->coll_bcast_module);
+    ompi_coll_args_t _bc;
+    ompi_coll_args_bcast(&_bc, bcast_vals, 3, MPI_INT, 0);
+    low_comm->c_coll->coll_bcast(&_bc, low_comm, low_comm->c_coll->coll_bcast_module);
     is_imbalanced = bcast_vals[0];
     ranks_non_consecutive = bcast_vals[1];
     han_module->is_heterogeneous = bcast_vals[2];
@@ -199,8 +204,9 @@ mca_coll_han_topo_init(struct ompi_communicator_t *comm,
     }
 
     /* broadcast topology from node leaders to remaining ranks */
-    low_comm->c_coll->coll_bcast(topo, num_topo_level*size, MPI_INT, 0,
-                                low_comm, low_comm->c_coll->coll_bcast_module);
+    ompi_coll_args_t _bct;
+    ompi_coll_args_bcast(&_bct, topo, num_topo_level*size, MPI_INT, 0);
+    low_comm->c_coll->coll_bcast(&_bct, low_comm, low_comm->c_coll->coll_bcast_module);
     free(my_low_rank_map);
     han_module->cached_topo = topo;
 #if OPAL_ENABLE_DEBUG
