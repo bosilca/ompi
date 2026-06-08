@@ -14,6 +14,7 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2024-2025 Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -30,7 +31,9 @@ PROTOTYPE VOID alltoallw(BUFFER x1, COUNT_ARRAY sendcounts,
     int size, c_ierr;
     MPI_Comm c_comm = PMPI_Comm_f2c(*comm);
     char *sendbuf = OMPI_CFI_BASE_ADDR(x1), *recvbuf = OMPI_CFI_BASE_ADDR(x2);
-    MPI_Datatype *c_sendtypes = NULL, *c_recvtypes = NULL;
+    ompi_count_array_t sendcounts_desc, recvcounts_desc;
+    ompi_disp_array_t sdispls_desc, rdispls_desc;
+    ompi_datatype_array_t sendtypes_desc = OMPI_DATATYPE_ARRAY_NULL;
     @COUNT_TYPE@ *tmp_sendcounts = NULL;
     @DISP_TYPE@ *tmp_sdispls = NULL;
     @COUNT_TYPE@ *tmp_recvcounts = NULL;
@@ -45,10 +48,10 @@ PROTOTYPE VOID alltoallw(BUFFER x1, COUNT_ARRAY sendcounts,
             OMPI_ERRHANDLER_INVOKE(c_comm, c_ierr, FUNC_NAME)
             return;
         }
-        c_sendtypes = (MPI_Datatype *) malloc(size * sizeof(MPI_Datatype));
-        for (int i=0; i<size; i++) {
-            c_sendtypes[i] = PMPI_Type_f2c(sendtypes[i]);
-        }
+        /* Pass the Fortran datatype handles straight through as a tagged array;
+         * the dispatch resolves them, so no temporary MPI_Datatype array is
+         * allocated here. */
+        sendtypes_desc = ompi_datatype_array_create_f(sendtypes);
         OMPI_FORTRAN_BIGCOUNT_ARRAY_SET(sendcounts, tmp_sendcounts, size);
         OMPI_FORTRAN_BIGCOUNT_ARRAY_SET(sdispls, tmp_sdispls, size);
     } else {
@@ -62,11 +65,6 @@ PROTOTYPE VOID alltoallw(BUFFER x1, COUNT_ARRAY sendcounts,
         goto fn_exit;
     }
 
-    c_recvtypes = (MPI_Datatype *) malloc(size * sizeof(MPI_Datatype));
-    for (int i=0; i<size; i++) {
-        c_recvtypes[i] = PMPI_Type_f2c(recvtypes[i]);
-    }
-
     sendbuf = (char *) OMPI_F2C_IN_PLACE(sendbuf);
     sendbuf = (char *) OMPI_F2C_BOTTOM(sendbuf);
     recvbuf = (char *) OMPI_F2C_BOTTOM(recvbuf);
@@ -74,14 +72,15 @@ PROTOTYPE VOID alltoallw(BUFFER x1, COUNT_ARRAY sendcounts,
     OMPI_FORTRAN_BIGCOUNT_ARRAY_SET(recvcounts, tmp_recvcounts, size);
     OMPI_FORTRAN_BIGCOUNT_ARRAY_SET(rdispls, tmp_rdispls, size);
 
-    c_ierr = @INNER_CALL@(sendbuf,
-                          tmp_sendcounts,
-                          tmp_sdispls,
-                          c_sendtypes,
-                          recvbuf,
-                          tmp_recvcounts,
-                          tmp_rdispls,
-                          c_recvtypes, c_comm);
+    OMPI_COUNT_ARRAY_INIT(&sendcounts_desc, tmp_sendcounts);
+    OMPI_DISP_ARRAY_INIT(&sdispls_desc, tmp_sdispls);
+    OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, tmp_recvcounts);
+    OMPI_DISP_ARRAY_INIT(&rdispls_desc, tmp_rdispls);
+
+    c_ierr = ompi_alltoallw_dispatch(sendbuf, sendcounts_desc, sdispls_desc, sendtypes_desc,
+                                     recvbuf, recvcounts_desc, rdispls_desc,
+                                     ompi_datatype_array_create_f(recvtypes),
+                                     c_comm, FUNC_NAME);
     if (NULL != ierr) *ierr = OMPI_INT_2_FINT(c_ierr);
 
 fn_exit:
@@ -89,11 +88,4 @@ fn_exit:
     OMPI_FORTRAN_BIGCOUNT_ARRAY_CLEANUP(sdispls, tmp_sdispls);
     OMPI_FORTRAN_BIGCOUNT_ARRAY_CLEANUP(recvcounts, tmp_recvcounts);
     OMPI_FORTRAN_BIGCOUNT_ARRAY_CLEANUP(rdispls, tmp_rdispls);
-
-    if (NULL != c_sendtypes) {
-        free(c_sendtypes);
-    }
-    if (NULL != c_recvtypes) {
-        free(c_recvtypes);
-    }
 }

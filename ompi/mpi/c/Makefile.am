@@ -47,7 +47,7 @@ if BUILD_MPI_BINDINGS_LAYER
 noinst_LTLIBRARIES += libmpi_c_noprofile.la
 endif
 
-headers = bindings.h
+headers = bindings.h coll_w_dispatch.h
 
 #
 # Template/prototype source files used for generating MPI functions
@@ -505,8 +505,13 @@ EXTRA_DIST = $(prototype_sources)
 
 # attr_fn.c contains attribute manipulation functions which do not
 # profiling implications, and so are always built.
+#
+# coll_w_dispatch.c is the shared (profiling-neutral) back-end for the
+# alltoallw / neighbor_alltoallw family, called by both the C bindings and
+# the Fortran bindings.
 libmpi_c_la_SOURCES = \
-        attr_fn.c
+        attr_fn.c \
+        coll_w_dispatch.c
 libmpi_c_la_LIBADD = libmpi_c_profile.la
 if BUILD_MPI_BINDINGS_LAYER
 libmpi_c_la_LIBADD += libmpi_c_noprofile.la

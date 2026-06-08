@@ -38,22 +38,26 @@ int mca_coll_self_alltoallw_intra(ompi_coll_args_t *args, struct ompi_communicat
 {
     int err;
     ptrdiff_t lb, rextent, sextent;
+    struct ompi_datatype_t *sdtype, *rdtype;
 
     if (MPI_IN_PLACE == args->src.info_v.buffer) {
         return MPI_SUCCESS;
     }
 
-    err = ompi_datatype_get_extent(args->src.info_v.datatypes[0], &lb, &sextent);
+    sdtype = ompi_datatype_array_get(args->src.info_v.datatypes, 0);
+    rdtype = ompi_datatype_array_get(args->dst.info_v.datatypes, 0);
+
+    err = ompi_datatype_get_extent(sdtype, &lb, &sextent);
     if (OMPI_SUCCESS != err) {
         return OMPI_ERROR;
     }
-    err = ompi_datatype_get_extent(args->dst.info_v.datatypes[0], &lb, &rextent);
+    err = ompi_datatype_get_extent(rdtype, &lb, &rextent);
     if (OMPI_SUCCESS != err) {
         return OMPI_ERROR;
     }
 
     return ompi_datatype_sndrcv(((char *) args->src.info_v.buffer) + ompi_disp_array_get(args->src.info_v.displacements, 0) * sextent,
-                           ompi_count_array_get(args->src.info_v.counts, 0), args->src.info_v.datatypes[0],
+                           ompi_count_array_get(args->src.info_v.counts, 0), sdtype,
                            ((char *) args->dst.info_v.buffer) + ompi_disp_array_get(args->dst.info_v.displacements, 0) * rextent,
-                           ompi_count_array_get(args->dst.info_v.counts, 0), args->dst.info_v.datatypes[0]);
+                           ompi_count_array_get(args->dst.info_v.counts, 0), rdtype);
 }

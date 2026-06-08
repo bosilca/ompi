@@ -26,7 +26,9 @@
 
 #include "ompi/mpi/fortran/mpif-h/bindings.h"
 #include "ompi/mpi/fortran/base/constants.h"
+#include "ompi/communicator/communicator.h"
 #include "ompi/mca/coll/base/coll_base_util.h"
+#include "ompi/mpi/c/coll_w_dispatch.h"
 
 #if OMPI_BUILD_MPI_PROFILING
 #if OPAL_HAVE_WEAK_SYMBOLS
@@ -78,10 +80,13 @@ void ompi_alltoallw_init_f(char *sendbuf, MPI_Fint *sendcounts,
                            MPI_Fint *comm, MPI_Fint *info, MPI_Fint *request, MPI_Fint *ierr)
 {
     MPI_Comm c_comm;
-    MPI_Datatype *c_sendtypes = NULL, *c_recvtypes;
     MPI_Info c_info;
     MPI_Request c_request;
     int size, c_ierr;
+    bool have_sendbuf = !OMPI_IS_FORTRAN_IN_PLACE(sendbuf);
+    ompi_count_array_t sendcounts_desc, recvcounts_desc;
+    ompi_disp_array_t sdispls_desc, rdispls_desc;
+    ompi_datatype_array_t sendtypes_desc = OMPI_DATATYPE_ARRAY_NULL;
     OMPI_ARRAY_NAME_DECL(sendcounts);
     OMPI_ARRAY_NAME_DECL(sdispls);
     OMPI_ARRAY_NAME_DECL(recvcounts);
@@ -91,48 +96,41 @@ void ompi_alltoallw_init_f(char *sendbuf, MPI_Fint *sendcounts,
     c_info = PMPI_Info_f2c(*info);
     size = OMPI_COMM_IS_INTER(c_comm)?ompi_comm_remote_size(c_comm):ompi_comm_size(c_comm);
 
-    if (!OMPI_IS_FORTRAN_IN_PLACE(sendbuf)) {
-        c_sendtypes = (MPI_Datatype *) malloc(size * sizeof(MPI_Datatype));
+    /* Datatype handles are passed straight through; the dispatch retains stable
+     * object pointers on the persistent request (freed when the request is
+     * freed), so no temporary MPI_Datatype array is allocated here. */
+    if (have_sendbuf) {
         OMPI_ARRAY_FINT_2_INT(sendcounts, size);
         OMPI_ARRAY_FINT_2_INT(sdispls, size);
-        for (int i=0; i<size; i++) {
-            c_sendtypes[i] = PMPI_Type_f2c(sendtypes[i]);
-        }
+        sendtypes_desc = ompi_datatype_array_create_f(sendtypes);
     }
+    OMPI_COUNT_ARRAY_INIT(&sendcounts_desc, OMPI_ARRAY_NAME_CONVERT(sendcounts));
+    OMPI_DISP_ARRAY_INIT(&sdispls_desc, OMPI_ARRAY_NAME_CONVERT(sdispls));
 
-    c_recvtypes = (MPI_Datatype *) malloc(size * sizeof(MPI_Datatype));
     OMPI_ARRAY_FINT_2_INT(recvcounts, size);
     OMPI_ARRAY_FINT_2_INT(rdispls, size);
-    for (int i=0; i<size; i++) {
-        c_recvtypes[i] = PMPI_Type_f2c(recvtypes[i]);
-    }
+    OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, OMPI_ARRAY_NAME_CONVERT(recvcounts));
+    OMPI_DISP_ARRAY_INIT(&rdispls_desc, OMPI_ARRAY_NAME_CONVERT(rdispls));
 
     sendbuf = (char *) OMPI_F2C_IN_PLACE(sendbuf);
     sendbuf = (char *) OMPI_F2C_BOTTOM(sendbuf);
     recvbuf = (char *) OMPI_F2C_BOTTOM(recvbuf);
 
-    c_ierr = PMPI_Alltoallw_init(sendbuf,
-                                 OMPI_ARRAY_NAME_CONVERT(sendcounts),
-                                 OMPI_ARRAY_NAME_CONVERT(sdispls),
-                                 c_sendtypes,
-                                 recvbuf,
-                                 OMPI_ARRAY_NAME_CONVERT(recvcounts),
-                                 OMPI_ARRAY_NAME_CONVERT(rdispls),
-                                 c_recvtypes, c_comm, c_info, &c_request);
+    c_ierr = ompi_alltoallw_init_dispatch(sendbuf, sendcounts_desc, sdispls_desc, sendtypes_desc,
+                                          recvbuf, recvcounts_desc, rdispls_desc,
+                                          ompi_datatype_array_create_f(recvtypes),
+                                          c_comm, c_info, &c_request, "MPI_Alltoallw_init");
     if (NULL != ierr) *ierr = OMPI_INT_2_FINT(c_ierr);
     if (MPI_SUCCESS == c_ierr) {
         *request = PMPI_Request_c2f(c_request);
-        ((ompi_coll_base_nbc_request_t *) c_request)->args.mask |= OMPI_COLL_ARGS_FREE_DST_DTYPES;
         if ((void *)recvcounts != (void *)OMPI_ARRAY_NAME_CONVERT(recvcounts)) {
             ((ompi_coll_base_nbc_request_t *) c_request)->args.mask |= OMPI_COLL_ARGS_FREE_DST_COUNTS;
             ((ompi_coll_base_nbc_request_t *) c_request)->args.mask |= OMPI_COLL_ARGS_FREE_DST_DISPS;
         }
-        if (NULL != c_sendtypes) {
-            ((ompi_coll_base_nbc_request_t *) c_request)->args.mask |= OMPI_COLL_ARGS_FREE_SRC_DTYPES;
-            if ((void *)sendcounts != (void *)OMPI_ARRAY_NAME_CONVERT(sendcounts)) {
-                ((ompi_coll_base_nbc_request_t *) c_request)->args.mask |= OMPI_COLL_ARGS_FREE_SRC_COUNTS;
-                ((ompi_coll_base_nbc_request_t *) c_request)->args.mask |= OMPI_COLL_ARGS_FREE_SRC_DISPS;
-            }
+        if (have_sendbuf &&
+            (void *)sendcounts != (void *)OMPI_ARRAY_NAME_CONVERT(sendcounts)) {
+            ((ompi_coll_base_nbc_request_t *) c_request)->args.mask |= OMPI_COLL_ARGS_FREE_SRC_COUNTS;
+            ((ompi_coll_base_nbc_request_t *) c_request)->args.mask |= OMPI_COLL_ARGS_FREE_SRC_DISPS;
         }
         ompi_coll_base_add_release_arrays_cb(c_request);
     } else {
@@ -140,9 +138,5 @@ void ompi_alltoallw_init_f(char *sendbuf, MPI_Fint *sendcounts,
         OMPI_ARRAY_FINT_2_INT_CLEANUP(sdispls);
         OMPI_ARRAY_FINT_2_INT_CLEANUP(recvcounts);
         OMPI_ARRAY_FINT_2_INT_CLEANUP(rdispls);
-        if (NULL != c_sendtypes) {
-            free(c_sendtypes);
-        }
-        free(c_recvtypes);
     }
 }

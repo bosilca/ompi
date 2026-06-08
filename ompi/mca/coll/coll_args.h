@@ -39,6 +39,7 @@
 
 #include "ompi/request/request.h"
 #include "ompi/util/count_disp_array.h"
+#include "ompi/util/datatype_array.h"
 
 BEGIN_C_DECLS
 
@@ -144,7 +145,7 @@ typedef struct ompi_coll_buffer_info_v_t {
     ompi_disp_array_t       displacements;   /**< unused for reduce_scatter */
     union {                                  /**< anonymous: only one is set */
         struct ompi_datatype_t *datatype;          /**< single datatype */
-        struct ompi_datatype_t * const *datatypes; /**< per-peer (alltoallw) */
+        ompi_datatype_array_t   datatypes;         /**< per-peer (alltoallw) */
     };
 } ompi_coll_buffer_info_v_t;
 
@@ -342,9 +343,9 @@ ompi_coll_args_alltoallv(ompi_coll_args_t *a, const void *sbuf,
 static inline void
 ompi_coll_args_alltoallw(ompi_coll_args_t *a, const void *sbuf,
                          ompi_count_array_t scounts, ompi_disp_array_t sdisps,
-                         struct ompi_datatype_t * const *sdtypes, void *rbuf,
+                         ompi_datatype_array_t sdtypes, void *rbuf,
                          ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                         struct ompi_datatype_t * const *rdtypes)
+                         ompi_datatype_array_t rdtypes)
 {
     *a = (ompi_coll_args_t) {
         .coll_type = OMPI_COLL_TYPE_ALLTOALLW,
@@ -490,9 +491,9 @@ ompi_coll_args_neighbor_alltoallv(ompi_coll_args_t *a, const void *sbuf,
 static inline void
 ompi_coll_args_neighbor_alltoallw(ompi_coll_args_t *a, const void *sbuf,
                                   ompi_count_array_t scounts, ompi_disp_array_t sdisps,
-                                  struct ompi_datatype_t * const *sdtypes, void *rbuf,
+                                  ompi_datatype_array_t sdtypes, void *rbuf,
                                   ompi_count_array_t rcounts, ompi_disp_array_t rdisps,
-                                  struct ompi_datatype_t * const *rdtypes)
+                                  ompi_datatype_array_t rdtypes)
 {
     ompi_coll_args_alltoallw(a, sbuf, scounts, sdisps, sdtypes, rbuf, rcounts, rdisps, rdtypes);
     a->coll_type = OMPI_COLL_TYPE_NEIGHBOR_ALLTOALLW;

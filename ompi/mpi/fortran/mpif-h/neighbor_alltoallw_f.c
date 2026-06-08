@@ -29,6 +29,8 @@
 #include "ompi/mpi/fortran/mpif-h/bindings.h"
 #include "ompi/mpi/fortran/base/constants.h"
 #include "ompi/mpi/fortran/base/fortran_base_topo_neighbors.h"
+#include "ompi/communicator/communicator.h"
+#include "ompi/mpi/c/coll_w_dispatch.h"
 
 #if OMPI_BUILD_MPI_PROFILING
 #if OPAL_HAVE_WEAK_SYMBOLS
@@ -80,8 +82,9 @@ void ompi_neighbor_alltoallw_f(char *sendbuf, MPI_Fint *sendcounts,
                                MPI_Fint *comm, MPI_Fint *ierr)
 {
     MPI_Comm c_comm;
-    MPI_Datatype *c_sendtypes, *c_recvtypes;
     int indegree, outdegree, c_ierr;
+    ompi_count_array_t sendcounts_desc, recvcounts_desc;
+    ompi_disp_array_t sdispls_desc, rdispls_desc;
     OMPI_ARRAY_NAME_DECL(sendcounts);
     OMPI_ARRAY_NAME_DECL(recvcounts);
 
@@ -92,38 +95,26 @@ void ompi_neighbor_alltoallw_f(char *sendbuf, MPI_Fint *sendcounts,
         return;
     }
 
-    c_sendtypes = (MPI_Datatype *) malloc(outdegree * sizeof(MPI_Datatype));
-    c_recvtypes = (MPI_Datatype *) malloc(indegree * sizeof(MPI_Datatype));
-
     OMPI_ARRAY_FINT_2_INT(sendcounts, outdegree);
     OMPI_ARRAY_FINT_2_INT(recvcounts, indegree);
+    OMPI_COUNT_ARRAY_INIT(&sendcounts_desc, OMPI_ARRAY_NAME_CONVERT(sendcounts));
+    OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, OMPI_ARRAY_NAME_CONVERT(recvcounts));
+    OMPI_DISP_ARRAY_INIT(&sdispls_desc, sdispls);
+    OMPI_DISP_ARRAY_INIT(&rdispls_desc, rdispls);
 
-    while (outdegree > 0) {
-        c_sendtypes[outdegree - 1] = PMPI_Type_f2c(sendtypes[outdegree - 1]);
-        --outdegree;
-    }
-
-    while (indegree > 0) {
-        c_recvtypes[indegree - 1] = PMPI_Type_f2c(recvtypes[indegree - 1]);
-        --indegree;
-    }
-
-    /* Alltoallw does not support MPI_IN_PLACE */
+    /* Alltoallw does not support MPI_IN_PLACE; the Fortran datatype handles are
+     * passed straight through as tagged arrays (no temporary MPI_Datatype
+     * array is allocated). */
     sendbuf = (char *) OMPI_F2C_BOTTOM(sendbuf);
     recvbuf = (char *) OMPI_F2C_BOTTOM(recvbuf);
 
-    c_ierr = PMPI_Neighbor_alltoallw(sendbuf,
-                                    OMPI_ARRAY_NAME_CONVERT(sendcounts),
-                                    sdispls,
-                                    c_sendtypes,
-                                    recvbuf,
-                                    OMPI_ARRAY_NAME_CONVERT(recvcounts),
-                                    rdispls,
-                                    c_recvtypes, c_comm);
+    c_ierr = ompi_neighbor_alltoallw_dispatch(sendbuf, sendcounts_desc, sdispls_desc,
+                                              ompi_datatype_array_create_f(sendtypes),
+                                              recvbuf, recvcounts_desc, rdispls_desc,
+                                              ompi_datatype_array_create_f(recvtypes),
+                                              c_comm, "MPI_Neighbor_alltoallw");
     if (NULL != ierr) *ierr = OMPI_INT_2_FINT(c_ierr);
 
     OMPI_ARRAY_FINT_2_INT_CLEANUP(sendcounts);
     OMPI_ARRAY_FINT_2_INT_CLEANUP(recvcounts);
-    free(c_sendtypes);
-    free(c_recvtypes);
 }

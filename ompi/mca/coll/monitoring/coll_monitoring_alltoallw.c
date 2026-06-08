@@ -25,7 +25,7 @@ int mca_coll_monitoring_alltoallw(ompi_coll_args_t *args, struct ompi_communicat
     int i, rank;
     for( i = 0; i < comm_size; ++i ) {
         if( my_rank == i ) continue; /* No communication for self */
-            ompi_datatype_type_size(args->src.info_v.datatypes[i], &type_size);
+            ompi_datatype_type_size(ompi_datatype_array_get(args->src.info_v.datatypes, i), &type_size);
             data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
         /**
          * If this fails the destination is not part of my MPI_COM_WORLD
@@ -49,7 +49,7 @@ int mca_coll_monitoring_ialltoallw(ompi_coll_args_t *args, struct ompi_communica
     int i, rank;
     for( i = 0; i < comm_size; ++i ) {
         if( my_rank == i ) continue; /* No communication for self */
-            ompi_datatype_type_size(args->src.info_v.datatypes[i], &type_size);
+            ompi_datatype_type_size(ompi_datatype_array_get(args->src.info_v.datatypes, i), &type_size);
             data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
         /**
          * If this fails the destination is not part of my MPI_COM_WORLD

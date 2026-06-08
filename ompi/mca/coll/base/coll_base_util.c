@@ -181,18 +181,20 @@ static void release_args(ompi_coll_base_nbc_request_t *request)
                                                        : ompi_comm_size(comm);
         }
         if (a->flags & OMPI_COLL_ARGS_FLAG_SRC_DTYPE_VEC) {
-            ompi_datatype_t * const *types = a->src.info_v.datatypes;
-            for (int i = 0; NULL != types && i < scount; i++) {
-                if (NULL != types[i] && !ompi_datatype_is_predefined(types[i])) {
-                    OMPI_DATATYPE_RELEASE_NO_NULLIFY(types[i]);
+            ompi_datatype_array_t types = a->src.info_v.datatypes;
+            for (int i = 0; OMPI_DATATYPE_ARRAY_NULL != types && i < scount; i++) {
+                ompi_datatype_t *type = ompi_datatype_array_get(types, i);
+                if (NULL != type && !ompi_datatype_is_predefined(type)) {
+                    OMPI_DATATYPE_RELEASE_NO_NULLIFY(type);
                 }
             }
         }
         if (a->flags & OMPI_COLL_ARGS_FLAG_DST_DTYPE_VEC) {
-            ompi_datatype_t * const *types = a->dst.info_v.datatypes;
-            for (int i = 0; NULL != types && i < rcount; i++) {
-                if (NULL != types[i] && !ompi_datatype_is_predefined(types[i])) {
-                    OMPI_DATATYPE_RELEASE_NO_NULLIFY(types[i]);
+            ompi_datatype_array_t types = a->dst.info_v.datatypes;
+            for (int i = 0; OMPI_DATATYPE_ARRAY_NULL != types && i < rcount; i++) {
+                ompi_datatype_t *type = ompi_datatype_array_get(types, i);
+                if (NULL != type && !ompi_datatype_is_predefined(type)) {
+                    OMPI_DATATYPE_RELEASE_NO_NULLIFY(type);
                 }
             }
         }
@@ -216,7 +218,7 @@ static void release_args(ompi_coll_base_nbc_request_t *request)
         free((void *) ompi_disp_array_ptr(a->src.info_v.displacements));
     }
     if (a->mask & OMPI_COLL_ARGS_FREE_SRC_DTYPES) {
-        free((void *) a->src.info_v.datatypes);
+        free((void *) ompi_datatype_array_ptr(a->src.info_v.datatypes));
     }
     if (a->mask & OMPI_COLL_ARGS_FREE_DST_COUNTS) {
         free((void *) ompi_count_array_ptr(a->dst.info_v.counts));
@@ -225,7 +227,7 @@ static void release_args(ompi_coll_base_nbc_request_t *request)
         free((void *) ompi_disp_array_ptr(a->dst.info_v.displacements));
     }
     if (a->mask & OMPI_COLL_ARGS_FREE_DST_DTYPES) {
-        free((void *) a->dst.info_v.datatypes);
+        free((void *) ompi_datatype_array_ptr(a->dst.info_v.datatypes));
     }
     a->mask &= ~(OMPI_COLL_ARGS_FREE_SRC_COUNTS | OMPI_COLL_ARGS_FREE_SRC_DISPS
                  | OMPI_COLL_ARGS_FREE_SRC_DTYPES | OMPI_COLL_ARGS_FREE_DST_COUNTS
@@ -357,14 +359,69 @@ int ompi_coll_base_retain_datatypes( ompi_request_t *req, ompi_datatype_t *stype
     return OMPI_SUCCESS;
 }
 
+/*
+ * Retain one side (src or dst) of a per-peer datatype array for a non-blocking
+ * request. The operation's datatypes must survive until the request completes,
+ * so we capture stable object pointers now: a Fortran-handle array is resolved
+ * once into an owned C-pointer array (marked for deferred free), while a
+ * C-pointer array is stored as-is. The resolved, non-predefined datatypes are
+ * retained and released in release_args(). Resolving a Fortran handle later (at
+ * completion) would be unsafe because the handle may have been freed/recycled.
+ */
+static int retain_datatypes_w_side(ompi_coll_base_nbc_request_t *request,
+                                   ompi_datatype_array_t types, int count,
+                                   ompi_datatype_array_t *stored,
+                                   uint64_t flag_bit, uint64_t free_bit,
+                                   bool *retain)
+{
+    ompi_datatype_t * const *resolved;
+    ompi_datatype_t **owned = NULL;
+
+    *stored = OMPI_DATATYPE_ARRAY_NULL;
+    if (OMPI_DATATYPE_ARRAY_NULL == types) {
+        return OMPI_SUCCESS;
+    }
+
+    if (ompi_datatype_array_is_fortran(types)) {
+        owned = (ompi_datatype_t **) malloc(count * sizeof(ompi_datatype_t *));
+        if (OPAL_UNLIKELY(NULL == owned)) {
+            return OMPI_ERR_OUT_OF_RESOURCE;
+        }
+        for (int i = 0; i < count; i++) {
+            owned[i] = ompi_datatype_array_get(types, i);
+        }
+        resolved = owned;
+    } else {
+        resolved = (ompi_datatype_t * const *) ompi_datatype_array_ptr(types);
+    }
+
+    for (int i = 0; i < count; i++) {
+        if (NULL != resolved[i] && !ompi_datatype_is_predefined(resolved[i])) {
+            OBJ_RETAIN(resolved[i]);
+            *retain = true;
+        }
+    }
+
+    *stored = ompi_datatype_array_create(resolved);
+    request->args.flags |= flag_bit;
+    if (NULL != owned) {
+        /* We own this resolved array and must free it at completion, which
+         * only happens if the completion/free callbacks are installed. Force
+         * that even when every datatype was predefined (nothing retained). */
+        request->args.mask |= free_bit;
+        *retain = true;
+    }
+    return OMPI_SUCCESS;
+}
+
 int ompi_coll_base_retain_datatypes_w( ompi_request_t *req,
-                                       ompi_datatype_t * const stypes[],
-                                       ompi_datatype_t * const rtypes[],
+                                       ompi_datatype_array_t stypes,
+                                       ompi_datatype_array_t rtypes,
                                        bool use_topo)
 {
     ompi_coll_base_nbc_request_t *request = (ompi_coll_base_nbc_request_t *)req;
     ompi_communicator_t *comm = request->super.req_mpi_object.comm;
-    int scount, rcount;
+    int scount, rcount, rc;
     bool retain = false;
 
     if (REQUEST_COMPLETE(req)) {
@@ -377,29 +434,21 @@ int ompi_coll_base_retain_datatypes_w( ompi_request_t *req,
         scount = rcount = OMPI_COMM_IS_INTER(comm)?ompi_comm_remote_size(comm):ompi_comm_size(comm);
     }
 
-    request->args.src.info_v.datatypes = NULL;
-    request->args.dst.info_v.datatypes = NULL;
     request->args.flags &= ~(OMPI_COLL_ARGS_FLAG_SRC_DTYPE_VEC | OMPI_COLL_ARGS_FLAG_DST_DTYPE_VEC);
-    if (NULL != stypes) {
-        for (int i = 0; i < scount; i++) {
-            if (NULL != stypes[i] && !ompi_datatype_is_predefined(stypes[i])) {
-                OBJ_RETAIN(stypes[i]);
-                retain = true;
-            }
-        }
-        request->args.src.info_v.datatypes = stypes;
-        request->args.flags |= OMPI_COLL_ARGS_FLAG_SRC_DTYPE_VEC;
+
+    rc = retain_datatypes_w_side(request, stypes, scount, &request->args.src.info_v.datatypes,
+                                 OMPI_COLL_ARGS_FLAG_SRC_DTYPE_VEC, OMPI_COLL_ARGS_FREE_SRC_DTYPES,
+                                 &retain);
+    if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
+        return rc;
     }
-    if (NULL != rtypes) {
-        for (int i = 0; i < rcount; i++) {
-            if (NULL != rtypes[i] && !ompi_datatype_is_predefined(rtypes[i])) {
-                OBJ_RETAIN(rtypes[i]);
-                retain = true;
-            }
-        }
-        request->args.dst.info_v.datatypes = rtypes;
-        request->args.flags |= OMPI_COLL_ARGS_FLAG_DST_DTYPE_VEC;
+    rc = retain_datatypes_w_side(request, rtypes, rcount, &request->args.dst.info_v.datatypes,
+                                 OMPI_COLL_ARGS_FLAG_DST_DTYPE_VEC, OMPI_COLL_ARGS_FREE_DST_DTYPES,
+                                 &retain);
+    if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
+        return rc;
     }
+
     if (OPAL_LIKELY(retain)) {
         nbc_install_callbacks(request);
     }

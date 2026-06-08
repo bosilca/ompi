@@ -35,7 +35,7 @@ int mca_coll_monitoring_neighbor_alltoallw(ompi_coll_args_t *args, struct ompi_c
         }
 
         if (MPI_PROC_NULL != srank) {
-            ompi_datatype_type_size(args->src.info_v.datatypes[i], &type_size);
+            ompi_datatype_type_size(ompi_datatype_array_get(args->src.info_v.datatypes, i), &type_size);
             data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
@@ -49,7 +49,7 @@ int mca_coll_monitoring_neighbor_alltoallw(ompi_coll_args_t *args, struct ompi_c
         }
 
         if (MPI_PROC_NULL != drank) {
-            ompi_datatype_type_size(args->src.info_v.datatypes[i], &type_size);
+            ompi_datatype_type_size(ompi_datatype_array_get(args->src.info_v.datatypes, i), &type_size);
             data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
@@ -86,7 +86,7 @@ int mca_coll_monitoring_ineighbor_alltoallw(ompi_coll_args_t *args, struct ompi_
         }
 
         if (MPI_PROC_NULL != srank) {
-            ompi_datatype_type_size(args->src.info_v.datatypes[i], &type_size);
+            ompi_datatype_type_size(ompi_datatype_array_get(args->src.info_v.datatypes, i), &type_size);
             data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD
@@ -100,7 +100,7 @@ int mca_coll_monitoring_ineighbor_alltoallw(ompi_coll_args_t *args, struct ompi_
         }
 
         if (MPI_PROC_NULL != drank) {
-            ompi_datatype_type_size(args->src.info_v.datatypes[i], &type_size);
+            ompi_datatype_type_size(ompi_datatype_array_get(args->src.info_v.datatypes, i), &type_size);
             data_size = ompi_count_array_get(args->src.info_v.counts, i) * type_size;
             /**
              * If this fails the destination is not part of my MPI_COM_WORLD

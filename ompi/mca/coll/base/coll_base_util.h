@@ -162,13 +162,18 @@ int ompi_coll_base_retain_datatypes( ompi_request_t *request,
                                      ompi_datatype_t *rtype);
 
 /**
- * If necessary, retain the datatypes and store them in the
- * request object, which should be of type ompi_coll_base_nbc_request_t
- * (will be cast internally).
+ * Retain the per-peer datatype arrays (alltoallw family) and store stable
+ * object pointers in the request object, which should be of type
+ * ompi_coll_base_nbc_request_t (will be cast internally).
+ *
+ * The arrays are tagged (ompi_datatype_array_t): a C-pointer array is stored
+ * as-is, while a Fortran-handle array is resolved once into an owned C-pointer
+ * array that release_args() will free.  Pass OMPI_DATATYPE_ARRAY_NULL for a
+ * side that has no datatype array (e.g. MPI_IN_PLACE send).
  */
 int ompi_coll_base_retain_datatypes_w( ompi_request_t *request,
-                                       ompi_datatype_t * const stypes[],
-                                       ompi_datatype_t * const rtypes[],
+                                       ompi_datatype_array_t stypes,
+                                       ompi_datatype_array_t rtypes,
                                        bool use_topo);
 
 /**

@@ -270,6 +270,7 @@ def print_c_source_header(out):
     out.dump('#include "ompi/datatype/ompi_datatype.h"')
     out.dump('#include "ompi/attribute/attribute.h"')
     out.dump('#include "ompi/mca/coll/base/coll_base_util.h"')
+    out.dump('#include "ompi/mpi/c/coll_w_dispatch.h"')
     out.dump('#include "ts.h"')
     out.dump('#include "bigcount.h"')
 

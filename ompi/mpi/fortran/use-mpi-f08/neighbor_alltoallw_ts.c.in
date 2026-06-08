@@ -17,6 +17,7 @@
  *                         and Technology (RIST).  All rights reserved.
  * Copyright (c) 2024-2026 Triad National Security, LLC. All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -31,9 +32,10 @@ PROTOTYPE VOID neighbor_alltoallw(BUFFER x1, COUNT_ARRAY sendcounts,
                                   COMM comm)
 {
     MPI_Comm c_comm = PMPI_Comm_f2c(*comm);
-    MPI_Datatype *c_sendtypes, *c_recvtypes;
     int indegree, outdegree, c_ierr;
     char *sendbuf = OMPI_CFI_BASE_ADDR(x1), *recvbuf = OMPI_CFI_BASE_ADDR(x2);
+    ompi_count_array_t sendcounts_desc, recvcounts_desc;
+    ompi_disp_array_t sdispls_desc, rdispls_desc;
     @COUNT_TYPE@ *tmp_sendcounts = NULL;
     @COUNT_TYPE@ *tmp_recvcounts = NULL;
 
@@ -57,37 +59,26 @@ PROTOTYPE VOID neighbor_alltoallw(BUFFER x1, COUNT_ARRAY sendcounts,
         return;
     }
 
-    c_sendtypes = (MPI_Datatype *) malloc(outdegree * sizeof(MPI_Datatype));
-    c_recvtypes = (MPI_Datatype *) malloc(indegree * sizeof(MPI_Datatype));
-
     OMPI_FORTRAN_BIGCOUNT_ARRAY_SET(sendcounts, tmp_sendcounts, outdegree);
     OMPI_FORTRAN_BIGCOUNT_ARRAY_SET(recvcounts, tmp_recvcounts, indegree);
 
-    while (outdegree > 0) {
-        c_sendtypes[outdegree - 1] = PMPI_Type_f2c(sendtypes[outdegree - 1]);
-        --outdegree;
-    }
-    while (indegree > 0) {
-        c_recvtypes[indegree - 1] = PMPI_Type_f2c(recvtypes[indegree - 1]);
-        --indegree;
-    }
+    OMPI_COUNT_ARRAY_INIT(&sendcounts_desc, tmp_sendcounts);
+    OMPI_COUNT_ARRAY_INIT(&recvcounts_desc, tmp_recvcounts);
+    OMPI_DISP_ARRAY_INIT(&sdispls_desc, sdispls);
+    OMPI_DISP_ARRAY_INIT(&rdispls_desc, rdispls);
 
-    /* Alltoallw does not support MPI_IN_PLACE */
+    /* Alltoallw does not support MPI_IN_PLACE; the datatype handles are passed
+     * straight through as tagged arrays (no temporary MPI_Datatype array). */
     sendbuf = (char *) OMPI_F2C_BOTTOM(sendbuf);
     recvbuf = (char *) OMPI_F2C_BOTTOM(recvbuf);
 
-    c_ierr = @INNER_CALL@(sendbuf,
-                          tmp_sendcounts,
-                          sdispls,
-                          c_sendtypes,
-                          recvbuf,
-                          tmp_recvcounts,
-                          rdispls,
-                          c_recvtypes, c_comm);
+    c_ierr = ompi_neighbor_alltoallw_dispatch(sendbuf, sendcounts_desc, sdispls_desc,
+                                              ompi_datatype_array_create_f(sendtypes),
+                                              recvbuf, recvcounts_desc, rdispls_desc,
+                                              ompi_datatype_array_create_f(recvtypes),
+                                              c_comm, FUNC_NAME);
     if (NULL != ierr) *ierr = OMPI_INT_2_FINT(c_ierr);
 
     OMPI_FORTRAN_BIGCOUNT_ARRAY_CLEANUP(sendcounts, tmp_sendcounts);
     OMPI_FORTRAN_BIGCOUNT_ARRAY_CLEANUP(recvcounts, tmp_recvcounts);
-    free(c_sendtypes);
-    free(c_recvtypes);
 }

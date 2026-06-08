@@ -44,8 +44,8 @@ int NBC_Ineighbor_alltoallw_args_compare(NBC_Ineighbor_alltoallw_args *a, NBC_In
 }
 #endif
 
-static int nbc_neighbor_alltoallw_init(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps, struct ompi_datatype_t * const *stypes,
-                                       void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps, struct ompi_datatype_t * const *rtypes,
+static int nbc_neighbor_alltoallw_init(const void *sbuf, ompi_count_array_t scounts, ompi_disp_array_t sdisps, ompi_datatype_array_t stypes,
+                                       void *rbuf, ompi_count_array_t rcounts, ompi_disp_array_t rdisps, ompi_datatype_array_t rtypes,
                                        struct ompi_communicator_t *comm, ompi_request_t ** request,
                                        mca_coll_base_module_t *module, bool persistent) {
   int res, indegree, outdegree, *srcs, *dsts;
@@ -81,7 +81,7 @@ static int nbc_neighbor_alltoallw_init(const void *sbuf, ompi_count_array_t scou
     for (int i = 0 ; i < indegree ; ++i) {
       if (srcs[i] != MPI_PROC_NULL) {
         res = NBC_Sched_recv ((char *) rbuf + ompi_disp_array_get(rdisps, i), false,
-                              ompi_count_array_get(rcounts, i), rtypes[i], srcs[i], schedule, false);
+                              ompi_count_array_get(rcounts, i), ompi_datatype_array_get(rtypes, i), srcs[i], schedule, false);
         if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
           break;
         }
@@ -99,7 +99,7 @@ static int nbc_neighbor_alltoallw_init(const void *sbuf, ompi_count_array_t scou
     for (int i = 0 ; i < outdegree ; ++i) {
       if (dsts[i] != MPI_PROC_NULL) {
         res = NBC_Sched_send ((char *) sbuf + ompi_disp_array_get(sdisps, i), false,
-                              ompi_count_array_get(scounts, i), stypes[i], dsts[i], schedule, false);
+                              ompi_count_array_get(scounts, i), ompi_datatype_array_get(stypes, i), dsts[i], schedule, false);
         if (OPAL_UNLIKELY(OMPI_SUCCESS != res)) {
           break;
         }
