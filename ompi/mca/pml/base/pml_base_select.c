@@ -243,8 +243,9 @@ int mca_pml_base_select(bool enable_progress_threads,
 }
 
 /* need a "commonly" named PML structure so everything ends up in the
-   same modex field */
-static mca_base_component_t pml_base_component = {
+   same modex field. Not static: ompi_modex.c probes the same key to
+   learn whether a peer has committed. */
+mca_base_component_t mca_pml_base_modex_component = {
     OMPI_MCA_BASE_VERSION_2_1_0("pml", 2, 0, 0),
     .mca_component_name = "base",
     .mca_component_major_version = 2,
@@ -313,7 +314,7 @@ mca_pml_base_pml_check_selected_impl(const char *my_pml,
     }
     /* The macro expands its key argument twice, so building the key
      * inline would allocate twice and leak both. */
-    key = mca_base_component_to_string(&pml_base_component);
+    key = mca_base_component_to_string(&mca_pml_base_modex_component);
     if (NULL == key) {
         return OMPI_ERR_OUT_OF_RESOURCE;
     }
