@@ -1624,23 +1624,30 @@ static int ompi_osc_rdma_component_select (struct ompi_win_t *win, void **base, 
     if (OMPI_SUCCESS != ret) {
         opal_output_verbose(MCA_BASE_VERBOSE_ERROR, ompi_osc_base_framework.framework_output,
                             "failed to share window data with peers");
-        ompi_osc_rdma_free (win);
     } else {
         /* for now the leader is always rank 0 in the communicator */
         module->leader = ompi_osc_rdma_module_peer (module, 0);
         if (OPAL_UNLIKELY(NULL == module->leader)) {
             opal_output_verbose(MCA_BASE_VERBOSE_ERROR, ompi_osc_base_framework.framework_output,
                                 "could not reach the window leader");
-            ompi_osc_rdma_free (win);
-            return OMPI_ERR_UNREACH;
+            ret = OMPI_ERR_UNREACH;
         }
-
-        opal_output_verbose(MCA_BASE_VERBOSE_INFO, ompi_osc_base_framework.framework_output,
-                            "finished creating osc/rdma window with id %s",
-                            ompi_comm_print_cid(module->comm));
     }
 
-    return ret;
+    /* Local failures of a collective: rank 0 can never fail the leader
+     * lookup, so without agreement one rank errors out of the
+     * constructor while the rest hold a live window and later deadlock. */
+    ret = synchronize_errorcode (ret, module->comm);
+    if (OPAL_UNLIKELY(OMPI_SUCCESS != ret)) {
+        ompi_osc_rdma_free (win);
+        return ret;
+    }
+
+    opal_output_verbose(MCA_BASE_VERBOSE_INFO, ompi_osc_base_framework.framework_output,
+                        "finished creating osc/rdma window with id %s",
+                        ompi_comm_print_cid(module->comm));
+
+    return OMPI_SUCCESS;
 }
 
 
