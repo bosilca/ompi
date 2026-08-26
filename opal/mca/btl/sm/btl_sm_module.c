@@ -77,24 +77,21 @@ static int sm_btl_first_time_init(mca_btl_sm_t *sm_btl, int n)
     component->endpoints = (struct mca_btl_base_endpoint_t *)
         calloc(n + 1, sizeof(struct mca_btl_base_endpoint_t));
     if (NULL == component->endpoints) {
-        return OPAL_ERR_OUT_OF_RESOURCE;
+        rc = OPAL_ERR_OUT_OF_RESOURCE;
+        goto cleanup;
     }
     component->endpoints[n].peer_smp_rank = -1;
 
     component->local_procs = (opal_proc_t **) calloc(n + 1, sizeof(opal_proc_t *));
     if (NULL == component->local_procs) {
-        free(component->endpoints);
-        component->endpoints = NULL;
-        return OPAL_ERR_OUT_OF_RESOURCE;
+        rc = OPAL_ERR_OUT_OF_RESOURCE;
+        goto cleanup;
     }
 
     component->fbox_in_endpoints = calloc(n + 1, sizeof(void *));
     if (NULL == component->fbox_in_endpoints) {
-        free(component->local_procs);
-        component->local_procs = NULL;
-        free(component->endpoints);
-        component->endpoints = NULL;
-        return OPAL_ERR_OUT_OF_RESOURCE;
+        rc = OPAL_ERR_OUT_OF_RESOURCE;
+        goto cleanup;
     }
 
     component->mpool = mca_mpool_basic_create((void *) (component->my_segment
@@ -103,13 +100,8 @@ static int sm_btl_first_time_init(mca_btl_sm_t *sm_btl, int n)
                                                                - MCA_BTL_SM_FIFO_SIZE),
                                               64);
     if (NULL == component->mpool) {
-        free(component->fbox_in_endpoints);
-        component->fbox_in_endpoints = NULL;
-        free(component->local_procs);
-        component->local_procs = NULL;
-        free(component->endpoints);
-        component->endpoints = NULL;
-        return OPAL_ERR_OUT_OF_RESOURCE;
+        rc = OPAL_ERR_OUT_OF_RESOURCE;
+        goto cleanup;
     }
 
     /* Fast box buffers are prepended with a metadata section. */
@@ -119,7 +111,7 @@ static int sm_btl_first_time_init(mca_btl_sm_t *sm_btl, int n)
                              opal_cache_line_size, 0, mca_btl_sm_component.fbox_max, 4,
                              component->mpool, 0, NULL, NULL, NULL);
     if (OPAL_SUCCESS != rc) {
-        return rc;
+        goto cleanup;
     }
 
     /* initialize fragment descriptor free lists */
@@ -132,7 +124,7 @@ static int sm_btl_first_time_init(mca_btl_sm_t *sm_btl, int n)
                              component->mpool, 0, NULL, mca_btl_sm_frag_init,
                              &component->sm_frags_user);
     if (OPAL_SUCCESS != rc) {
-        return rc;
+        goto cleanup;
     }
 
     /* initialize free list for buffered send fragments */
@@ -144,7 +136,7 @@ static int sm_btl_first_time_init(mca_btl_sm_t *sm_btl, int n)
                              component->mpool, 0, NULL, mca_btl_sm_frag_init,
                              &component->sm_frags_eager);
     if (OPAL_SUCCESS != rc) {
-        return rc;
+        goto cleanup;
     }
 
     if (!mca_smsc_base_has_feature(MCA_SMSC_FEATURE_CAN_MAP)) {
@@ -157,14 +149,43 @@ static int sm_btl_first_time_init(mca_btl_sm_t *sm_btl, int n)
                                  component->mpool, 0, NULL, mca_btl_sm_frag_init,
                                  &component->sm_frags_max_send);
         if (OPAL_SUCCESS != rc) {
-            return rc;
+            goto cleanup;
         }
     }
 
     /* set flag indicating btl has been inited */
-    sm_btl->btl_inited = true;
+    sm_btl->btl_inited = 1;
 
     return OPAL_SUCCESS;
+
+cleanup:
+    /* sm_finalize() skips a btl that never inited, so everything taken
+     * above has to go back here. Re-construct the free lists rather than
+     * release them: they belong to the component and are destructed at
+     * component close, and re-constructing clears fl_mpool so that
+     * destruct does not reach into the mpool finalized below. */
+    OBJ_DESTRUCT(&component->sm_frags_max_send);
+    OBJ_CONSTRUCT(&component->sm_frags_max_send, opal_free_list_t);
+    OBJ_DESTRUCT(&component->sm_frags_eager);
+    OBJ_CONSTRUCT(&component->sm_frags_eager, opal_free_list_t);
+    OBJ_DESTRUCT(&component->sm_frags_user);
+    OBJ_CONSTRUCT(&component->sm_frags_user, opal_free_list_t);
+    OBJ_DESTRUCT(&component->sm_fboxes);
+    OBJ_CONSTRUCT(&component->sm_fboxes, opal_free_list_t);
+
+    if (NULL != component->mpool) {
+        component->mpool->mpool_finalize(component->mpool);
+        component->mpool = NULL;
+    }
+
+    free(component->fbox_in_endpoints);
+    component->fbox_in_endpoints = NULL;
+    free(component->local_procs);
+    component->local_procs = NULL;
+    free(component->endpoints);
+    component->endpoints = NULL;
+
+    return rc;
 }
 
 /* Tell a transient Get miss from a final one; the peer's own state says
@@ -325,14 +346,45 @@ static int init_sm_endpoint(struct mca_btl_base_endpoint_t **ep_out, struct opal
 static int sm_ensure_inited(void)
 {
     mca_btl_sm_component_t *component = &mca_btl_sm_component;
+    bool raise = false;
     int rc = OPAL_SUCCESS;
 
-    if (!mca_btl_sm.btl_inited) {
+    /* A failed init is permanent -- the mpool the free lists come out of
+     * never gives anything back -- so btl_inited keeps the status and
+     * this btl is out for every peer, not just the one being set up. */
+    if (OPAL_UNLIKELY(0 > mca_btl_sm.btl_inited)) {
+        return mca_btl_sm.btl_inited;
+    }
+
+    if (0 == mca_btl_sm.btl_inited) {
         OPAL_THREAD_LOCK(&component->lock);
-        if (!mca_btl_sm.btl_inited) {
+        if (0 == mca_btl_sm.btl_inited) {
             rc = sm_btl_first_time_init(&mca_btl_sm, 1 + MCA_BTL_SM_NUM_LOCAL_PEERS);
+            if (OPAL_SUCCESS != rc) {
+                mca_btl_sm.btl_inited = rc;
+                raise = true;
+                BTL_ERROR(("could not initialize the shared memory btl (%d). A "
+                           "btl_sm_segment_size too small to hold btl_sm_free_list_num "
+                           "fragments and btl_sm_fbox_max fast boxes is the usual cause.",
+                           rc));
+            }
+        } else if (0 > mca_btl_sm.btl_inited) {
+            /* Another thread failed it while we waited for the lock. */
+            rc = mca_btl_sm.btl_inited;
         }
         OPAL_THREAD_UNLOCK(&component->lock);
+
+        /* No fallback is possible: component_init already published this
+         * process's segment, so local peers whose own init succeeded keep
+         * writing into a fifo this process can no longer drain. Abort
+         * rather than hang on it. */
+        if (raise && NULL != mca_btl_sm.error_cb) {
+            mca_btl_sm.error_cb(&mca_btl_sm.super, MCA_BTL_ERROR_FLAGS_FATAL, NULL,
+                                "the shared memory btl could not allocate its fragment "
+                                "pools, and it has already advertised its segment: local "
+                                "peers can reach this process, which can no longer "
+                                "receive from them");
+        }
         if (OPAL_SUCCESS != rc) {
             return rc;
         }
@@ -547,7 +599,9 @@ static int sm_finalize(struct mca_btl_base_module_t *btl)
     mca_btl_sm_component_t *component = &mca_btl_sm_component;
     mca_btl_sm_t *sm_btl = (mca_btl_sm_t *) btl;
 
-    if (!sm_btl->btl_inited) {
+    /* Nothing to unwind unless the init ran to completion: a failed one
+     * released what it had taken, and left the arrays below NULL. */
+    if (1 != sm_btl->btl_inited) {
         return OPAL_SUCCESS;
     }
 
@@ -561,7 +615,7 @@ static int sm_finalize(struct mca_btl_base_module_t *btl)
     free(component->local_procs);
     component->local_procs = NULL;
 
-    sm_btl->btl_inited = false;
+    sm_btl->btl_inited = 0;
 
     free(component->fbox_in_endpoints);
     component->fbox_in_endpoints = NULL;
