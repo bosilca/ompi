@@ -93,11 +93,15 @@ mca_bml_base_endpoint_create (struct ompi_proc_t *proc, int *status);
  */
 static inline struct mca_bml_base_endpoint_t *
 mca_bml_base_get_endpoint (struct ompi_proc_t *proc, int *status) {
+    struct mca_bml_base_endpoint_t *endpoint = mca_bml_base_endpoint_peek (proc);
+
     assert (NULL != status);
 
-    if (OPAL_LIKELY(NULL != proc->proc_endpoints[OMPI_PROC_ENDPOINT_TAG_BML])) {
+    /* One load: a second could race a del_procs and return NULL with a
+     * SUCCESS status. */
+    if (OPAL_LIKELY(NULL != endpoint)) {
         *status = OMPI_SUCCESS;
-        return (struct mca_bml_base_endpoint_t *) proc->proc_endpoints[OMPI_PROC_ENDPOINT_TAG_BML];
+        return endpoint;
     }
 
     return mca_bml_base_endpoint_create (proc, status);
