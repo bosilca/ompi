@@ -53,13 +53,12 @@ static void mca_btl_ofi_drop_unwired_endpoint(mca_btl_ofi_module_t *ofi_btl, opa
 
 static int mca_btl_ofi_add_procs(mca_btl_base_module_t *btl, size_t nprocs,
                                  opal_proc_t **opal_procs, mca_btl_base_endpoint_t **peers,
-                                 opal_bitmap_t *reachable)
+                                 opal_bitmap_t *status)
 {
     int rc;
     int count = 0;
     char *ep_name = NULL;
     size_t namelen = mca_btl_ofi_component.namelen;
-    bool not_ready = false;
 
     opal_proc_t *proc;
     mca_btl_base_endpoint_t *ep;
@@ -78,9 +77,7 @@ static int mca_btl_ofi_add_procs(mca_btl_base_module_t *btl, size_t nprocs,
             BTL_VERBOSE(
                 ("returning existing endpoint for proc %s", OPAL_NAME_PRINT(proc->proc_name)));
             peers[i] = ep;
-            if (NULL != reachable) {
-                opal_bitmap_set_bit(reachable, i);
-            }
+            MCA_BTL_PROC_STATUS_SET(status, i, MCA_BTL_PROC_CONNECTED);
             continue;
         }
 
@@ -102,7 +99,9 @@ static int mca_btl_ofi_add_procs(mca_btl_base_module_t *btl, size_t nprocs,
             BTL_VERBOSE(("error receiving ofi modex for %s: %d",
                          OPAL_NAME_PRINT(proc->proc_name), rc));
             if (OPAL_ERR_NOT_READY == rc) {
-                not_ready = true;
+                /* Any other error is final: no ofi endpoint we can
+                 * address, i.e. MCA_BTL_PROC_NOT_ELIGIBLE. */
+                MCA_BTL_PROC_STATUS_SET(status, i, MCA_BTL_PROC_NO_INFO);
             }
             mca_btl_ofi_drop_unwired_endpoint(ofi_btl, proc, &peers[i]);
             continue;
@@ -140,21 +139,17 @@ static int mca_btl_ofi_add_procs(mca_btl_base_module_t *btl, size_t nprocs,
         }
         free(ep_name);
 
-        /* if succeed, add this proc and mark reachable */
+        /* if succeed, add this proc and report it usable */
         if (peers[i]->peer_addr != FI_ADDR_NOTAVAIL && count == 1) {
             opal_list_append(&ofi_btl->endpoints, &peers[i]->super);
-            if (NULL != reachable) {
-                opal_bitmap_set_bit(reachable, i);
-            }
+            MCA_BTL_PROC_STATUS_SET(status, i, MCA_BTL_PROC_CONNECTED);
         } else {
+            /* Address in hand and unusable by this module: final. */
             BTL_VERBOSE(("fi_av_insert failed for module %d", ofi_btl->module_index));
             mca_btl_ofi_drop_unwired_endpoint(ofi_btl, proc, &peers[i]);
         }
     }
 
-    if (not_ready) {
-        return OPAL_ERR_NOT_READY;
-    }
     return OPAL_SUCCESS;
 }
 
