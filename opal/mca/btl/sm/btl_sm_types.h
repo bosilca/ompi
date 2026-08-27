@@ -132,8 +132,17 @@ struct mca_btl_sm_component_t {
     unsigned int max_inline_send; /**< Limit for copy-in-copy-out fragments */
 
     mca_btl_base_endpoint_t
-        *endpoints; /**< array of local endpoints (one for each local peer including myself) */
+        *endpoints_storage; /**< array of local endpoints (one for each local peer including
+                             *   myself), as the setup paths see it while they fill it in */
+    mca_btl_base_endpoint_t
+        *endpoints; /**< the same array, published once every local peer's segment is mapped,
+                     *   and NULL until then; see
+                     *   mca_btl_sm_attach_local_peers(). A fragment path
+                     *   establishes with this single load that the whole node
+                     *   is mapped, and needs no barrier: what it reads
+                     *   afterwards is addressed off that value */
     struct opal_proc_t **local_procs; /**< opal_proc_t * indexed by SMP local rank */
+    bool local_procs_mapped;          /**< local_procs has been filled in */
     mca_btl_base_endpoint_t **fbox_in_endpoints; /**< array of fast box in endpoints */
     unsigned int num_fbox_in_endpoints;          /**< number of fast boxes to poll */
     struct sm_fifo_t *my_fifo;                   /**< pointer to the local fifo */
