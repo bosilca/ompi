@@ -62,6 +62,7 @@
 #include "ompi/group/group.h"
 #include "ompi/proc/proc.h"
 #include "ompi/mca/pml/pml.h"
+#include "ompi/mca/pml/base/base.h"
 #include "ompi/runtime/ompi_modex.h"
 #include "ompi/runtime/ompi_rte.h"
 #include "ompi/info/info.h"
@@ -69,6 +70,12 @@
 #include "ompi/dpm/dpm.h"
 
 static opal_rng_buff_t rnd;
+
+/* The value published on the port key is this token, the pml that side
+ * selected, then a colon-delimited list of its participating procs. A
+ * value without the token came from a version that predates it. */
+#define OMPI_DPM_PML_TOKEN     "pml="
+#define OMPI_DPM_PML_TOKEN_LEN (sizeof(OMPI_DPM_PML_TOKEN) - 1)
 
 typedef struct {
     ompi_communicator_t       *comm;
@@ -139,7 +146,9 @@ int ompi_dpm_connect_accept(ompi_communicator_t *comm, int root,
      * will append ":accept" to the port name and publish the list of its
      * participants on that key. Each proc will then block waiting for lookup
      * to complete on the other's key. Once that completes, the list of remote
-     * procs is used to complete construction of the intercommunicator. */
+     * procs is used to complete construction of the intercommunicator.
+     * The pml leading each list is how the two sides find out whether
+     * they can talk at all. */
 
     /* If there was an error during the COMM_SPAWN stage, the port string will
      * be set (in mpi/c/comm_spawn.c) with a special value that contains the error
@@ -214,7 +223,13 @@ int ompi_dpm_connect_accept(ompi_communicator_t *comm, int root,
             (void)opal_asprintf(&key, "%s:accept", port_string);
             (void)opal_asprintf(&pkey, "%s:connect", port_string);
         }
-        nstring = opal_argv_join(members, ':');
+        char *mstring = opal_argv_join(members, ':');
+        /* This exchange is the only data both sides are sure to hold:
+         * neither leader can read a value published by the other's
+         * ranks. Two jobs each agreeing internally can still disagree. */
+        (void) opal_asprintf(&nstring, OMPI_DPM_PML_TOKEN "%s:%s",
+                             mca_pml_base_pml_selected_name(), mstring);
+        free(mstring);
         PMIX_INFO_LOAD(&info, key, nstring, PMIX_STRING);
         PMIX_LOAD_KEY(pdat.key, pkey);
         free(nstring);
@@ -232,6 +247,35 @@ int ompi_dpm_connect_accept(ompi_communicator_t *comm, int root,
         rport = strdup(pdat.value.data.string);  // need this later
         rportlen = strlen(rport) + 1;  // retain the NULL terminator
         PMIX_PDATA_DESTRUCT(&pdat);
+
+        /* Only the two leaders compare: each side has already agreed
+         * with itself, so a leader's name stands for its whole side and
+         * both leaders refuse in step. A refusal reaches the rest of
+         * this side through the length below, as a failed spawn does. */
+        if (ompi_pml_base_check_pml
+            && 0 == strncmp(rport, OMPI_DPM_PML_TOKEN, OMPI_DPM_PML_TOKEN_LEN)) {
+            char *mine;
+
+            (void) opal_asprintf(&mine, OMPI_DPM_PML_TOKEN "%s:",
+                                 mca_pml_base_pml_selected_name());
+            if (0 != strncmp(rport, mine, strlen(mine))) {
+                const char *theirs = rport + OMPI_DPM_PML_TOKEN_LEN;
+                char name[MCA_BASE_MAX_COMPONENT_NAME_LEN + 1];
+                size_t len = strcspn(theirs, ":");
+
+                if (len > sizeof(name) - 1) {
+                    len = sizeof(name) - 1;
+                }
+                memcpy(name, theirs, len);
+                name[len] = '\0';
+                opal_show_help("help-dpm.txt", "pml-mismatch", true,
+                               mca_pml_base_pml_selected_name(), name);
+                free(rport);
+                rport = NULL;
+                rportlen = OMPI_ERR_UNREACH;
+            }
+            free(mine);
+        }
     }
 
 bcast_rportlen:
@@ -294,6 +338,15 @@ bcast_rportlen:
      * into an argv array */
     members = opal_argv_split(rport, ':');
     free(rport);
+
+    /* A version predating this exchange publishes the members with no
+     * pml in front. The leaders have already compared by now. */
+    if (NULL != members && NULL != members[0]
+        && 0 == strncmp(members[0], OMPI_DPM_PML_TOKEN, OMPI_DPM_PML_TOKEN_LEN)) {
+        int nmembers = opal_argv_count(members);
+
+        opal_argv_delete(&nmembers, &members, 0, 1);
+    }
 
     /* add the list of remote procs to our list, and
      * keep a list of them for later */
