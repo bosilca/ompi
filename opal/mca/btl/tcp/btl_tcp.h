@@ -83,6 +83,12 @@ extern opal_mutex_t mca_btl_tcp_ready_frag_mutex;
 extern int mca_btl_tcp_pipe_to_progress[2];
 extern int mca_btl_tcp_progress_thread_trigger;
 
+/* TEMPDIAG -- not for merge.  Set to leave a parked inbound socket and its
+ * armed arbitration timer behind at endpoint destruction, which is what the
+ * code did before the guard in the destructor.  Lets one job run the
+ * before and after back to back. */
+extern int mca_btl_tcp_tempdiag_leak_accept_timer;
+
 #define MCA_BTL_TCP_CRITICAL_SECTION_ENTER(name) opal_mutex_atomic_lock((name))
 #define MCA_BTL_TCP_CRITICAL_SECTION_LEAVE(name) opal_mutex_atomic_unlock((name))
 

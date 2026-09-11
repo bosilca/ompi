@@ -24,8 +24,11 @@
  * its endpoints, so cycle N+1 wires up with all of cycle N still in
  * memory.  That is how the tcp duel abort was found.
  *
- * Acts as its own child.  Run it with pmix_base_collect_data=0, and
- * with --timeout, since an unresolved peer hangs rather than fails.
+ * Acts as its own child.  Worth running in both modex modes, unlike
+ * the rest: a collecting fence is over one job, so it says nothing
+ * about a child's ranks either way, and all it decides is whether the
+ * fetch for one may block.  Launch with --timeout, since an unresolved
+ * peer hangs rather than fails.
  */
 
 #include <mpi.h>

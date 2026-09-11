@@ -21,24 +21,15 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
-      # Run both the OMPI-native and the MPI Standard ABI legs to
-      # completion even if one fails.
       fail-fast: false
       matrix:
         include:
-          # Native OMPI library: build without Fortran and test mpi4py
-          # against libmpi (the historical behavior).
+          # DIAGNOSTIC BRANCH: only the leg that hangs.
           - name: ompi
             extra_configure: --disable-mpi-fortran
             mpicc: mpicc
-          # MPI Forum ABI: build libmpi_abi with the Fortran bindings
-          # (so the optional Fortran datatypes are exercised) and build
-          # mpi4py against the ABI wrapper compiler so it links libmpi_abi.
-          - name: standard
-            extra_configure: --enable-standard-abi
-            mpicc: mpicc_abi
     env:
       MPI4PY_TEST_SPAWN: true
     steps:
@@ -51,6 +42,17 @@ jobs:
               libnuma-dev
       if:   ${{ runner.os == 'Linux' }}
 
+    - name: Allow ptrace and provide gstack
+      run: |
+        # --no-install-recommends keeps libc6-dbg out of it: the runner's
+        # apt index is stale and that one 404s.
+        sudo apt-get update -q
+        sudo apt-get install -y -q --no-install-recommends gdb
+        sudo sysctl -w kernel.yama.ptrace_scope=0 || true
+        printf '#!/bin/sh\nexec gdb -p "$1" -batch -ex "thread apply all bt" 2>/dev/null\n' \
+          | sudo tee /usr/local/bin/gstack > /dev/null
+        sudo chmod +x /usr/local/bin/gstack
+
     - name: Checkout Open MPI
       uses: actions/checkout@v6
       with:
@@ -61,11 +63,6 @@ jobs:
       run:  AUTOMAKE_JOBS=$(nproc) ./autogen.pl
       working-directory: mpi-build
 
-    # Install into a separate directory (/opt/openmpi) so that we can
-    # bundle up that tree into an artifact to share with other jobs in
-    # this github action.  Specifically don't use /usr/local, because
-    # there's a bunch of other stuff already installed in /usr/local,
-    # and we don't need to include that in our artifact.
     - name: Configure Open MPI
       run:  ./configure
               --disable-dependency-tracking
@@ -100,21 +97,12 @@ jobs:
         mca_params="$HOME/.prte/mca-params.conf"
         mkdir -p "$(dirname "$mca_params")"
         echo rmaps_default_mapping_policy = :oversubscribe >> "$mca_params"
-        #
-        # Recent versions of OpenPMIx started emitting warnings about use of deprecated
-        # MCA parameters its emission to stderr causes the demo/test-run stuff below to fail.
-        # Suppress generation of these warnings.  A simpler CI test should be used to
-        # to check for these messages.
-        #
         mca_params="$HOME/.pmix/mca-params.conf"
         mkdir -p "$(dirname "$mca_params")"
         echo mca_base_suppress_deprecated_warning = true >> "$mca_params"
 
     - name: Show MPI
       run:  ompi_info
-
-    - name: Show MPICC
-      run:  ${{ matrix.mpicc }} -show
 
     - name: Use Python
       uses: actions/setup-python@v5
@@ -142,46 +130,111 @@ jobs:
         CFLAGS: "-O0"
         MPICC: ${{ matrix.mpicc }}
 
-    - name: Test mpi4py (singleton)
-      run:  python test/main.py -v -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-    - name: Test mpi4py (np=1)
-      run:  mpiexec -n 1 python test/main.py -v -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-    - name: Test mpi4py (np=2)
-      run:  mpiexec -n 2 python test/main.py -v -f -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-    - name: Test mpi4py (np=3)
-      run:  mpiexec -n 3 python test/main.py -v -f -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-    - name: Test mpi4py (np=4)
-      run:  mpiexec -n 4 python test/main.py -v -f -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-    - name: Test mpi4py (np=5)
-      run:  mpiexec -n 5 python test/main.py -v -f -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-
-    - name: Test mpi4py.run
-      run:  python demo/test-run/test_run.py -v
-      if:   ${{ true }}
-      timeout-minutes: 10
-
-    - name: Relocate Open MPI installation
-      run:  mv /opt/openmpi /opt/ompi
-    - name: Update PATH and set OPAL_PREFIX and LD_LIBRARY_PATH
+    # DIAGNOSTIC: the spawn tests alone, looped, in two phases that differ
+    # only in whether the destructor lets a parked inbound socket and its
+    # armed timer outlive the endpoint.  A hang or a teardown flood stops
+    # the phase and dumps what is left: every surviving process with its
+    # stack, the ob1 queues a fragment can park on, and the TEMPDIAG lines
+    # naming every event still pending when the sync base was freed.
+    #
+    # Each iteration writes to a file rather than the job log: a flood runs
+    # at tens of thousands of lines a second and would bury everything else.
+    - name: Spawn tests, looped, two phases, dumps on hang or flood
+      timeout-minutes: 25
       run: |
-        sed -i '\|/opt/openmpi/bin|d' $GITHUB_PATH
-        echo OPAL_PREFIX=/opt/ompi >> $GITHUB_ENV
-        echo LD_LIBRARY_PATH=/opt/ompi/lib >> $GITHUB_ENV
+        set -u
+        FLOOD='event has no event_base set'
+        mca_params="$HOME/.openmpi/mca-params.conf"
 
-    - name: Test mpi4py (singleton)
-      run:  python test/main.py -v -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
+        dump() {
+          echo "########## processes ##########"
+          ps -eo pid,ppid,stat,etime,wchan:24,cmd | grep -E 'python|prte' | grep -v grep || true
+          echo "########## sockets ##########"
+          ss -tnp 2>/dev/null | head -60 || true
+          for p in $(pgrep -f 'python|prterun' || true); do
+            echo "########## pid $p ##########"
+            sudo timeout 60 gdb -p "$p" -batch \
+              -ex 'thread apply all bt' \
+              -ex 'p mca_pml_ob1.non_existing_communicator_pending.opal_list_length' \
+              -ex 'p mca_pml_ob1.modex_pending.opal_list_length' \
+              -ex 'p mca_pml_ob1.send_pending.opal_list_length' \
+              -ex 'p mca_pml_ob1.pckt_pending.opal_list_length' \
+              -ex "p 'pml_ob1_recvfrag.c'::mca_pml_ob1_unseeded_procs" \
+              -ex "p 'pml_ob1_progress.c'::mca_pml_ob1_progress_needed" \
+              -ex 'p ompi_modex_all_ready_flag' \
+              2>&1 | tail -120 || true
+          done
+        }
 
+        report() {
+          log="$1"
+          echo "---------- $log: TEMPDIAG, first 120 ----------"
+          grep TEMPDIAG "$log" | head -120 || true
+          echo "---------- $log: TEMPDIAG, last 40 ----------"
+          grep TEMPDIAG "$log" | tail -40 || true
+          echo "---------- $log: $(grep -c "$FLOOD" "$log" || true) warning lines, first 20 ----------"
+          grep "$FLOOD" "$log" | head -20 || true
+          echo "---------- $log: tail, warnings filtered out ----------"
+          grep -v "$FLOOD" "$log" | tail -50 || true
+        }
+
+        # $1 label, $2 leak_accept_timer, $3 minutes
+        run_phase() {
+          label="$1"
+          sed -i '/tempdiag_leak_accept_timer/d' "$mca_params"
+          echo "btl_tcp_tempdiag_leak_accept_timer = $2" >> "$mca_params"
+          echo "################ PHASE $label: leak_accept_timer=$2 ################"
+          deadline=$(( SECONDS + $3 * 60 ))
+          i=0
+          reported=
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            i=$(( i + 1 ))
+            log="/tmp/$label-$i.log"
+            mpiexec --tag-output -n 2 python test/main.py -v -f -i spawn > "$log" 2>&1 &
+            mpipid=$!
+            hit=
+            for _ in $(seq 1 90); do
+              sleep 1
+              kill -0 $mpipid 2>/dev/null || break
+              # A handful of these is a separate bug and does not stop the
+              # run; only the livelock writes them by the thousand.
+              if [ "$(grep -c "$FLOOD" "$log" 2>/dev/null || true)" -gt 5000 ]; then
+                hit=flood
+                break
+              fi
+            done
+            if [ -z "$hit" ] && kill -0 $mpipid 2>/dev/null; then hit=hang; fi
+            if [ -n "$hit" ]; then
+              echo "########## PHASE $label iteration $i: $hit ##########"
+              dump
+              report "$log"
+              pkill -9 -f 'python|prterun' || true
+              wait $mpipid 2>/dev/null || true
+              return 1
+            fi
+            wait $mpipid; rc=$?
+            warns=$(grep -c "$FLOOD" "$log" || true)
+            echo "----- $label iteration $i rc=$rc, $warns warnings, $(grep -c TEMPDIAG "$log" || true) TEMPDIAG lines, $(grep -c 'pending at finalize' "$log" || true) finalize dumps -----"
+            # The backtrace is the point, so hand back the first iteration
+            # that warns, then keep looping for the livelock.
+            if [ "$warns" -gt 0 ] && [ -z "$reported" ]; then
+              reported=1
+              echo "########## PHASE $label iteration $i: $warns warning(s), run still completed ##########"
+              report "$log"
+            fi
+            if [ "$rc" -ne 0 ]; then
+              echo "########## PHASE $label iteration $i exited $rc ##########"
+              report "$log"
+              return 1
+            fi
+          done
+          echo "########## PHASE $label: $i iterations, nothing caught ##########"
+          return 0
+        }
+
+        # A reproduces what the tree does today; B is the destructor guard.
+        run_phase A 1 9 && a=clean || a=caught
+        run_phase B 0 9 && b=clean || b=caught
+        echo "################ SUMMARY: A/leak=$a  B/guard=$b ################"
+        # A diagnostic run must hand back its log, so never fail the step.
+        exit 0

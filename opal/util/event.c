@@ -26,7 +26,11 @@
 
 #include "opal/util/event.h"
 
+#include <stdio.h>
+#include <unistd.h>
+
 #include "opal/constants.h"
+#include "opal/mca/backtrace/backtrace.h" /* TEMPDIAG -- not for merge */
 #include "opal/mca/base/mca_base_var.h"
 #include "opal/util/argv.h"
 #include "opal/util/output.h"
@@ -136,11 +140,35 @@ int opal_event_register_params(void)
     return OPAL_SUCCESS;
 }
 
+/* TEMPDIAG -- not for merge.  libevent complains rather than fails when it
+ * is handed an event it cannot act on, and the message alone does not say
+ * who handed it over.  Take the first few with a backtrace and then stay
+ * quiet: the case we are chasing repeats millions of times. */
+static void tempdiag_event_log(int severity, const char *msg)
+{
+    static int n = 0;
+    int seen;
+
+    if (EVENT_LOG_WARN > severity) {
+        return;
+    }
+    seen = ++n;
+    if (8 < seen) {
+        return;
+    }
+    fprintf(stderr, "TEMPDIAG libevent severity %d in pid %d: %s\n", severity, (int) getpid(), msg);
+    (void) opal_backtrace_print(stderr, (char *) "TEMPDIAG    ", 2);
+    fflush(stderr);
+}
+
 int opal_event_init(void)
 {
     char **includes = NULL;
     bool dumpit = false;
     int i, j;
+
+    /* TEMPDIAG -- not for merge.  Latch it before anything can warn. */
+    event_set_log_callback(tempdiag_event_log);
 
     if (opal_event_base_refcount > 0) {
         ++opal_event_base_refcount;
@@ -215,6 +243,25 @@ int opal_event_init(void)
     return OPAL_SUCCESS;
 }
 
+/* TEMPDIAG -- not for merge.  Name every event still pending on the sync
+ * base just before event_base_free() tries to drain it.  An event whose
+ * base reads NULL is one event_del_() refuses to unlink, which is the
+ * shape of the finalize livelock: the drain loop asks for the top of the
+ * timeheap forever and never removes it.  foreach_event walks the
+ * timeheap as well as the evmap, so a bare timer shows up here. */
+static int tempdiag_pending_event(const struct event_base *base __opal_attribute_unused__,
+                                  const struct event *ev, void *arg)
+{
+    int *n = (int *) arg;
+
+    ++*n;
+    opal_output(0, "TEMPDIAG pending event #%d ev=%p cb=%p arg=%p fd=%d events=0x%x base=%p",
+                *n, (const void *) ev, (void *) (uintptr_t) event_get_callback(ev),
+                event_get_callback_arg(ev), (int) event_get_fd(ev),
+                (unsigned) event_get_events(ev), (void *) event_get_base(ev));
+    return 0;
+}
+
 int opal_event_finalize(void)
 {
     /* A failed opal_event_init() takes no reference, and its caller must
@@ -231,6 +278,11 @@ int opal_event_finalize(void)
     }
 
     if (NULL != opal_sync_event_base) {
+        /* TEMPDIAG -- not for merge. */
+        int tempdiag_n = 0;
+        (void) event_base_foreach_event(opal_sync_event_base, tempdiag_pending_event, &tempdiag_n);
+        opal_output(0, "TEMPDIAG sync base %p: %d event(s) pending at finalize",
+                    (void *) opal_sync_event_base, tempdiag_n);
         opal_event_base_free(opal_sync_event_base);
         opal_sync_event_base = NULL;
     }

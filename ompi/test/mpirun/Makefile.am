@@ -106,6 +106,14 @@ DIRECT_MODEX = OMPI_MCA_pmix_base_async_modex=1 \
 # rank's state.  It is worst within a node, where the ranks share the
 # segment they are sizing differently, hence the shared-memory-only run.
 #
+# The spawn test is the exception to the shared-memory-only run: a child
+# job's ranks carry a different jobid, which sm_add_procs() refuses
+# outright, so restricting the transports would leave the two jobs
+# genuinely unreachable.  It is run in both modex modes instead, and
+# neither is the weaker one here -- the fence covers this job alone, so a
+# child's connection info is fetched on demand whichever mode is in
+# force, and what the mode decides is whether that fetch may block.
+#
 # Everything below goes through the "run" wrapper, which fails the target
 # on a run that exits 0 while announcing that it could not reach a peer.
 # That is not a pedantic reading of the output: a wire-up bug reaches the
@@ -195,6 +203,8 @@ check-mpirun:
 	    echo "=== session first touch, direct modex, default transports ==="; \
 	    run env $(DIRECT_MODEX) $(oversub_runner) ./session_first_touch; \
 	    $(MPICC) -g "$(srcdir)/spawn_first_touch.c" -o spawn_first_touch; \
+	    echo "=== spawn first touch, full modex ==="; \
+	    run $(spawn_runner) ./spawn_first_touch; \
 	    echo "=== spawn first touch, direct modex ==="; \
 	    run env $(DIRECT_MODEX) $(spawn_runner) ./spawn_first_touch; \
 	fi
