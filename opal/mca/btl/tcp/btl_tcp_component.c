@@ -110,6 +110,7 @@ static int mca_btl_tcp_component_close(void);
 
 opal_event_base_t *mca_btl_tcp_event_base = NULL;
 int mca_btl_tcp_progress_thread_trigger = -1;
+int mca_btl_tcp_tempdiag_leak_accept_timer = 0; /* TEMPDIAG -- not for merge */
 int mca_btl_tcp_pipe_to_progress[2] = {-1, -1};
 static opal_thread_t mca_btl_tcp_progress_thread = {{0}};
 opal_list_t mca_btl_tcp_ready_frag_pending_queue = {{0}};
@@ -354,6 +355,11 @@ static int mca_btl_tcp_component_register(void)
     mca_btl_tcp_param_register_int(
         "port_min_v4", "The minimum port where the TCP BTL will try to bind (default 1024)", 1024,
         OPAL_INFO_LVL_2, &mca_btl_tcp_component.tcp_port_min);
+    mca_btl_tcp_param_register_int("tempdiag_leak_accept_timer",
+                                   "TEMPDIAG -- not for merge.  Leave a parked inbound socket "
+                                   "and its armed timer behind at endpoint destruction.",
+                                   0, OPAL_INFO_LVL_9,
+                                   &mca_btl_tcp_tempdiag_leak_accept_timer);
 
     opal_asprintf(&message,
                   "The number of ports where the TCP BTL will try to bind (default %d)."

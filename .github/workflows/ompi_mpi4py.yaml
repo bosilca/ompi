@@ -21,24 +21,15 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
-      # Run both the OMPI-native and the MPI Standard ABI legs to
-      # completion even if one fails.
       fail-fast: false
       matrix:
         include:
-          # Native OMPI library: build without Fortran and test mpi4py
-          # against libmpi (the historical behavior).
+          # DIAGNOSTIC BRANCH: only the leg that hangs.
           - name: ompi
             extra_configure: --disable-mpi-fortran
             mpicc: mpicc
-          # MPI Forum ABI: build libmpi_abi with the Fortran bindings
-          # (so the optional Fortran datatypes are exercised) and build
-          # mpi4py against the ABI wrapper compiler so it links libmpi_abi.
-          - name: standard
-            extra_configure: --enable-standard-abi
-            mpicc: mpicc_abi
     env:
       MPI4PY_TEST_SPAWN: true
     steps:
@@ -51,6 +42,17 @@ jobs:
               libnuma-dev
       if:   ${{ runner.os == 'Linux' }}
 
+    - name: Allow ptrace and provide gstack
+      run: |
+        # --no-install-recommends keeps libc6-dbg out of it: the runner's
+        # apt index is stale and that one 404s.
+        sudo apt-get update -q
+        sudo apt-get install -y -q --no-install-recommends gdb
+        sudo sysctl -w kernel.yama.ptrace_scope=0 || true
+        printf '#!/bin/sh\nexec gdb -p "$1" -batch -ex "thread apply all bt" 2>/dev/null\n' \
+          | sudo tee /usr/local/bin/gstack > /dev/null
+        sudo chmod +x /usr/local/bin/gstack
+
     - name: Checkout Open MPI
       uses: actions/checkout@v6
       with:
@@ -61,11 +63,6 @@ jobs:
       run:  AUTOMAKE_JOBS=$(nproc) ./autogen.pl
       working-directory: mpi-build
 
-    # Install into a separate directory (/opt/openmpi) so that we can
-    # bundle up that tree into an artifact to share with other jobs in
-    # this github action.  Specifically don't use /usr/local, because
-    # there's a bunch of other stuff already installed in /usr/local,
-    # and we don't need to include that in our artifact.
     - name: Configure Open MPI
       run:  ./configure
               --disable-dependency-tracking
@@ -100,21 +97,12 @@ jobs:
         mca_params="$HOME/.prte/mca-params.conf"
         mkdir -p "$(dirname "$mca_params")"
         echo rmaps_default_mapping_policy = :oversubscribe >> "$mca_params"
-        #
-        # Recent versions of OpenPMIx started emitting warnings about use of deprecated
-        # MCA parameters its emission to stderr causes the demo/test-run stuff below to fail.
-        # Suppress generation of these warnings.  A simpler CI test should be used to
-        # to check for these messages.
-        #
         mca_params="$HOME/.pmix/mca-params.conf"
         mkdir -p "$(dirname "$mca_params")"
         echo mca_base_suppress_deprecated_warning = true >> "$mca_params"
 
     - name: Show MPI
       run:  ompi_info
-
-    - name: Show MPICC
-      run:  ${{ matrix.mpicc }} -show
 
     - name: Use Python
       uses: actions/setup-python@v5
@@ -142,46 +130,259 @@ jobs:
         CFLAGS: "-O0"
         MPICC: ${{ matrix.mpicc }}
 
-    - name: Test mpi4py (singleton)
-      run:  python test/main.py -v -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-    - name: Test mpi4py (np=1)
-      run:  mpiexec -n 1 python test/main.py -v -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-    - name: Test mpi4py (np=2)
-      run:  mpiexec -n 2 python test/main.py -v -f -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-    - name: Test mpi4py (np=3)
-      run:  mpiexec -n 3 python test/main.py -v -f -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-    - name: Test mpi4py (np=4)
-      run:  mpiexec -n 4 python test/main.py -v -f -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-    - name: Test mpi4py (np=5)
-      run:  mpiexec -n 5 python test/main.py -v -f -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
-
-    - name: Test mpi4py.run
-      run:  python demo/test-run/test_run.py -v
-      if:   ${{ true }}
-      timeout-minutes: 10
-
-    - name: Relocate Open MPI installation
-      run:  mv /opt/openmpi /opt/ompi
-    - name: Update PATH and set OPAL_PREFIX and LD_LIBRARY_PATH
+    # DIAGNOSTIC: the spawn tests alone, looped, in two phases that differ
+    # only in whether the destructor lets a parked inbound socket and its
+    # armed timer outlive the endpoint.  A hang or a teardown flood stops
+    # the phase and dumps what is left: every surviving process with its
+    # stack, every queue a fragment can park on -- ob1's and btl/sm's --
+    # and the TEMPDIAG lines naming every event still pending when the sync
+    # base was freed.  The $spe block walks the head of sm's
+    # pending_endpoints, so it is only meaningful when the length printed
+    # just above it is non-zero; otherwise it is reading the sentinel.
+    # The $pmlc block is the per-peer state ob1 keeps outside any global
+    # list: read expected_sequence in whoever is waiting against
+    # send_sequence in whoever sent, and frags_cant_match names what is
+    # parked behind a gap.  procs[] past num_procs prints an error, which
+    # is harmless.  Keep these names clear of gdb's registers: $pc would
+    # assign the program counter of the selected thread, not a variable.
+    #
+    # The endpoint block asks where an eager send actually went.  ob1
+    # reaches btl_sendi, which prefers the peer's fast box over the fifo
+    # whenever one exists, and a receiver polls only the fast boxes in
+    # fbox_in_endpoints.  A sender holding fbox_out for a peer that is
+    # absent from that peer's list is a payload nobody will ever look at.
+    #
+    # The $smh block reads the fragment itself.  A process parked in
+    # PMIx_Connect leaves its own fifo unread, and a fragment it sent
+    # comes back there once the peer has taken it, with the tag and the
+    # ob1 match header it carried still intact.  relative2virtual() is
+    # inlined and so not callable here; the offset's high bits name the
+    # segment's owner and the low 32 are the offset into it.  Only
+    # meaningful when the fifo_head printed just above is not -2.
+    #
+    # The last block asks the one question the counters cannot answer:
+    # whether a sender's endpoint for a peer names that peer's fifo and
+    # segment at all.  All of it is read inside a single process, so the
+    # comparison is meaningful: endpoints[n].fifo equal to my_fifo, or
+    # endpoints[n].segment_base equal to my_segment for an n that is not
+    # my own local rank, is a sender posting into its own mailbox.
+    #
+    # The counters close the last gap.  btl/sm's delivered count is
+    # fragments it handed to an active message callback; ob1's entered
+    # count is arrivals at the match callback, and the rest name every
+    # way out of it.  delivered above entered means the payload never
+    # reached the pml, and entered without any exit accounting for it
+    # means the pml dropped it.
+    #
+    # The last block reads both sides of a mismatch the counters exposed:
+    # ob1 counted arrivals that advanced no sequence on the peer struct
+    # hanging off ompi_mpi_comm_world, so the fragment and the posted
+    # receive are not looking at the same one.  ompi_comm_lookup() indexes
+    # by c_index, which is what a fragment's hdr_ctx carries, so slot 0 of
+    # ompi_mpi_communicators is the communicator the match callback used;
+    # $rr is the receive actually waiting, and names its own.
+    #
+    # ob1_diag_unex then stops the inferring altogether: each fragment the
+    # match callback files as unexpected writes down the communicator, the
+    # pml comm, the peer structure and the header it was filed under, so
+    # the queue it went into can be named instead of deduced from a peer
+    # structure that reads empty afterwards.
+    #
+    # Each iteration writes to a file rather than the job log: a flood runs
+    # at tens of thousands of lines a second and would bury everything else.
+    - name: Spawn tests, looped, two phases, dumps on hang or flood
+      timeout-minutes: 25
       run: |
-        sed -i '\|/opt/openmpi/bin|d' $GITHUB_PATH
-        echo OPAL_PREFIX=/opt/ompi >> $GITHUB_ENV
-        echo LD_LIBRARY_PATH=/opt/ompi/lib >> $GITHUB_ENV
+        set -u
+        FLOOD='event has no event_base set'
+        mca_params="$HOME/.openmpi/mca-params.conf"
 
-    - name: Test mpi4py (singleton)
-      run:  python test/main.py -v -x TestExcErrhandlerNull
-      if:   ${{ true }}
-      timeout-minutes: 10
+        dump() {
+          echo "########## processes ##########"
+          ps -eo pid,ppid,stat,etime,wchan:24,cmd | grep -E 'python|prte' | grep -v grep || true
+          echo "########## sockets ##########"
+          ss -tnp 2>/dev/null | head -60 || true
+          for p in $(pgrep -f 'python|prterun' || true); do
+            echo "########## pid $p ##########"
+            sudo timeout 60 gdb -p "$p" -batch \
+              -ex 'thread apply all bt' \
+              -ex 'p mca_pml_ob1.non_existing_communicator_pending.opal_list_length' \
+              -ex 'p mca_pml_ob1.modex_pending.opal_list_length' \
+              -ex 'p mca_pml_ob1.send_pending.opal_list_length' \
+              -ex 'p mca_pml_ob1.pckt_pending.opal_list_length' \
+              -ex 'p mca_pml_ob1.recv_pending.opal_list_length' \
+              -ex 'p mca_pml_ob1.rdma_pending.opal_list_length' \
+              -ex "p 'pml_ob1_recvfrag.c'::mca_pml_ob1_unseeded_procs" \
+              -ex "p 'pml_ob1_progress.c'::mca_pml_ob1_progress_needed" \
+              -ex 'p ompi_modex_all_ready_flag' \
+              -ex 'p ompi_mpi_comm_world.comm.c_my_rank' \
+              -ex 'p mca_btl_sm_component.pending_endpoints.opal_list_length' \
+              -ex 'p mca_btl_sm_component.pending_fragments.opal_list_length' \
+              -ex 'p *mca_btl_sm_component.my_fifo' \
+              -ex 'set $spe = (mca_btl_sm_endpoint_t *) mca_btl_sm_component.pending_endpoints.opal_list_sentinel.opal_list_next' \
+              -ex 'p $spe->peer_smp_rank' \
+              -ex 'p $spe->pending_frags.opal_list_length' \
+              -ex 'p $spe->waiting' \
+              -ex 'p $spe->fbox_out' \
+              -ex 'p $spe->send_count' \
+              -ex 'p $spe->fifo' \
+              -ex 'set $pmlc = (mca_pml_ob1_comm_t *) ompi_mpi_comm_world.comm.c_pml_comm' \
+              -ex 'p $pmlc->num_procs' \
+              -ex 'p *$pmlc->procs[0]' \
+              -ex 'p *$pmlc->procs[1]' \
+              -ex 'p *$pmlc->procs[2]' \
+              -ex 'p opal_process_info.my_local_rank' \
+              -ex 'p opal_process_info.num_local_peers' \
+              -ex 'p mca_btl_sm_component.endpoints' \
+              -ex 'p mca_btl_sm_component.num_fbox_in_endpoints' \
+              -ex 'p *mca_btl_sm_component.fbox_in_endpoints@4' \
+              -ex 'p mca_btl_sm_component.endpoints[0].peer_smp_rank' \
+              -ex 'p mca_btl_sm_component.endpoints[0].send_count' \
+              -ex 'p mca_btl_sm_component.endpoints[0].fbox_out' \
+              -ex 'p mca_btl_sm_component.endpoints[0].fbox_in' \
+              -ex 'p mca_btl_sm_component.endpoints[1].peer_smp_rank' \
+              -ex 'p mca_btl_sm_component.endpoints[1].send_count' \
+              -ex 'p mca_btl_sm_component.endpoints[1].fbox_out' \
+              -ex 'p mca_btl_sm_component.endpoints[1].fbox_in' \
+              -ex 'p mca_btl_sm_component.endpoints[2].peer_smp_rank' \
+              -ex 'p mca_btl_sm_component.endpoints[2].send_count' \
+              -ex 'p mca_btl_sm_component.endpoints[2].fbox_out' \
+              -ex 'p mca_btl_sm_component.endpoints[2].fbox_in' \
+              -ex 'set $fifov = mca_btl_sm_component.my_fifo->fifo_head' \
+              -ex 'p /x $fifov' \
+              -ex 'set $smh = (mca_btl_sm_hdr_t *) (($fifov & 0xffffffff) + mca_btl_sm_component.endpoints[$fifov >> 32].segment_base)' \
+              -ex 'p *$smh' \
+              -ex 'p mca_btl_base_active_message_trigger[$smh->tag]' \
+              -ex 'p *(mca_pml_ob1_match_hdr_t *) ($smh + 1)' \
+              -ex 'set $fifov2 = $smh->next' \
+              -ex 'p /x $fifov2' \
+              -ex 'set $smh2 = (mca_btl_sm_hdr_t *) (($fifov2 & 0xffffffff) + mca_btl_sm_component.endpoints[$fifov2 >> 32].segment_base)' \
+              -ex 'p *$smh2' \
+              -ex 'p mca_btl_base_active_message_trigger[$smh2->tag]' \
+              -ex 'p *(mca_pml_ob1_match_hdr_t *) ($smh2 + 1)' \
+              -ex 'set $fifov3 = $smh2->next' \
+              -ex 'p /x $fifov3' \
+              -ex 'set $smh3 = (mca_btl_sm_hdr_t *) (($fifov3 & 0xffffffff) + mca_btl_sm_component.endpoints[$fifov3 >> 32].segment_base)' \
+              -ex 'p *$smh3' \
+              -ex 'p *(mca_pml_ob1_match_hdr_t *) ($smh3 + 1)' \
+              -ex 'p mca_btl_sm_component.my_segment' \
+              -ex 'p mca_btl_sm_component.my_fifo' \
+              -ex 'p mca_btl_sm_component.endpoints[0].segment_base' \
+              -ex 'p mca_btl_sm_component.endpoints[0].fifo' \
+              -ex 'p *mca_btl_sm_component.endpoints[0].fifo' \
+              -ex 'p mca_btl_sm_component.endpoints[1].segment_base' \
+              -ex 'p mca_btl_sm_component.endpoints[1].fifo' \
+              -ex 'p *mca_btl_sm_component.endpoints[1].fifo' \
+              -ex 'p mca_btl_sm_component.endpoints[2].segment_base' \
+              -ex 'p mca_btl_sm_component.endpoints[2].fifo' \
+              -ex 'p *mca_btl_sm_component.endpoints[2].fifo' \
+              -ex "p 'btl_sm_component.c'::mca_btl_sm_diag_delivered" \
+              -ex "p 'btl_sm_component.c'::mca_btl_sm_diag_precomplete" \
+              -ex "p 'btl_sm_component.c'::mca_btl_sm_diag_no_handler" \
+              -ex "p 'btl_sm_component.c'::mca_btl_sm_diag_last_tag" \
+              -ex "p 'pml_ob1_recvfrag.c'::ob1_diag_entered" \
+              -ex "p 'pml_ob1_recvfrag.c'::ob1_diag_short_seg" \
+              -ex "p 'pml_ob1_recvfrag.c'::ob1_diag_no_comm" \
+              -ex "p 'pml_ob1_recvfrag.c'::ob1_diag_unseeded" \
+              -ex "p 'pml_ob1_recvfrag.c'::ob1_diag_cantmatch" \
+              -ex "p 'pml_ob1_recvfrag.c'::ob1_diag_matched" \
+              -ex "p 'pml_ob1_recvfrag.c'::ob1_diag_unexpected" \
+              -ex 'p (void *) &ompi_mpi_comm_world.comm' \
+              -ex 'p ompi_mpi_comm_world.comm.c_index' \
+              -ex 'p ompi_mpi_comm_world.comm.c_pml_comm' \
+              -ex 'p ompi_mpi_communicators.addr[0]' \
+              -ex 'set $lc = (ompi_communicator_t *) ompi_mpi_communicators.addr[0]' \
+              -ex 'p $lc->c_index' \
+              -ex 'p $lc->c_name' \
+              -ex 'p $lc->c_my_rank' \
+              -ex 'p $lc->c_pml_comm' \
+              -ex 'set $lpc = (mca_pml_ob1_comm_t *) $lc->c_pml_comm' \
+              -ex 'p $lpc->num_procs' \
+              -ex 'p *$lpc->procs[0]' \
+              -ex 'p *$lpc->procs[1]' \
+              -ex 'p *$lpc->procs[2]' \
+              -ex 'set $rr = (mca_pml_ob1_recv_request_t *) $pmlc->procs[0]->specific_receives.opal_list_sentinel.opal_list_next' \
+              -ex 'p $rr->req_recv.req_base.req_comm' \
+              -ex 'p $rr->req_recv.req_base.req_comm->c_index' \
+              -ex 'p $rr->req_recv.req_base.req_comm->c_name' \
+              -ex 'p $rr->req_recv.req_base.req_peer' \
+              -ex 'p $rr->req_recv.req_base.req_tag' \
+              -ex 'p (void *) &ompi_mpi_comm_self.comm' \
+              -ex "p 'pml_ob1_recvfrag.c'::ob1_diag_unex_n" \
+              -ex "p 'pml_ob1_recvfrag.c'::ob1_diag_unex" \
+              2>&1 | tail -620 || true
+          done
+        }
 
+        report() {
+          log="$1"
+          echo "---------- $log: TEMPDIAG, first 120 ----------"
+          grep TEMPDIAG "$log" | head -120 || true
+          echo "---------- $log: TEMPDIAG, last 40 ----------"
+          grep TEMPDIAG "$log" | tail -40 || true
+          echo "---------- $log: $(grep -c "$FLOOD" "$log" || true) warning lines, first 20 ----------"
+          grep "$FLOOD" "$log" | head -20 || true
+          echo "---------- $log: tail, warnings filtered out ----------"
+          grep -v "$FLOOD" "$log" | tail -50 || true
+        }
+
+        # $1 label, $2 leak_accept_timer, $3 minutes
+        run_phase() {
+          label="$1"
+          sed -i '/tempdiag_leak_accept_timer/d' "$mca_params"
+          echo "btl_tcp_tempdiag_leak_accept_timer = $2" >> "$mca_params"
+          echo "################ PHASE $label: leak_accept_timer=$2 ################"
+          deadline=$(( SECONDS + $3 * 60 ))
+          i=0
+          reported=
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            i=$(( i + 1 ))
+            log="/tmp/$label-$i.log"
+            mpiexec --tag-output -n 2 python test/main.py -v -f -i spawn > "$log" 2>&1 &
+            mpipid=$!
+            hit=
+            for _ in $(seq 1 90); do
+              sleep 1
+              kill -0 $mpipid 2>/dev/null || break
+              # A handful of these is a separate bug and does not stop the
+              # run; only the livelock writes them by the thousand.
+              if [ "$(grep -c "$FLOOD" "$log" 2>/dev/null || true)" -gt 5000 ]; then
+                hit=flood
+                break
+              fi
+            done
+            if [ -z "$hit" ] && kill -0 $mpipid 2>/dev/null; then hit=hang; fi
+            if [ -n "$hit" ]; then
+              echo "########## PHASE $label iteration $i: $hit ##########"
+              dump
+              report "$log"
+              pkill -9 -f 'python|prterun' || true
+              wait $mpipid 2>/dev/null || true
+              return 1
+            fi
+            wait $mpipid; rc=$?
+            warns=$(grep -c "$FLOOD" "$log" || true)
+            echo "----- $label iteration $i rc=$rc, $warns warnings, $(grep -c TEMPDIAG "$log" || true) TEMPDIAG lines, $(grep -c 'pending at finalize' "$log" || true) finalize dumps -----"
+            # The backtrace is the point, so hand back the first iteration
+            # that warns, then keep looping for the livelock.
+            if [ "$warns" -gt 0 ] && [ -z "$reported" ]; then
+              reported=1
+              echo "########## PHASE $label iteration $i: $warns warning(s), run still completed ##########"
+              report "$log"
+            fi
+            if [ "$rc" -ne 0 ]; then
+              echo "########## PHASE $label iteration $i exited $rc ##########"
+              report "$log"
+              return 1
+            fi
+          done
+          echo "########## PHASE $label: $i iterations, nothing caught ##########"
+          return 0
+        }
+
+        # A reproduces what the tree does today; B is the destructor guard.
+        run_phase A 1 9 && a=clean || a=caught
+        run_phase B 0 9 && b=clean || b=caught
+        echo "################ SUMMARY: A/leak=$a  B/guard=$b ################"
+        # A diagnostic run must hand back its log, so never fail the step.
+        exit 0

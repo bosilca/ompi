@@ -442,12 +442,23 @@ failed:
     return NULL;
 }
 
+/* TEMPDIAG: what this process took off its fifo, and what it did with
+ * it.  Read with p 'btl_sm_component.c'::<name>. */
+static opal_atomic_int32_t mca_btl_sm_diag_precomplete = 0;
+static opal_atomic_int32_t mca_btl_sm_diag_delivered = 0;
+static opal_atomic_int32_t mca_btl_sm_diag_no_handler = 0;
+static opal_atomic_int32_t mca_btl_sm_diag_last_tag = -1;
+
 void mca_btl_sm_poll_handle_frag(mca_btl_sm_hdr_t *hdr, struct mca_btl_base_endpoint_t *endpoint)
 {
     if (hdr->flags & MCA_BTL_SM_FLAG_COMPLETE) {
+        (void) OPAL_ATOMIC_ADD_FETCH32(&mca_btl_sm_diag_precomplete, 1);
         mca_btl_sm_frag_complete(hdr->frag);
         return;
     }
+
+    mca_btl_sm_diag_last_tag = (int32_t) hdr->tag;
+    (void) OPAL_ATOMIC_ADD_FETCH32(&mca_btl_sm_diag_delivered, 1);
 
     const mca_btl_active_message_callback_t *reg = mca_btl_base_active_message_trigger + hdr->tag;
     mca_btl_base_segment_t segments[2] = {
@@ -458,7 +469,12 @@ void mca_btl_sm_poll_handle_frag(mca_btl_sm_hdr_t *hdr, struct mca_btl_base_endp
                                               .tag = hdr->tag,
                                               .cbdata = reg->cbdata};
 
-    if (hdr->flags & MCA_BTL_SM_FLAG_SINGLE_COPY) {
+    if (OPAL_UNLIKELY(NULL == reg->cbfunc)) {
+        /* TEMPDIAG: nobody claims this tag, so the payload would go
+         * nowhere.  Counted rather than called, which also spares us the
+         * jump through a NULL this function never checked for. */
+        (void) OPAL_ATOMIC_ADD_FETCH32(&mca_btl_sm_diag_no_handler, 1);
+    } else if (hdr->flags & MCA_BTL_SM_FLAG_SINGLE_COPY) {
         void *ctx = MCA_SMSC_CALL(map_peer_region, endpoint->smsc_endpoint,
                                   MCA_RCACHE_FLAGS_PERSIST, hdr->sc_iov.iov_base,
                                   hdr->sc_iov.iov_len, &segments[1].seg_addr.pval);

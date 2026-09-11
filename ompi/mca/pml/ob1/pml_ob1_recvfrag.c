@@ -135,7 +135,32 @@ void ompi_pml_ob1_append_frag_to_ordered_list (mca_pml_ob1_recv_frag_t **queue,
     }
 
     prior = *queue;
-    assert(hdr->hdr_seq != prior->hdr.hdr_match.hdr_seq);
+#if OPAL_ENABLE_DEBUG
+    /* Everything below needs hdr_seq to be unique among the fragments
+     * already here: a duplicate orders itself after the head and then
+     * sits there, because the sequence that would match it is consumed
+     * by the copy in front of it. Only the head was ever checked, so
+     * check all of them while we are in a debug build -- the horizontal
+     * ring, and the range each of its entries may own. */
+    for (mca_pml_ob1_recv_frag_t *seen = prior;;) {
+        assert(hdr->hdr_seq != seen->hdr.hdr_match.hdr_seq);
+
+        if (NULL != seen->range) {
+            for (mca_pml_ob1_recv_frag_t *in_range = seen->range;;) {
+                assert(hdr->hdr_seq != in_range->hdr.hdr_match.hdr_seq);
+                in_range = (mca_pml_ob1_recv_frag_t *) in_range->super.super.opal_list_next;
+                if (in_range == seen->range) {
+                    break;
+                }
+            }
+        }
+
+        seen = (mca_pml_ob1_recv_frag_t *) seen->super.super.opal_list_next;
+        if (seen == prior) {
+            break;
+        }
+    }
+#endif /* OPAL_ENABLE_DEBUG */
 
     /* The hdr_seq being 16 bits long it can rollover rather quickly. We need to
      * account for this rollover or the matching will fail.
@@ -583,9 +608,40 @@ int mca_pml_ob1_drain_unseeded_frags (void)
 #endif /* OPAL_ENABLE_HETEROGENEOUS_SUPPORT */
 }
 
+/* TEMPDIAG: one counter per way out of the callback below, so a fragment
+ * the btl says it delivered can be traced to the exit that consumed it,
+ * or shown never to have arrived.  Read with
+ * p 'pml_ob1_recvfrag.c'::<name>. */
+static opal_atomic_int32_t ob1_diag_entered = 0;
+static opal_atomic_int32_t ob1_diag_short_seg = 0;
+static opal_atomic_int32_t ob1_diag_no_comm = 0;
+static opal_atomic_int32_t ob1_diag_unseeded = 0;
+static opal_atomic_int32_t ob1_diag_cantmatch = 0;
+static opal_atomic_int32_t ob1_diag_matched = 0;
+static opal_atomic_int32_t ob1_diag_unexpected = 0;
+
+/* TEMPDIAG: the counters say fragments are filed as unexpected against
+ * peer structures that are empty by the time we look, so stop inferring
+ * and write down what the callback actually used. */
+struct ob1_diag_unex_t {
+    void *comm_ptr;
+    void *pml_comm;
+    void *proc;
+    void *umq_head;
+    int c_index;
+    int hdr_ctx;
+    int hdr_src;
+    int hdr_tag;
+    int hdr_seq;
+    int umq_len;
+};
+static struct ob1_diag_unex_t ob1_diag_unex[8];
+static opal_atomic_int32_t ob1_diag_unex_n = 0;
+
 void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
                                            const mca_btl_base_receive_descriptor_t *descriptor)
 {
+    (void) OPAL_ATOMIC_ADD_FETCH32(&ob1_diag_entered, 1);
     const mca_btl_base_segment_t *segments = descriptor->des_segments;
     const mca_pml_ob1_match_hdr_t *hdr = (const mca_pml_ob1_match_hdr_t *) segments->seg_addr.pval;
     ompi_communicator_t *comm_ptr;
@@ -598,6 +654,7 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
     assert(num_segments <= MCA_BTL_DES_MAX_SEGMENTS);
 
     if (OPAL_UNLIKELY(segments->seg_len < OMPI_PML_OB1_MATCH_HDR_LEN)) {
+        (void) OPAL_ATOMIC_ADD_FETCH32(&ob1_diag_short_seg, 1);
         return;
     }
     ob1_hdr_ntoh(((mca_pml_ob1_hdr_t*) hdr), MCA_PML_OB1_HDR_TYPE_MATCH);
@@ -607,6 +664,7 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
     if(OPAL_UNLIKELY(NULL == comm_ptr || NULL == comm_ptr->c_pml_comm)) {
         /* Communicator not yet known, or add_comm() has not run.
          * BTL listen sockets can deliver MATCH during MPI_Init. */
+        (void) OPAL_ATOMIC_ADD_FETCH32(&ob1_diag_no_comm, 1);
         append_frag_to_list( &mca_pml_ob1.non_existing_communicator_pending, btl,
                              hdr, segments, num_segments, NULL );
         return;
@@ -649,6 +707,7 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
 #if OPAL_ENABLE_HETEROGENEOUS_SUPPORT
     if (OPAL_UNLIKELY(!opal_proc_known(&proc->ompi_proc->super,
                                        OPAL_PROC_FLAG_INITIALIZED))) {
+        (void) OPAL_ATOMIC_ADD_FETCH32(&ob1_diag_unseeded, 1);
         pml_ob1_park_unseeded_frag(btl, proc, hdr, segments, num_segments);
         OB1_MATCHING_UNLOCK(&comm->matching_lock);
         return;
@@ -666,6 +725,7 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
             MCA_PML_OB1_RECV_FRAG_INIT(frag, hdr, segments, num_segments, btl);
             ompi_pml_ob1_append_frag_to_ordered_list(&proc->frags_cant_match, frag, proc->expected_sequence);
             SPC_RECORD(OMPI_SPC_OUT_OF_SEQUENCE, 1);
+            (void) OPAL_ATOMIC_ADD_FETCH32(&ob1_diag_cantmatch, 1);
             OB1_MATCHING_UNLOCK(&comm->matching_lock);
             return;
         }
@@ -692,6 +752,21 @@ void mca_pml_ob1_recv_frag_callback_match (mca_btl_base_module_t *btl,
 
     /* release matching lock before processing fragment */
     OB1_MATCHING_UNLOCK(&comm->matching_lock);
+
+    (void) OPAL_ATOMIC_ADD_FETCH32(match ? &ob1_diag_matched : &ob1_diag_unexpected, 1);
+    if (NULL == match) {
+        int slot = OPAL_ATOMIC_ADD_FETCH32(&ob1_diag_unex_n, 1) - 1;
+        if (slot < (int) (sizeof(ob1_diag_unex) / sizeof(ob1_diag_unex[0]))) {
+            ob1_diag_unex[slot] = (struct ob1_diag_unex_t) {
+                .comm_ptr = comm_ptr, .pml_comm = comm, .proc = proc,
+                .umq_head = opal_list_get_first(&proc->unexpected_frags),
+                .c_index = comm_ptr->c_index, .hdr_ctx = hdr->hdr_ctx,
+                .hdr_src = hdr->hdr_src, .hdr_tag = hdr->hdr_tag,
+                .hdr_seq = hdr->hdr_seq,
+                .umq_len = (int) opal_list_get_size(&proc->unexpected_frags),
+            };
+        }
+    }
 
     if(OPAL_LIKELY(match)) {
         bytes_received = segments->seg_len - OMPI_PML_OB1_MATCH_HDR_LEN;

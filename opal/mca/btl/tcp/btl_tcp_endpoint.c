@@ -107,6 +107,22 @@ static void mca_btl_tcp_endpoint_construct(mca_btl_tcp_endpoint_t *endpoint)
  */
 static void mca_btl_tcp_endpoint_destruct(mca_btl_tcp_endpoint_t *endpoint)
 {
+    /* An inbound socket may still be parked here, waiting on the timer that
+     * arbitrates it against a dial of our own, and nothing else can reach
+     * either one: the timer is embedded in this endpoint, and close() cannot
+     * own the socket, as the adopting path calls close() while it is still
+     * parked. */
+    if (0 <= endpoint->endpoint_sd_next) {
+        /* TEMPDIAG -- not for merge. */
+        opal_output(0, "TEMPDIAG destruct, socket parked: ep=%p ev=%p sd_next=%d sd=%d state=%d",
+                    (void *) endpoint, (void *) &endpoint->endpoint_accept_event,
+                    endpoint->endpoint_sd_next, endpoint->endpoint_sd, endpoint->endpoint_state);
+        if (0 == mca_btl_tcp_tempdiag_leak_accept_timer) {
+            opal_event_del(&endpoint->endpoint_accept_event);
+            CLOSE_THE_SOCKET(endpoint->endpoint_sd_next);
+            endpoint->endpoint_sd_next = -1;
+        }
+    }
     mca_btl_tcp_endpoint_close(endpoint);
     mca_btl_tcp_proc_remove(endpoint->endpoint_proc, endpoint);
     OBJ_DESTRUCT(&endpoint->endpoint_frags);
@@ -474,6 +490,19 @@ static bool mca_btl_tcp_endpoint_abandoned(int sd)
     return (EWOULDBLOCK != opal_socket_errno) && (EAGAIN != opal_socket_errno);
 }
 
+/* TEMPDIAG -- not for merge.  Re-arming can spin, so report it at a rate
+ * that cannot swamp the log while still showing a spin for what it is. */
+static void tempdiag_rearm(mca_btl_base_endpoint_t *ep, const char *which)
+{
+    static int n = 0;
+    int seen = ++n;
+
+    if (1 == seen || 0 == seen % 10000) {
+        opal_output(0, "TEMPDIAG re-armed accept timer (%s lock busy, %d so far): ep=%p", which,
+                    seen, (void *) ep);
+    }
+}
+
 static void *mca_btl_tcp_endpoint_complete_accept(int fd, int flags, void *context)
 {
     mca_btl_base_endpoint_t *btl_endpoint = (mca_btl_base_endpoint_t *) context;
@@ -482,13 +511,20 @@ static void *mca_btl_tcp_endpoint_complete_accept(int fd, int flags, void *conte
 
     if (OPAL_THREAD_TRYLOCK(&btl_endpoint->endpoint_recv_lock)) {
         opal_event_add(&btl_endpoint->endpoint_accept_event, &now);
+        tempdiag_rearm(btl_endpoint, "recv");
         return NULL;
     }
     if (OPAL_THREAD_TRYLOCK(&btl_endpoint->endpoint_send_lock)) {
         OPAL_THREAD_UNLOCK(&btl_endpoint->endpoint_recv_lock);
         opal_event_add(&btl_endpoint->endpoint_accept_event, &now);
+        tempdiag_rearm(btl_endpoint, "send");
         return NULL;
     }
+
+    /* TEMPDIAG -- not for merge. */
+    opal_output(0, "TEMPDIAG accept timer fired: ep=%p sd_next=%d sd=%d state=%d",
+                (void *) btl_endpoint, btl_endpoint->endpoint_sd_next, btl_endpoint->endpoint_sd,
+                btl_endpoint->endpoint_state);
 
     if (NULL == btl_endpoint->endpoint_addr) {
         CLOSE_THE_SOCKET(
@@ -582,6 +618,13 @@ void mca_btl_tcp_endpoint_accept(mca_btl_base_endpoint_t *btl_endpoint, struct s
     opal_event_evtimer_set(mca_btl_tcp_event_base, &btl_endpoint->endpoint_accept_event,
                            mca_btl_tcp_endpoint_complete_accept, btl_endpoint);
     opal_event_add(&btl_endpoint->endpoint_accept_event, &now);
+
+    /* TEMPDIAG -- not for merge.  cb is what a pending event dumped at
+     * finalize has to match for this timer to be the one stuck there. */
+    opal_output(0, "TEMPDIAG armed accept timer: ep=%p ev=%p cb=%p sd_next=%d base=%p",
+                (void *) btl_endpoint, (void *) &btl_endpoint->endpoint_accept_event,
+                (void *) (uintptr_t) mca_btl_tcp_endpoint_complete_accept, sd,
+                (void *) mca_btl_tcp_event_base);
 }
 
 /*
