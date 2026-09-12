@@ -92,6 +92,7 @@ static int sm_btl_first_time_init(mca_btl_sm_t *sm_btl, int n)
     }
 
     component->fbox_in_endpoints = calloc(n + 1, sizeof(void *));
+    component->num_fbox_in_endpoints = 0;
     if (NULL == component->fbox_in_endpoints) {
         rc = OPAL_ERR_OUT_OF_RESOURCE;
         goto cleanup;
@@ -185,6 +186,7 @@ cleanup:
 
     free(component->fbox_in_endpoints);
     component->fbox_in_endpoints = NULL;
+    component->num_fbox_in_endpoints = 0;
     free(component->local_procs);
     component->local_procs = NULL;
     component->local_procs_mapped = false;
@@ -735,6 +737,9 @@ static int sm_finalize(struct mca_btl_base_module_t *btl)
 
     free(component->fbox_in_endpoints);
     component->fbox_in_endpoints = NULL;
+    /* The count names entries in the array that is going away. A later
+     * init reallocates it, and the poll loop trusts the count. */
+    component->num_fbox_in_endpoints = 0;
 
     return OPAL_SUCCESS;
 }
@@ -920,6 +925,14 @@ static void mca_btl_sm_endpoint_destructor(mca_btl_sm_endpoint_t *ep)
     if (ep->smsc_endpoint) {
         MCA_SMSC_CALL(return_endpoint, ep->smsc_endpoint);
         ep->smsc_endpoint = NULL;
+    }
+
+    if (ep->fbox_in.buffer) {
+        /* The component polls this endpoint by name, and nothing else
+         * ever takes an entry out of that list: leaving it there means
+         * the progress loop keeps reading a fast box through the NULL
+         * buffer set just below. */
+        mca_btl_sm_fbox_in_unregister(ep);
     }
 
     ep->fbox_in.buffer = ep->fbox_out.buffer = NULL;
