@@ -523,15 +523,19 @@ int ompi_mpi_init(int argc, char **argv, int requested, int *provided,
 
     /* The connection-info exchange runs in instance init. A second
      * collecting fence here would wait for every peer blob and defeat
-     * lazy add_procs; only the world-model add_comm calls belong here. */
+     * lazy add_procs; only the world-model add_comm calls belong here.
+     *
+     * These are the only add_comm calls for the predefined communicators:
+     * instance init neither builds nor adds them, so the pair built by
+     * ompi_comm_init_mpi3() above is handed to the PML exactly once.  The
+     * BTLs have been able to deliver since instance init ran add_procs,
+     * so a fragment for MPI_COMM_WORLD may already have arrived; the PML
+     * holds anything it could not place for a communicator it had never
+     * seen, and add_comm() drains that queue here. */
 
-    if (NULL == ompi_mpi_comm_world.comm.c_pml_comm) {
-        MCA_PML_CALL(add_comm(&ompi_mpi_comm_world.comm));
-    }
+    MCA_PML_CALL(add_comm(&ompi_mpi_comm_world.comm));
     OMPI_COMM_SET_PML_ADDED(&ompi_mpi_comm_world.comm);
-    if (NULL == ompi_mpi_comm_self.comm.c_pml_comm) {
-        MCA_PML_CALL(add_comm(&ompi_mpi_comm_self.comm));
-    }
+    MCA_PML_CALL(add_comm(&ompi_mpi_comm_self.comm));
     OMPI_COMM_SET_PML_ADDED(&ompi_mpi_comm_self.comm);
 
 #if OPAL_ENABLE_FT_MPI

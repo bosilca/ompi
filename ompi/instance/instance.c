@@ -420,7 +420,7 @@ static void evhandler_dereg_callbk(pmix_status_t status,
 static int ompi_mpi_instance_init_common (int argc, char **argv)
 {
     int ret;
-    bool need_world_comms;
+    bool requires_world;
     ompi_proc_t **procs;
     size_t nprocs;
     volatile bool active;
@@ -707,14 +707,18 @@ static int ompi_mpi_instance_init_common (int argc, char **argv)
         return ompi_instance_print_error ("ompi_attr_create_predefined_keyvals() failed", ret);
     }
 
-    need_world_comms = mca_pml_base_requires_world() || mca_osc_base_requires_world();
-    if (need_world_comms) {
-        /* need to set up comm world for this instance -- XXX -- FIXME -- probably won't always
-         * be the case. */
-        if (OMPI_SUCCESS != (ret = ompi_comm_init_mpi3 ())) {
-            return ompi_instance_print_error ("ompi_comm_init_mpi3 () failed", ret);
-        }
-    }
+    /* The predefined MPI-3 communicators are not built here.  They belong
+     * to the World Model, which builds them once after this function has
+     * returned, and cannot do it any earlier: MPI_COMM_WORLD records the
+     * instance it lives in, and this instance is not published until
+     * ompi_mpi_instance_init() is done with it.  Building them here as
+     * well costs a message, because the second construction runs over the
+     * first -- it hands the PML a new and empty communicator and orphans
+     * everything the PML had already matched against the old one, with
+     * the sender none the wiser.  Waiting loses nothing: the PML parks a
+     * fragment it cannot place on its non-existing communicator queue,
+     * and add_comm() drains that queue. */
+    requires_world = mca_pml_base_requires_world() || mca_osc_base_requires_world();
 
     /* initialize file handles */
     if (OMPI_SUCCESS != (ret = ompi_file_init ())) {
@@ -760,7 +764,7 @@ static int ompi_mpi_instance_init_common (int argc, char **argv)
             return ompi_instance_print_error ("ompi_modex_wait_if_needed() failed", ret);
         }
 
-        if (need_world_comms) {
+        if (requires_world) {
             if (NULL == (procs = ompi_proc_world (&nprocs))) {
                 return ompi_instance_print_error ("ompi_proc_get_allocated () failed", ret);
             }
@@ -792,25 +796,6 @@ static int ompi_mpi_instance_init_common (int argc, char **argv)
         } else if (OMPI_SUCCESS != ret) {
             return ompi_instance_print_error ("PML add procs failed", ret);
         }
-    }
-
-    /* ompi_comm_init_mpi3() creates the predefined world/self
-       communicators but does not add_comm() them, so without this
-       teardown would call pml del_comm() on communicators the PML has
-       never seen.  The c_pml_comm guard keeps the World Model path (which
-       re-runs ompi_comm_init_mpi3() and performs its own add_comm() after
-       this function returns) from double-adding. */
-    if (need_world_comms && NULL == ompi_mpi_comm_world.comm.c_pml_comm) {
-        ret = MCA_PML_CALL(add_comm(&ompi_mpi_comm_world.comm));
-        if (OMPI_SUCCESS != ret) {
-            return ompi_instance_print_error ("PML add comm (world) failed", ret);
-        }
-        OMPI_COMM_SET_PML_ADDED(&ompi_mpi_comm_world.comm);
-        ret = MCA_PML_CALL(add_comm(&ompi_mpi_comm_self.comm));
-        if (OMPI_SUCCESS != ret) {
-            return ompi_instance_print_error ("PML add comm (self) failed", ret);
-        }
-        OMPI_COMM_SET_PML_ADDED(&ompi_mpi_comm_self.comm);
     }
 
     /* Determine the overall threadlevel support of all processes
