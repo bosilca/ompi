@@ -267,10 +267,50 @@ OBJ_CLASS_INSTANCE(mca_btl_tcp_event_t, opal_list_item_t, mca_btl_tcp_event_cons
                    mca_btl_tcp_event_destruct);
 
 /*
+ * An inbound connection that has named itself and is waiting for a
+ * module's endpoint to take it. It waits here rather than on the endpoint
+ * because adopting it means closing whatever socket that endpoint already
+ * has, under the endpoint's own locks -- work the listener cannot do
+ * without stalling every other peer behind it.
+ *
+ * The entry owns the socket until sd is set to -1. Nothing else has to
+ * remember to close it: whoever returns the entry closes what is left.
+ */
+struct mca_btl_tcp_pending_accept_t {
+    opal_free_list_item_t super;
+    opal_event_t event;           /**< timer that drives the arbitration */
+    opal_process_name_t name;     /**< the peer by name: its proc may be retired while we wait */
+    struct sockaddr_storage addr; /**< the address the peer dialled */
+    int sd;
+    int attempts;
+};
+typedef struct mca_btl_tcp_pending_accept_t mca_btl_tcp_pending_accept_t;
+
+static void mca_btl_tcp_pending_accept_construct(mca_btl_tcp_pending_accept_t *pending)
+{
+    pending->sd = -1;
+    pending->attempts = 0;
+}
+
+/* Runs when the free list is torn down, not on every use, so this is only
+ * a backstop: an entry still in flight is drained by component close. */
+static void mca_btl_tcp_pending_accept_destruct(mca_btl_tcp_pending_accept_t *pending)
+{
+    if (0 <= pending->sd) {
+        CLOSE_THE_SOCKET(pending->sd);
+        pending->sd = -1;
+    }
+}
+
+OBJ_CLASS_INSTANCE(mca_btl_tcp_pending_accept_t, opal_free_list_item_t,
+                   mca_btl_tcp_pending_accept_construct, mca_btl_tcp_pending_accept_destruct);
+
+/*
  * functions for receiving event callbacks
  */
 static void mca_btl_tcp_component_recv_handler(int, short, void *);
 static void mca_btl_tcp_component_accept_handler(int, short, void *);
+static void mca_btl_tcp_pending_accept_return(mca_btl_tcp_pending_accept_t *);
 
 static int mca_btl_tcp_component_verify(void)
 {
@@ -324,6 +364,23 @@ static int mca_btl_tcp_component_register(void)
                                    &mca_btl_tcp_component.tcp_free_list_max);
     mca_btl_tcp_param_register_int("free_list_inc", NULL, 32, OPAL_INFO_LVL_5,
                                    &mca_btl_tcp_component.tcp_free_list_inc);
+    mca_btl_tcp_param_register_int("pending_accept_peers",
+                                   "Number of peers to have arbitration entries ready for before "
+                                   "any inbound connection arrives.  One entry is needed per link "
+                                   "per peer connecting at the same time; more are allocated on "
+                                   "demand, so this only trades memory for allocations in a burst.",
+                                   5, OPAL_INFO_LVL_5,
+                                   &mca_btl_tcp_component.tcp_pending_accept_peers);
+    mca_btl_tcp_param_register_int("arbitration_retry",
+                                   "Microseconds to wait before offering an inbound connection to "
+                                   "an endpoint that was busy in its own send or recv path.",
+                                   100, OPAL_INFO_LVL_5,
+                                   &mca_btl_tcp_component.tcp_arbitration_retry);
+    mca_btl_tcp_param_register_int("arbitration_retries",
+                                   "How many times to re-offer an inbound connection to a busy "
+                                   "endpoint before dropping the connection.",
+                                   1000, OPAL_INFO_LVL_5,
+                                   &mca_btl_tcp_component.tcp_arbitration_retries);
     mca_btl_tcp_param_register_int(
         "sndbuf",
         "The size of the send buffer socket option for each connection.  "
@@ -477,6 +534,9 @@ static int mca_btl_tcp_component_open(void)
     OBJ_CONSTRUCT(&mca_btl_tcp_component.tcp_lock, opal_mutex_t);
     OBJ_CONSTRUCT(&mca_btl_tcp_component.tcp_procs, opal_proc_table_t);
     OBJ_CONSTRUCT(&mca_btl_tcp_component.tcp_events, opal_list_t);
+    OBJ_CONSTRUCT(&mca_btl_tcp_component.tcp_pending_accepts, opal_list_t);
+    OBJ_CONSTRUCT(&mca_btl_tcp_component.tcp_pending_accepts_lock, opal_mutex_t);
+    OBJ_CONSTRUCT(&mca_btl_tcp_component.tcp_pending_accepts_fl, opal_free_list_t);
     OBJ_CONSTRUCT(&mca_btl_tcp_component.tcp_frag_eager, opal_free_list_t);
     OBJ_CONSTRUCT(&mca_btl_tcp_component.tcp_frag_max, opal_free_list_t);
     OBJ_CONSTRUCT(&mca_btl_tcp_component.tcp_frag_user, opal_free_list_t);
@@ -512,6 +572,7 @@ static int mca_btl_tcp_component_open(void)
 static int mca_btl_tcp_component_close(void)
 {
     mca_btl_tcp_event_t *event, *next;
+    mca_btl_tcp_pending_accept_t *pending, *pending_next;
     bool free_event_base = false;
 
     /**
@@ -576,11 +637,23 @@ static int mca_btl_tcp_component_close(void)
         OBJ_RELEASE(event);
     }
 
+    /* Inbound connections that never found an endpoint to take them. Their
+       timers must go before the base they are armed on, and their sockets
+       are still theirs to close. */
+    OPAL_LIST_FOREACH_SAFE (pending, pending_next, &mca_btl_tcp_component.tcp_pending_accepts,
+                            mca_btl_tcp_pending_accept_t) {
+        opal_event_del(&pending->event);
+        mca_btl_tcp_pending_accept_return(pending);
+    }
+
     opal_proc_table_remove_value(&mca_btl_tcp_component.tcp_procs,
                                  opal_proc_local_get()->proc_name);
 
     /* release resources */
     OBJ_DESTRUCT(&mca_btl_tcp_component.tcp_procs);
+    OBJ_DESTRUCT(&mca_btl_tcp_component.tcp_pending_accepts);
+    OBJ_DESTRUCT(&mca_btl_tcp_component.tcp_pending_accepts_fl);
+    OBJ_DESTRUCT(&mca_btl_tcp_component.tcp_pending_accepts_lock);
     OBJ_DESTRUCT(&mca_btl_tcp_component.tcp_frag_eager);
     OBJ_DESTRUCT(&mca_btl_tcp_component.tcp_frag_max);
     OBJ_DESTRUCT(&mca_btl_tcp_component.tcp_frag_user);
@@ -1383,6 +1456,7 @@ mca_btl_base_module_t **mca_btl_tcp_component_init(int *num_btl_modules,
 {
     int ret = OPAL_SUCCESS;
     unsigned int i;
+    int per_peer;
     mca_btl_base_module_t **btls;
     *num_btl_modules = 0;
 
@@ -1411,6 +1485,23 @@ mca_btl_base_module_t **mca_btl_tcp_component_init(int *num_btl_modules,
     if (OPAL_SUCCESS != (ret = mca_btl_tcp_component_create_instances())) {
         return 0;
     }
+
+    /* Arbitration entries, now that the module count is known. A peer can
+     * dial every module at once -- tcp_num_btls already counts each link of
+     * each interface separately -- so one peer's worth is one entry per
+     * module, and the initial allocation covers a few peers arriving
+     * together. There is no maximum: refusing an entry means dropping a
+     * connection a peer is waiting on.
+     */
+    per_peer = (int) mca_btl_tcp_component.tcp_num_btls;
+    if (per_peer < 1) {
+        per_peer = 1; /* never a growth increment of zero */
+    }
+    opal_free_list_init(&mca_btl_tcp_component.tcp_pending_accepts_fl,
+                        sizeof(mca_btl_tcp_pending_accept_t), opal_cache_line_size,
+                        OBJ_CLASS(mca_btl_tcp_pending_accept_t), 0, opal_cache_line_size,
+                        per_peer * mca_btl_tcp_component.tcp_pending_accept_peers, -1, per_peer,
+                        NULL, 0, NULL, NULL, NULL);
 
     /* create a TCP listen socket for incoming connection attempts */
     if (OPAL_SUCCESS != (ret = mca_btl_tcp_component_create_listen(AF_INET))) {
@@ -1447,6 +1538,123 @@ mca_btl_base_module_t **mca_btl_tcp_component_init(int *num_btl_modules,
            mca_btl_tcp_component.tcp_num_btls * sizeof(mca_btl_tcp_module_t *));
     *num_btl_modules = mca_btl_tcp_component.tcp_num_btls;
     return btls;
+}
+
+/*
+ * Give up an arbitration entry, closing the socket if it still owns one.
+ */
+static void mca_btl_tcp_pending_accept_return(mca_btl_tcp_pending_accept_t *pending)
+{
+    MCA_BTL_TCP_CRITICAL_SECTION_ENTER(&mca_btl_tcp_component.tcp_pending_accepts_lock);
+    opal_list_remove_item(&mca_btl_tcp_component.tcp_pending_accepts,
+                          (opal_list_item_t *) pending);
+    MCA_BTL_TCP_CRITICAL_SECTION_LEAVE(&mca_btl_tcp_component.tcp_pending_accepts_lock);
+
+    if (0 <= pending->sd) {
+        CLOSE_THE_SOCKET(pending->sd);
+        pending->sd = -1;
+    }
+    opal_free_list_return(&mca_btl_tcp_component.tcp_pending_accepts_fl, &pending->super);
+}
+
+/*
+ * Hand a named inbound connection to the endpoint that should have it.
+ * Runs on mca_btl_tcp_event_base, which is where an endpoint's locks may
+ * be taken, rather than on the listener, where they may not.
+ */
+static void mca_btl_tcp_component_arbitrate(int fd, short flags, void *context)
+{
+    mca_btl_tcp_pending_accept_t *pending = (mca_btl_tcp_pending_accept_t *) context;
+    mca_btl_tcp_proc_t *btl_proc;
+    struct timeval retry;
+    int rc;
+
+    /* By name, not by pointer: the peer may have been retired while this
+     * socket waited, in which case there is nothing left to give it to.
+     */
+    btl_proc = mca_btl_tcp_proc_peek(&pending->name);
+    if (NULL == btl_proc) {
+        opal_output_verbose(20, opal_btl_base_framework.framework_output,
+                            "btl:tcp: no proc left for the inbound connection from %s",
+                            OPAL_NAME_PRINT(pending->name));
+        mca_btl_tcp_pending_accept_return(pending);
+        return;
+    }
+
+    rc = mca_btl_tcp_proc_accept(btl_proc, (struct sockaddr *) &pending->addr, pending->sd);
+    if (OPAL_ERR_RESOURCE_BUSY == rc) {
+        /* The endpoint this socket belongs to is busy in its own send or
+         * recv path. Come back for it rather than blocking here, and rather
+         * than making this socket's contention anyone else's: every pending
+         * connection carries its own timer, so a peer waiting on a long
+         * receive holds up only itself.
+         */
+        if (++pending->attempts > mca_btl_tcp_component.tcp_arbitration_retries) {
+            opal_output_verbose(5, opal_btl_base_framework.framework_output,
+                                "btl:tcp: gave up arbitrating the inbound connection from %s "
+                                "after %d attempts",
+                                OPAL_NAME_PRINT(pending->name), pending->attempts);
+            mca_btl_tcp_pending_accept_return(pending);
+            return;
+        }
+        if (1 == pending->attempts) {
+            /* Only the first: the same socket may be re-offered hundreds of
+             * times before the endpoint takes it, and what is worth knowing
+             * is that a deferral happened at all -- the ones after it say
+             * nothing new and would bury the rest of the output.
+             */
+            opal_output_verbose(20, opal_btl_base_framework.framework_output,
+                                "btl:tcp: deferring the inbound connection from %s, "
+                                "the endpoint is busy in its own send or recv path",
+                                OPAL_NAME_PRINT(pending->name));
+        }
+        retry.tv_sec = 0;
+        retry.tv_usec = mca_btl_tcp_component.tcp_arbitration_retry;
+        opal_event_add(&pending->event, &retry);
+        return;
+    }
+
+    if (OPAL_SUCCESS == rc) {
+        pending->sd = -1; /* the endpoint owns it now */
+    }
+    mca_btl_tcp_pending_accept_return(pending);
+}
+
+/*
+ * Take an inbound connection that has named itself, and arrange for an
+ * endpoint to be given it from the event base.
+ */
+static int mca_btl_tcp_component_queue_accept(const opal_process_name_t *name,
+                                              const struct sockaddr_storage *addr, int sd)
+{
+    mca_btl_tcp_pending_accept_t *pending;
+    struct timeval now = {0, 0};
+
+    pending = (mca_btl_tcp_pending_accept_t *) opal_free_list_get(
+        &mca_btl_tcp_component.tcp_pending_accepts_fl);
+    if (NULL == pending) {
+        return OPAL_ERR_OUT_OF_RESOURCE;
+    }
+    pending->name = *name;
+    memcpy(&pending->addr, addr, sizeof(pending->addr));
+    pending->sd = sd;
+    pending->attempts = 0;
+
+    /* Set each time rather than once at allocation: the event base is not
+     * known until the listener is created, and it may be the shared base or
+     * a private one depending on how the progress thread came up. Set before
+     * the entry is published, so that everything component close finds on
+     * the list has a timer it can delete.
+     */
+    opal_event_evtimer_set(mca_btl_tcp_event_base, &pending->event,
+                           mca_btl_tcp_component_arbitrate, pending);
+
+    MCA_BTL_TCP_CRITICAL_SECTION_ENTER(&mca_btl_tcp_component.tcp_pending_accepts_lock);
+    opal_list_append(&mca_btl_tcp_component.tcp_pending_accepts, (opal_list_item_t *) pending);
+    MCA_BTL_TCP_CRITICAL_SECTION_LEAVE(&mca_btl_tcp_component.tcp_pending_accepts_lock);
+
+    opal_event_add(&pending->event, &now);
+    return OPAL_SUCCESS;
 }
 
 /**
@@ -1630,12 +1838,24 @@ static void mca_btl_tcp_component_recv_handler(int sd, short flags, void *user)
         return;
     }
 
-    /* are there any existing peer instances willing to accept this connection */
-    (void) mca_btl_tcp_proc_accept(btl_proc, (struct sockaddr *) &addr, sd);
-
     const char *str = opal_fd_get_peer_name(sd);
     opal_output_verbose(10, opal_btl_base_framework.framework_output,
                         "btl:tcp: now connected to %s, process %s", str,
                         OPAL_NAME_PRINT(btl_proc->proc_opal->proc_name));
     free((char *) str);
+
+    /* The socket goes to the arbitration queue, not to an endpoint. Which
+     * module owns the address the peer dialled, and whether that module's
+     * endpoint can be given the socket now, are questions for a context
+     * that may take an endpoint's locks; this is the listener, and every
+     * other peer waits behind it. The queue owns the socket from here, so
+     * nothing below may name it.
+     */
+    if (OPAL_SUCCESS != mca_btl_tcp_component_queue_accept(&guid, &addr, sd)) {
+        opal_output_verbose(5, opal_btl_base_framework.framework_output,
+                            "btl:tcp: no room to queue the inbound connection from %s",
+                            OPAL_NAME_PRINT(btl_proc->proc_opal->proc_name));
+        CLOSE_THE_SOCKET(sd);
+        return;
+    }
 }
