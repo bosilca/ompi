@@ -54,16 +54,27 @@ static void _mem_rec_destructor(void *arg);
  * address goes out in the modex -- rather than one handed to a thread.  The
  * caller knows which it is asking for, so it is told rather than inferred
  * from the state of the pool.
+ *
+ * The default winfo runs on the process-wide shared worker, which the pool
+ * already holds a reference on; so does every winfo in a job that is not
+ * threaded, since there is then no reason for a thread to have one of its
+ * own.  Only a thread in a threaded job gets a private worker, and that one
+ * is purely client-side: it publishes no address, and peers reach this
+ * process through the shared worker regardless.
  */
 static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool,
                                               bool is_dflt)
 {
     ucp_worker_params_t worker_params;
+    bool shared_worker = is_dflt || !opal_common_ucx_thread_enabled;
     ucp_worker_h worker;
     ucs_status_t status;
     opal_common_ucx_winfo_t *winfo = NULL;
 
-    if (opal_common_ucx_thread_enabled || is_dflt) {
+    if (shared_worker) {
+        worker = opal_common_ucx_worker_handle(&wpool->worker_user);
+        assert(NULL != worker);
+    } else {
         memset(&worker_params, 0, sizeof(worker_params));
         worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
         worker_params.thread_mode = opal_common_ucx_single_threaded ? UCS_THREAD_MODE_SINGLE : UCS_THREAD_MODE_SERIALIZED;
@@ -72,10 +83,6 @@ static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool,
             MCA_COMMON_UCX_ERROR("ucp_worker_create failed: %d", status);
             goto exit;
         }
-    } else {
-        /* Single threaded application can reuse the default worker */
-        assert(NULL != wpool->dflt_winfo);
-        worker = wpool->dflt_winfo->worker;
     }
 
     winfo = OBJ_NEW(opal_common_ucx_winfo_t);
@@ -92,11 +99,12 @@ static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool,
     winfo->global_inflight_ops = 0;
     winfo->inflight_req = UCS_OK;
     winfo->is_dflt_winfo = is_dflt;
+    winfo->shared_worker = shared_worker;
 
     return winfo;
 
 release_worker:
-    if (opal_common_ucx_thread_enabled || is_dflt) {
+    if (!shared_worker) {
         ucp_worker_destroy(worker);
     }
 exit:
@@ -114,7 +122,10 @@ static void _winfo_destructor(opal_common_ucx_winfo_t *winfo)
 
     if (winfo->comm_size != 0) {
         size_t i;
-        if (opal_common_ucx_thread_enabled) {
+        /* On the shared worker the endpoints are the context's, borrowed
+         * from its registry references, and it releases them.  On a private
+         * worker they are ours alone. */
+        if (!winfo->shared_worker) {
             for (i = 0; i < winfo->comm_size; i++) {
                 if (NULL != winfo->endpoints[i]) {
                     ucp_ep_destroy(winfo->endpoints[i]);
@@ -130,7 +141,7 @@ static void _winfo_destructor(opal_common_ucx_winfo_t *winfo)
     winfo->comm_size = 0;
 
     OBJ_DESTRUCT(&winfo->mutex);
-    if (opal_common_ucx_thread_enabled || winfo->is_dflt_winfo) {
+    if (!winfo->shared_worker) {
         ucp_worker_destroy(winfo->worker);
     }
 
@@ -160,7 +171,7 @@ static int _wpool_list_put(opal_common_ucx_wpool_t *wpool, opal_list_t *list,
 OPAL_DECLSPEC int opal_common_ucx_wpool_init(opal_common_ucx_wpool_t *wpool)
 {
     opal_common_ucx_winfo_t *winfo;
-    ucs_status_t status;
+    ucs_thread_mode_t thread_mode;
     int rc = OPAL_SUCCESS;
 
     wpool->refcnt++;
@@ -177,6 +188,23 @@ OPAL_DECLSPEC int opal_common_ucx_wpool_init(opal_common_ucx_wpool_t *wpool)
 
     wpool->dflt_winfo = NULL;
 
+    /* The same derivation every other UCX user of this process makes, so
+     * that we all ask for the same thing and can therefore share. */
+    thread_mode = opal_common_ucx_job_thread_mode();
+
+    /* Deliberately no opal_common_ucx_worker_publish() here.  A pool is only
+     * ever built on the first use of a window, which is long after MPI_Init
+     * closed the business card, so there is nothing we could put in it:
+     * either the ucx PML already published this worker for us, or nobody
+     * did and our users have to exchange addresses among themselves.  Which
+     * of the two it is is exactly what opal_common_ucx_worker_is_published()
+     * reports, and the caller tells wpctx_create() how to cope. */
+    rc = opal_common_ucx_worker_get(&wpool->worker_user, wpool->ucp_ctx, thread_mode, 0);
+    if (OPAL_SUCCESS != rc) {
+        MCA_COMMON_UCX_ERROR("Failed to acquire a UCP worker");
+        goto err_worker_get;
+    }
+
     winfo = _winfo_create(wpool, true);
     if (NULL == winfo) {
         MCA_COMMON_UCX_ERROR("Failed to create receive worker");
@@ -186,14 +214,6 @@ OPAL_DECLSPEC int opal_common_ucx_wpool_init(opal_common_ucx_wpool_t *wpool)
     wpool->dflt_winfo = winfo;
     OBJ_RETAIN(wpool->dflt_winfo);
 
-    status = ucp_worker_get_address(wpool->dflt_winfo->worker, &wpool->recv_waddr,
-                                    &wpool->recv_waddr_len);
-    if (status != UCS_OK) {
-        MCA_COMMON_UCX_VERBOSE(1, "ucp_worker_get_address failed: %d", status);
-        rc = OPAL_ERROR;
-        goto err_get_addr;
-    }
-
     rc = _wpool_list_put(wpool, &wpool->idle_workers, winfo);
     if (rc) {
         goto err_wpool_add;
@@ -202,11 +222,11 @@ OPAL_DECLSPEC int opal_common_ucx_wpool_init(opal_common_ucx_wpool_t *wpool)
     return rc;
 
 err_wpool_add:
-    free(wpool->recv_waddr);
-err_get_addr:
     OBJ_RELEASE(winfo);
     wpool->dflt_winfo = NULL;
 err_worker_create:
+    opal_common_ucx_worker_put(&wpool->worker_user);
+err_worker_get:
     OBJ_DESTRUCT(&wpool->idle_workers);
     OBJ_DESTRUCT(&wpool->active_workers);
     if (wpool->ucp_ctx_owned) {
@@ -223,10 +243,6 @@ void opal_common_ucx_wpool_finalize(opal_common_ucx_wpool_t *wpool)
     if (wpool->refcnt > 0) {
         return;
     }
-
-    /* Release the address here. recv worker will be released
-     * below along with other idle workers */
-    ucp_worker_release_address(wpool->dflt_winfo->worker, wpool->recv_waddr);
 
     /* Go over the list, free idle list items */
     if (!opal_list_is_empty(&wpool->idle_workers)) {
@@ -252,6 +268,9 @@ void opal_common_ucx_wpool_finalize(opal_common_ucx_wpool_t *wpool)
     OBJ_RELEASE(wpool->dflt_winfo);
     wpool->dflt_winfo = NULL;
 
+    /* After the winfos, which were running on it. */
+    opal_common_ucx_worker_put(&wpool->worker_user);
+
     OBJ_DESTRUCT(&wpool->mutex);
     if (wpool->ucp_ctx_owned && (NULL != wpool->ucp_ctx)) {
         ucp_cleanup(wpool->ucp_ctx);
@@ -273,15 +292,18 @@ OPAL_DECLSPEC int opal_common_ucx_wpool_progress(opal_common_ucx_wpool_t *wpool)
         return completed;
     }
 
-    bool progress_dflt_worker = true;
     OPAL_LIST_FOREACH_SAFE (winfo, next, &wpool->active_workers, opal_common_ucx_winfo_t) {
+        /* The shared worker has one driver for the whole process, registered
+         * by common/ucx; progressing it from here as well would mean one
+         * call per active winfo on the same worker.  Only the private
+         * per-thread workers are ours to drive. */
+        if (winfo->shared_worker) {
+            continue;
+        }
         if (0 != opal_mutex_trylock(&winfo->mutex)) {
             continue;
         }
         do {
-            if (winfo == wpool->dflt_winfo) {
-                progress_dflt_worker = false;
-            }
             progressed = ucp_worker_progress(winfo->worker);
             completed += progressed;
         } while (progressed);
@@ -289,12 +311,6 @@ OPAL_DECLSPEC int opal_common_ucx_wpool_progress(opal_common_ucx_wpool_t *wpool)
     }
     opal_mutex_unlock(&wpool->mutex);
 
-    if (progress_dflt_worker) {
-        /* make sure to progress at least some */
-        opal_mutex_lock(&wpool->dflt_winfo->mutex);
-        completed += ucp_worker_progress(wpool->dflt_winfo->worker);
-        opal_mutex_unlock(&wpool->dflt_winfo->mutex);
-    }
     return completed;
 }
 
@@ -349,7 +365,9 @@ static void _wpool_put_winfo(opal_common_ucx_wpool_t *wpool, opal_common_ucx_win
     opal_mutex_lock(&wpool->mutex);
     if (winfo->comm_size != 0) {
         size_t i;
-        if (opal_common_ucx_thread_enabled) {
+        /* See _winfo_destructor(): only a private worker's endpoints are
+         * ours to close. */
+        if (!winfo->shared_worker) {
             for (i = 0; i < winfo->comm_size; i++) {
                 if (NULL != winfo->endpoints[i]) {
                     ucp_ep_destroy(winfo->endpoints[i]);
@@ -375,6 +393,7 @@ static void _wpool_put_winfo(opal_common_ucx_wpool_t *wpool, opal_common_ucx_win
  *----------------------------------------------------------------------------*/
 
 OPAL_DECLSPEC int opal_common_ucx_wpctx_create(opal_common_ucx_wpool_t *wpool, int comm_size,
+                                               const opal_process_name_t *proc_names,
                                                opal_common_ucx_exchange_func_t exchange_func,
                                                void *exchange_metadata,
                                                opal_common_ucx_ctx_t **ctx_ptr)
@@ -382,19 +401,49 @@ OPAL_DECLSPEC int opal_common_ucx_wpctx_create(opal_common_ucx_wpool_t *wpool, i
     opal_common_ucx_ctx_t *ctx = calloc(1, sizeof(*ctx));
     int ret = OPAL_SUCCESS;
 
+    if (NULL == ctx) {
+        (*ctx_ptr) = NULL;
+        return OPAL_ERR_OUT_OF_RESOURCE;
+    }
+
     OBJ_CONSTRUCT(&ctx->mutex, opal_recursive_mutex_t);
     OBJ_CONSTRUCT(&ctx->ctx_records, opal_list_t);
 
     ctx->wpool = wpool;
     ctx->comm_size = comm_size;
+    ctx->num_incomplete_req_ops = 0;
 
+    ctx->proc_names = malloc(comm_size * sizeof(*ctx->proc_names));
+    if (NULL == ctx->proc_names) {
+        ret = OPAL_ERR_OUT_OF_RESOURCE;
+        goto error;
+    }
+    memcpy(ctx->proc_names, proc_names, comm_size * sizeof(*ctx->proc_names));
+
+    /* Normally nothing to exchange: the addresses are already in the
+     * business card, put there once for the whole process rather than once
+     * per context. */
     ctx->recv_worker_addrs = NULL;
     ctx->recv_worker_displs = NULL;
-    ctx->num_incomplete_req_ops = 0;
-    ret = exchange_func(wpool->recv_waddr, wpool->recv_waddr_len, &ctx->recv_worker_addrs,
-                        &ctx->recv_worker_displs, exchange_metadata);
-    if (ret != OPAL_SUCCESS) {
-        goto error;
+    if (NULL != exchange_func) {
+        ucp_address_t *my_addr;
+        size_t my_addr_len;
+        ucs_status_t status;
+
+        status = ucp_worker_get_address(opal_common_ucx_worker_handle(&wpool->worker_user),
+                                        &my_addr, &my_addr_len);
+        if (UCS_OK != status) {
+            MCA_COMMON_UCX_VERBOSE(1, "ucp_worker_get_address failed: %d", status);
+            ret = OPAL_ERROR;
+            goto error;
+        }
+
+        ret = exchange_func(my_addr, my_addr_len, &ctx->recv_worker_addrs,
+                            &ctx->recv_worker_displs, exchange_metadata);
+        ucp_worker_release_address(opal_common_ucx_worker_handle(&wpool->worker_user), my_addr);
+        if (OPAL_SUCCESS != ret) {
+            goto error;
+        }
     }
 
     OBJ_CONSTRUCT(&ctx->tls_key, opal_tsd_tracked_key_t);
@@ -403,6 +452,9 @@ OPAL_DECLSPEC int opal_common_ucx_wpctx_create(opal_common_ucx_wpool_t *wpool, i
     (*ctx_ptr) = ctx;
     return ret;
 error:
+    free(ctx->recv_worker_addrs);
+    free(ctx->recv_worker_displs);
+    free(ctx->proc_names);
     OBJ_DESTRUCT(&ctx->mutex);
     OBJ_DESTRUCT(&ctx->ctx_records);
     free(ctx);
@@ -425,8 +477,11 @@ OPAL_DECLSPEC void opal_common_ucx_wpctx_release(opal_common_ucx_ctx_t *ctx)
         _tlocal_ctx_rec_cleanup(ctx_rec);
     }
 
+    /* The shared endpoints are not ours to release: they live in the
+     * caller's process-wide slots, which outlive any one context. */
     free(ctx->recv_worker_addrs);
     free(ctx->recv_worker_displs);
+    free(ctx->proc_names);
 
     OBJ_DESTRUCT(&ctx->mutex);
     OBJ_DESTRUCT(&ctx->ctx_records);
@@ -655,31 +710,89 @@ error1:
     return NULL;
 }
 
-static int _tlocal_ctx_connect(_ctx_record_t *ctx_rec, int target)
+/*
+ * Open the endpoint this winfo needs in order to reach `target'.
+ *
+ * `shared_ep' is the caller's process-wide slot for this peer -- osc/ucx's
+ * component-level endpoint array -- and it, not us, owns what ends up in it:
+ * it outlives any one context, and the registry reference is released when
+ * the caller tears the slot down.  We only fill it on a miss and borrow the
+ * handle into our own per-winfo array.
+ *
+ * A winfo on a private per-thread worker cannot use the slot at all, since an
+ * endpoint belongs to the worker it was opened on; it gets one of its own and
+ * destroys it itself.
+ */
+static int _tlocal_ctx_connect(_ctx_record_t *ctx_rec, int target, ucp_ep_h *shared_ep)
 {
     ucp_ep_params_t ep_params;
     opal_common_ucx_winfo_t *winfo = ctx_rec->winfo;
     opal_common_ucx_ctx_t *gctx = ctx_rec->gctx;
+    ucp_address_t *address, *owned_address = NULL;
     ucs_status_t status;
-    int displ;
-
-    memset(&ep_params, 0, sizeof(ucp_ep_params_t));
-    ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
+    size_t addrlen;
+    int rc;
 
     assert(winfo->endpoints[target] == NULL);
+
+    /* The business card is where a peer's address normally comes from; the
+     * gathered table is the fallback for a context whose members could not
+     * reach it (see opal_common_ucx_wpctx_create()). */
+    if (NULL != gctx->recv_worker_addrs) {
+        address = (ucp_address_t *) &gctx->recv_worker_addrs[gctx->recv_worker_displs[target]];
+    } else {
+        rc = opal_common_ucx_worker_lookup_addr(&gctx->wpool->worker_user,
+                                                &gctx->proc_names[target], &owned_address,
+                                                &addrlen);
+        if (OPAL_SUCCESS != rc) {
+            return rc;
+        }
+        address = owned_address;
+    }
+
+    if (winfo->shared_worker && (NULL != shared_ep)) {
+        /* One endpoint per peer for the whole process, so this may well be
+         * one the ucx PML or another window opened already, in which case
+         * the address goes unused. */
+        opal_mutex_lock(&gctx->wpool->mutex);
+        if (NULL == *shared_ep) {
+            rc = opal_common_ucx_worker_connect_addr(&gctx->wpool->worker_user,
+                                                     &gctx->proc_names[target], address,
+                                                     shared_ep);
+            if (OPAL_SUCCESS != rc) {
+                opal_mutex_unlock(&gctx->wpool->mutex);
+                goto out;
+            }
+            OPAL_COMMON_UCX_DEBUG_ATOMIC_ADD(opal_common_ucx_ep_counts, 1);
+        }
+        winfo->endpoints[target] = *shared_ep;
+        opal_mutex_unlock(&gctx->wpool->mutex);
+
+        rc = OPAL_SUCCESS;
+        goto out;
+    }
+
+    /* A worker of this thread's own, which nobody else drives and whose
+     * address was never published, so it needs an endpoint of its own. */
+    memset(&ep_params, 0, sizeof(ucp_ep_params_t));
+    ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
+    ep_params.address = address;
+
     opal_mutex_lock(&winfo->mutex);
-    displ = gctx->recv_worker_displs[target];
-    ep_params.address = (ucp_address_t *) &(gctx->recv_worker_addrs[displ]);
     status = ucp_ep_create(winfo->worker, &ep_params, &winfo->endpoints[target]);
+    opal_mutex_unlock(&winfo->mutex);
     if (status != UCS_OK) {
         MCA_COMMON_UCX_VERBOSE(1, "ucp_ep_create failed: %d", status);
-        opal_mutex_unlock(&winfo->mutex);
-        return OPAL_ERROR;
+        rc = OPAL_ERROR;
+        goto out;
     }
     OPAL_COMMON_UCX_DEBUG_ATOMIC_ADD(opal_common_ucx_ep_counts, 1);
-    opal_mutex_unlock(&winfo->mutex);
-    assert(winfo->endpoints[target] != NULL);
-    return OPAL_SUCCESS;
+    rc = OPAL_SUCCESS;
+
+out:
+    free(owned_address);
+    assert((OPAL_SUCCESS != rc) || (NULL != winfo->endpoints[target]));
+    return rc;
 }
 
 static void _mem_rec_destructor(void *arg)
@@ -750,7 +863,8 @@ static int _tlocal_mem_create_rkey(_mem_record_t *mem_rec, ucp_ep_h ep, int targ
 }
 
 /* Get the TLS in case of slow path (not everything has been yet initialized */
-OPAL_DECLSPEC int opal_common_ucx_tlocal_fetch_spath(opal_common_ucx_wpmem_t *mem, int target, ucp_ep_h *dflt_ep)
+OPAL_DECLSPEC int opal_common_ucx_tlocal_fetch_spath(opal_common_ucx_wpmem_t *mem, int target,
+                                                     ucp_ep_h *shared_ep)
 {
     _ctx_record_t *ctx_rec = NULL;
     _mem_record_t *mem_rec = NULL;
@@ -769,20 +883,9 @@ OPAL_DECLSPEC int opal_common_ucx_tlocal_fetch_spath(opal_common_ucx_wpmem_t *me
 
     /* Obtain the endpoint */
     if (OPAL_UNLIKELY(NULL == winfo->endpoints[target])) {
-        if (opal_common_ucx_thread_enabled || (dflt_ep == NULL) ||
-                (*dflt_ep == NULL)) {
-            rc = _tlocal_ctx_connect(ctx_rec, target);
-            if (rc != OPAL_SUCCESS) {
-                return rc;
-            }
-            if (!opal_common_ucx_thread_enabled && (dflt_ep != NULL) &&
-                    (*dflt_ep == NULL)) {
-                /* set the proc ep */
-                *dflt_ep = winfo->endpoints[target];
-            }
-        } else {
-            /* reuse the previously created ep */
-            winfo->endpoints[target] = *dflt_ep;
+        rc = _tlocal_ctx_connect(ctx_rec, target, shared_ep);
+        if (rc != OPAL_SUCCESS) {
+            return rc;
         }
     }
     ep = winfo->endpoints[target];
@@ -930,7 +1033,7 @@ OPAL_DECLSPEC int opal_common_ucx_ctx_flush(opal_common_ucx_ctx_t *ctx,
 OPAL_DECLSPEC int opal_common_ucx_wpmem_flush_ep_nb(opal_common_ucx_wpmem_t *mem,
                                                     int target,
                                                     opal_common_ucx_user_req_handler_t user_req_cb,
-                                                    void *user_req_ptr, ucp_ep_h *dflt_ep)
+                                                    void *user_req_ptr, ucp_ep_h *shared_ep)
 {
 #if HAVE_DECL_UCP_EP_FLUSH_NB
     int rc = OPAL_SUCCESS;
@@ -942,7 +1045,7 @@ OPAL_DECLSPEC int opal_common_ucx_wpmem_flush_ep_nb(opal_common_ucx_wpmem_t *mem
         return OPAL_SUCCESS;
     }
 
-    rc = opal_common_ucx_tlocal_fetch(mem, target, &ep, &rkey, &winfo, dflt_ep);
+    rc = opal_common_ucx_tlocal_fetch(mem, target, &ep, &rkey, &winfo, shared_ep);
     if (OPAL_UNLIKELY(OPAL_SUCCESS != rc)) {
         MCA_COMMON_UCX_ERROR("tlocal_fetch failed: %d", rc);
         return rc;

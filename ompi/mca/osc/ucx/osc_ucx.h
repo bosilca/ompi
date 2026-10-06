@@ -37,6 +37,11 @@ typedef struct ompi_osc_ucx_component {
      * it wants to take part in sharing one at all */
     opal_common_ucx_context_user_t ucx_context;
     bool share_context;
+    /* Whether to take part in sharing one worker, and so one endpoint per
+     * peer, with the other UCX components.  Lives here rather than in the
+     * pool's worker user because the pool is not allocated yet when the MCA
+     * parameters are registered. */
+    bool share_worker;
     opal_common_ucx_wpool_t *wpool;
     bool enable_mpi_threads;
     opal_free_list_t requests; /* request free list for the r* communication variants */
@@ -45,7 +50,12 @@ typedef struct ompi_osc_ucx_component {
     bool priority_is_set; /* Is ucp_ctx created and component priority has been set */
     opal_common_ucx_support_level_t support_level;
     int comm_world_size;
+    /* This process's endpoints, one per world rank, and the peer each slot
+     * belongs to.  The handles come from the process-wide registry and may be
+     * shared with the ucx PML; the names are kept so that the references can
+     * still be given back at finalize, when the communicators are gone. */
     ucp_ep_h *endpoints;
+    opal_process_name_t *endpoint_procs;
     int num_modules;
     bool no_locks; /* Default value of the no_locks info key for new windows */
     bool acc_single_intrinsic;
@@ -182,12 +192,16 @@ typedef struct ompi_osc_ucx_lock {
 #define OSC_UCX_GET_EP(_module, rank_) (mca_osc_ucx_component.endpoints[_module->comm_world_ranks[rank_]])
 #define OSC_UCX_GET_DISP(module_, rank_) ompi_osc_ucx_get_disp_unit((module_), (rank_))
 
+/* Our slot for the one endpoint this process holds to that peer.  Handed to
+ * the worker pool, which fills it from the process-wide registry on a miss --
+ * so it may well come back holding an endpoint the ucx PML opened.  The slot
+ * owns that reference, and component_finalize() gives it back; windows come
+ * and go without touching it.
+ *
+ * Indexed by world rank rather than by this window's rank, so that two
+ * windows over different communicators share the entry. */
 #define OSC_UCX_GET_DEFAULT_EP(_ep_ptr, _module, _target)                   \
-    if (opal_common_ucx_thread_enabled) {                  \
-        _ep_ptr = NULL;                                                     \
-    } else {                                                                \
-        _ep_ptr = (ucp_ep_h *)&(OSC_UCX_GET_EP(_module, _target));          \
-    }
+    _ep_ptr = (ucp_ep_h *) &(OSC_UCX_GET_EP(_module, _target))
 
 extern size_t ompi_osc_ucx_outstanding_ops_flush_threshold;
 

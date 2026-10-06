@@ -61,8 +61,6 @@
 mca_pml_transports_t *mca_pml_ucx_get_transports(ompi_communicator_t *comm,
                                                  int rank);
 
-#define MODEX_KEY "pml-ucx"
-
 mca_pml_ucx_module_t ompi_pml_ucx = {
     .super = {
         .pml_add_procs      = mca_pml_ucx_add_procs,
@@ -97,105 +95,6 @@ mca_pml_ucx_module_t ompi_pml_ucx = {
 #define PML_UCX_REQ_ALLOCA() \
     ((char *)alloca(ompi_pml_ucx.request_size) + ompi_pml_ucx.request_size);
 
-#if HAVE_UCP_WORKER_ADDRESS_FLAGS
-static int mca_pml_ucx_send_worker_address_type(int addr_flags, int modex_scope)
-{
-    ucs_status_t status;
-    ucp_worker_attr_t attrs;
-    int rc;
-
-    attrs.field_mask    = UCP_WORKER_ATTR_FIELD_ADDRESS |
-                          UCP_WORKER_ATTR_FIELD_ADDRESS_FLAGS;
-    attrs.address_flags = addr_flags;
-
-    status = ucp_worker_query(ompi_pml_ucx.ucp_worker, &attrs);
-    if (UCS_OK != status) {
-        PML_UCX_ERROR("Failed to query UCP worker address");
-        return OMPI_ERROR;
-    }
-
-    OPAL_MODEX_SEND(rc, modex_scope, &mca_pml_ucx_component.pmlm_version,
-                    (void*)attrs.address, attrs.address_length);
-
-    ucp_worker_release_address(ompi_pml_ucx.ucp_worker, attrs.address);
-
-    if (OMPI_SUCCESS != rc) {
-        return OMPI_ERROR;
-    }
-
-    PML_UCX_VERBOSE(2, "Pack %s worker address, size %ld",
-                    (modex_scope == PMIX_LOCAL) ? "local" : "remote",
-                    attrs.address_length);
-
-    return OMPI_SUCCESS;
-}
-#endif
-
-static int mca_pml_ucx_send_worker_address(void)
-{
-    ucs_status_t status;
-
-#if !HAVE_UCP_WORKER_ADDRESS_FLAGS
-    ucp_address_t *address;
-    size_t addrlen;
-    int rc;
-
-    status = ucp_worker_get_address(ompi_pml_ucx.ucp_worker, &address, &addrlen);
-    if (UCS_OK != status) {
-        PML_UCX_ERROR("Failed to get worker address");
-        return OMPI_ERROR;
-    }
-
-    PML_UCX_VERBOSE(2, "Pack worker address, size %ld", addrlen);
-
-    OPAL_MODEX_SEND(rc, PMIX_GLOBAL,
-                    &mca_pml_ucx_component.pmlm_version, (void*)address, addrlen);
-
-    ucp_worker_release_address(ompi_pml_ucx.ucp_worker, address);
-
-    if (OMPI_SUCCESS != rc) {
-        goto err;
-    }
-#else
-    /* Pack just network device addresses for remote node peers */
-    status = mca_pml_ucx_send_worker_address_type(UCP_WORKER_ADDRESS_FLAG_NET_ONLY,
-                                                  PMIX_REMOTE);
-    if (UCS_OK != status) {
-        goto err;
-    }
-
-    status = mca_pml_ucx_send_worker_address_type(0, PMIX_LOCAL);
-    if (UCS_OK != status) {
-        goto err;
-    }
-#endif
-
-    return OMPI_SUCCESS;
-
-err:
-    PML_UCX_ERROR("Open MPI couldn't distribute EP connection details");
-    return OMPI_ERROR;
-}
-
-static int mca_pml_ucx_recv_worker_address(ompi_proc_t *proc,
-                                           ucp_address_t **address_p,
-                                           size_t *addrlen_p)
-{
-    int ret;
-
-    *address_p = NULL;
-    OPAL_MODEX_RECV(ret, &mca_pml_ucx_component.pmlm_version, &proc->super.proc_name,
-                    (void**)address_p, addrlen_p);
-    if (ret < 0) {
-        PML_UCX_ERROR("Failed to receive UCX worker address: %s (%d)",
-                      opal_strerror(ret), ret);
-    }
-
-    PML_UCX_VERBOSE(2, "Got proc %d address, size %ld",
-                    proc->super.proc_name.vpid, *addrlen_p);
-    return ret;
-}
-
 int mca_pml_ucx_open(void)
 {
     opal_common_ucx_context_attr_t ctx_attr = {
@@ -204,8 +103,10 @@ int mca_pml_ucx_open(void)
         .share_context   = ompi_pml_ucx.share_context,
         .features        = UCP_FEATURE_TAG,
         .tag_sender_mask = PML_UCX_SPECIFIC_SOURCE_MASK,
-        /* We do not need context-level MT support: every worker of ours is
-         * driven under the worker's own lock. */
+        /* We do not need context-level MT support: we use a single worker,
+         * and concurrent access to it is the worker's own thread mode's
+         * problem, not the context's.  Another user that does drive several
+         * workers at once asks for this, and the union wins. */
         .mt_workers_shared = false,
         /* UCX builds this once per request in its pool rather than once
          * per operation, so the cost of an OBJ_CONSTRUCT() here is
@@ -236,6 +137,8 @@ int mca_pml_ucx_open(void)
     }
 
     ctx_attr.estimated_num_eps = ompi_proc_world_size();
+
+    ompi_pml_ucx.ucx_worker.name = "pml/ucx";
 
     /* The context itself is not created here: another UCX user may need
      * features we know nothing about, and UCX cannot add a feature to a
@@ -296,56 +199,55 @@ int mca_pml_ucx_context_init(void)
 
 int mca_pml_ucx_init(int enable_mpi_threads)
 {
-    ucp_worker_params_t params;
-    ucp_worker_attr_t attr;
-    ucs_status_t status;
+    ucs_thread_mode_t thread_mode;
+    uint64_t worker_flags = 0;
     int i, rc;
 
     PML_UCX_VERBOSE(1, "mca_pml_ucx_init");
 
-    params.field_mask  = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
     if (enable_mpi_threads) {
-        params.thread_mode = UCS_THREAD_MODE_MULTI;
+        thread_mode = UCS_THREAD_MODE_MULTI;
     } else {
-        params.thread_mode =
-            opal_common_ucx_thread_mode(ompi_mpi_thread_provided);
+        /* Deliberately not derived from ompi_mpi_thread_provided: the other
+         * UCX users of this process have no access to that, and we all have
+         * to ask for the same mode or we cannot share a worker. */
+        thread_mode = opal_common_ucx_job_thread_mode();
     }
 
 #if HAVE_DECL_UCP_WORKER_FLAG_IGNORE_REQUEST_LEAK
     if (!ompi_pml_ucx.request_leak_check) {
-        params.field_mask |= UCP_WORKER_PARAM_FIELD_FLAGS;
-        params.flags      |= UCP_WORKER_FLAG_IGNORE_REQUEST_LEAK;
+        worker_flags |= UCP_WORKER_FLAG_IGNORE_REQUEST_LEAK;
     }
 #endif
 
-    status = ucp_worker_create(ompi_pml_ucx.ucp_context, &params,
-                               &ompi_pml_ucx.ucp_worker);
-    if (UCS_OK != status) {
-        PML_UCX_ERROR("Failed to create UCP worker");
-        rc = OMPI_ERROR;
+    /* Shared with the other UCX users of this process, so that there is one
+     * endpoint per peer rather than one per user per peer. */
+    rc = opal_common_ucx_worker_get(&ompi_pml_ucx.ucx_worker, ompi_pml_ucx.ucp_context,
+                                    thread_mode, worker_flags);
+    if (OPAL_SUCCESS != rc) {
+        PML_UCX_ERROR("Failed to acquire a UCP worker");
         goto err;
     }
 
-    attr.field_mask = UCP_WORKER_ATTR_FIELD_THREAD_MODE;
-    status = ucp_worker_query(ompi_pml_ucx.ucp_worker, &attr);
-    if (UCS_OK != status) {
-        PML_UCX_ERROR("Failed to query UCP worker thread level");
-        rc = OMPI_ERROR;
-        goto err_destroy_worker;
-    }
+    ompi_pml_ucx.ucp_worker = opal_common_ucx_worker_handle(&ompi_pml_ucx.ucx_worker);
 
-    if (enable_mpi_threads && (attr.thread_mode != UCS_THREAD_MODE_MULTI)) {
+    if (enable_mpi_threads
+        && (UCS_THREAD_MODE_MULTI
+            != opal_common_ucx_worker_thread_mode(&ompi_pml_ucx.ucx_worker))) {
         /* UCX does not support multithreading, disqualify current PML for now */
         /* TODO: we should let OMPI to fallback to THREAD_SINGLE mode */
         PML_UCX_WARN("UCP worker does not support MPI_THREAD_MULTIPLE. "
                      "PML UCX could not be selected");
         rc = OMPI_ERR_NOT_SUPPORTED;
-        goto err_destroy_worker;
+        goto err_put_worker;
     }
 
-    rc = mca_pml_ucx_send_worker_address();
-    if (rc < 0) {
-        goto err_destroy_worker;
+    /* One address for the worker, whoever else is sharing it.  Has to happen
+     * before the modex closes, which is why it is here rather than at the
+     * first send. */
+    rc = opal_common_ucx_worker_publish(&ompi_pml_ucx.ucx_worker);
+    if (OPAL_SUCCESS != rc) {
+        goto err_put_worker;
     }
 
     ompi_pml_ucx.datatype_attr_keyval = MPI_KEYVAL_INVALID;
@@ -364,15 +266,20 @@ int mca_pml_ucx_init(int enable_mpi_threads)
     ompi_pml_ucx.completed_send_req.req_cancel = mca_pml_cancel_send_callback;
 #endif
 
-    opal_progress_register(mca_pml_ucx_progress);
+    /* The shared worker already has a driver, registered by common/ucx on
+     * behalf of everyone using it.  Only a worker of our own is ours to
+     * progress. */
+    if (!opal_common_ucx_worker_is_shared(&ompi_pml_ucx.ucx_worker)) {
+        opal_progress_register(mca_pml_ucx_progress);
+    }
 
     PML_UCX_VERBOSE(2, "created ucp context %p, worker %p",
                     (void *)ompi_pml_ucx.ucp_context,
                     (void *)ompi_pml_ucx.ucp_worker);
     return OMPI_SUCCESS;
 
-err_destroy_worker:
-    ucp_worker_destroy(ompi_pml_ucx.ucp_worker);
+err_put_worker:
+    opal_common_ucx_worker_put(&ompi_pml_ucx.ucx_worker);
 err:
     ompi_pml_ucx.ucp_worker = NULL;
     return rc;
@@ -384,7 +291,9 @@ int mca_pml_ucx_cleanup(void)
 
     PML_UCX_VERBOSE(1, "mca_pml_ucx_cleanup");
 
-    opal_progress_unregister(mca_pml_ucx_progress);
+    if (!opal_common_ucx_worker_is_shared(&ompi_pml_ucx.ucx_worker)) {
+        opal_progress_unregister(mca_pml_ucx_progress);
+    }
 
     if (ompi_pml_ucx.datatype_attr_keyval != MPI_KEYVAL_INVALID) {
         ompi_attr_free_keyval(TYPE_ATTR, &ompi_pml_ucx.datatype_attr_keyval, false);
@@ -404,20 +313,14 @@ int mca_pml_ucx_cleanup(void)
     OBJ_DESTRUCT(&ompi_pml_ucx.convs);
     OBJ_DESTRUCT(&ompi_pml_ucx.persistent_reqs);
 
-    if (ompi_pml_ucx.ucp_worker != NULL) {
-        ucp_worker_destroy(ompi_pml_ucx.ucp_worker);
-        ompi_pml_ucx.ucp_worker = NULL;
-    }
+    opal_common_ucx_worker_put(&ompi_pml_ucx.ucx_worker);
+    ompi_pml_ucx.ucp_worker = NULL;
 
     return OMPI_SUCCESS;
 }
 
 static ucp_ep_h mca_pml_ucx_add_proc_common(ompi_proc_t *proc)
 {
-    size_t addrlen = 0;
-    ucp_ep_params_t ep_params;
-    ucp_address_t *address;
-    ucs_status_t status;
     ucp_ep_h ep;
     int ret;
 
@@ -426,22 +329,15 @@ static ucp_ep_h mca_pml_ucx_add_proc_common(ompi_proc_t *proc)
         return proc->proc_endpoints[OMPI_PROC_ENDPOINT_TAG_PML];
     }
 
-    ret = mca_pml_ucx_recv_worker_address(proc, &address, &addrlen);
-    if (ret < 0) {
-        return NULL;
-    }
-
     PML_UCX_VERBOSE(2, "connecting to proc. %d", proc->super.proc_name.vpid);
 
-    ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
-    ep_params.address    = address;
-
-    status = ucp_ep_create(ompi_pml_ucx.ucp_worker, &ep_params, &ep);
-    free(address);
-    if (UCS_OK != status) {
-        PML_UCX_ERROR("ucp_ep_create(proc=%d) failed: %s",
-                      proc->super.proc_name.vpid,
-                      ucs_status_string(status));
+    /* May well hand back an endpoint another UCX user already opened to this
+     * peer.  The per-proc slot below stays the hot-path lookup either way:
+     * the registry is only consulted on a miss. */
+    ret = opal_common_ucx_worker_connect(&ompi_pml_ucx.ucx_worker, &proc->super.proc_name, &ep);
+    if (OPAL_SUCCESS != ret) {
+        PML_UCX_ERROR("Failed to connect to proc %d: %s", proc->super.proc_name.vpid,
+                      opal_strerror(ret));
         return NULL;
     }
 
@@ -544,7 +440,8 @@ int mca_pml_ucx_del_procs(struct ompi_proc_t **procs, size_t nprocs)
 {
     ompi_proc_t *proc;
     opal_common_ucx_del_proc_t *del_procs;
-    size_t i;
+    ucp_ep_h ep;
+    size_t i, ndel;
     int ret;
 
     del_procs = malloc(sizeof(*del_procs) * nprocs);
@@ -552,16 +449,25 @@ int mca_pml_ucx_del_procs(struct ompi_proc_t **procs, size_t nprocs)
         return OMPI_ERR_OUT_OF_RESOURCE;
     }
 
-    for (i = 0; i < nprocs; ++i) {
+    for (i = 0, ndel = 0; i < nprocs; ++i) {
         proc = procs[i];
-        del_procs[i].ep   = proc->proc_endpoints[OMPI_PROC_ENDPOINT_TAG_PML];
-        del_procs[i].vpid = proc->super.proc_name.vpid;
 
         /* mark peer as disconnected */
         proc->proc_endpoints[OMPI_PROC_ENDPOINT_TAG_PML] = NULL;
+
+        /* Only the last user of an endpoint gets to close it, so this is
+         * not necessarily every peer we were talking to. */
+        opal_common_ucx_worker_disconnect(&ompi_pml_ucx.ucx_worker, &proc->super.proc_name, &ep);
+        if (NULL == ep) {
+            continue;
+        }
+
+        del_procs[ndel].ep   = ep;
+        del_procs[ndel].vpid = proc->super.proc_name.vpid;
+        ndel++;
     }
 
-    ret = opal_common_ucx_del_procs(del_procs, nprocs, OMPI_PROC_MY_NAME->vpid,
+    ret = opal_common_ucx_del_procs(del_procs, ndel, OMPI_PROC_MY_NAME->vpid,
                                     ompi_pml_ucx.num_disconnect, ompi_pml_ucx.ucp_worker);
     free(del_procs);
 

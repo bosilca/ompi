@@ -18,6 +18,7 @@ headers =                         \
         common_ucx.h              \
         common_ucx_context.h      \
         common_ucx_md.h           \
+        common_ucx_worker.h       \
         common_ucx_wpool.h        \
         common_ucx_wpool_int.h
 
@@ -27,6 +28,7 @@ sources = \
         common_ucx.c              \
         common_ucx_context.c      \
         common_ucx_md.c           \
+        common_ucx_worker.c       \
         common_ucx_wpool.c
 
 # Help file

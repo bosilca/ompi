@@ -242,6 +242,8 @@ static int component_register(void) {
 
     opal_common_ucx_context_var_register(&mca_osc_ucx_component.super.osc_version,
                                          &mca_osc_ucx_component.share_context);
+    opal_common_ucx_worker_var_register(&mca_osc_ucx_component.super.osc_version,
+                                        &mca_osc_ucx_component.share_worker);
 
     opal_common_ucx_mca_var_register(&mca_osc_ucx_component.super.osc_version);
 
@@ -273,6 +275,12 @@ static int component_init(bool enable_progress_threads, bool enable_mpi_threads)
     mca_osc_ucx_component.enable_mpi_threads = enable_mpi_threads;
     mca_osc_ucx_component.ucx_context.attr.mt_workers_shared |= enable_mpi_threads;
     mca_osc_ucx_component.wpool = opal_common_ucx_wpool_allocate();
+    if (NULL == mca_osc_ucx_component.wpool) {
+        return OMPI_ERR_OUT_OF_RESOURCE;
+    }
+    mca_osc_ucx_component.wpool->worker_user.name = "osc/ucx";
+    mca_osc_ucx_component.wpool->worker_user.share_worker
+        = mca_osc_ucx_component.share_worker;
     mca_osc_ucx_component.priority_is_set = false;
     mca_osc_ucx_component.support_level = OPAL_COMMON_UCX_SUPPORT_NONE;
 
@@ -342,17 +350,37 @@ static int component_set_priority(int flavor) {
 
 static int component_finalize(void) {
 
-    if (!opal_common_ucx_thread_enabled) {
+    /* Give back our references on the shared endpoints.  Only the last user
+     * in the process -- us, or the ucx PML, whichever finishes second -- is
+     * handed one back to close. */
+    if (NULL != mca_osc_ucx_component.endpoints) {
         int i;
         for (i = 0; i < mca_osc_ucx_component.comm_world_size; i++) {
-            ucp_ep_h ep = mca_osc_ucx_component.endpoints[i];
-            if (ep != NULL) {
-                ucp_ep_destroy(ep);
-                OPAL_COMMON_UCX_DEBUG_ATOMIC_ADD(opal_common_ucx_ep_counts, -1);
+            ucp_ep_h ep;
+
+            if (NULL == mca_osc_ucx_component.endpoints[i]) {
+                continue;
             }
+
+            opal_common_ucx_worker_disconnect(&mca_osc_ucx_component.wpool->worker_user,
+                                              &mca_osc_ucx_component.endpoint_procs[i], &ep);
+            if (NULL != ep) {
+                ucp_ep_destroy(ep);
+            }
+            /* One reference released per peer we held, matching the count
+             * taken when the endpoint was first wired up (see
+             * _tlocal_ctx_connect() in common_ucx_wpool.c).  The decrement is
+             * unconditional on 'ep': whether this component or the ucx PML is
+             * the one handed the endpoint back to physically close depends on
+             * finalize order, but either way our reference is now gone. */
+            OPAL_COMMON_UCX_DEBUG_ATOMIC_ADD(opal_common_ucx_ep_counts, -1);
+            mca_osc_ucx_component.endpoints[i] = NULL;
         }
         free(mca_osc_ucx_component.endpoints);
+        mca_osc_ucx_component.endpoints = NULL;
     }
+    free(mca_osc_ucx_component.endpoint_procs);
+    mca_osc_ucx_component.endpoint_procs = NULL;
     opal_common_ucx_mca_deregister();
     if (mca_osc_ucx_component.env_initialized) {
         opal_common_ucx_wpool_finalize(mca_osc_ucx_component.wpool);
@@ -477,12 +505,12 @@ static int ompi_osc_ucx_shared_query_peer(ompi_osc_ucx_module_t *module, int pee
     ptrdiff_t *disp_unit, void *baseptr) {
 
     int rc;
-    ucp_ep_h *dflt_ep;
+    ucp_ep_h *shared_ep;
     ucp_ep_h ep; // ignored
     ucp_rkey_h rkey;
-    OSC_UCX_GET_DEFAULT_EP(dflt_ep, module, peer);
+    OSC_UCX_GET_DEFAULT_EP(shared_ep, module, peer);
     opal_common_ucx_winfo_t *winfo; // ignored
-    rc = opal_common_ucx_tlocal_fetch(module->mem, peer, &ep, &rkey, &winfo, dflt_ep);
+    rc = opal_common_ucx_tlocal_fetch(module->mem, peer, &ep, &rkey, &winfo, shared_ep);
     if (OMPI_SUCCESS != rc) {
         return OMPI_ERR_NOT_SUPPORTED;
     }
@@ -548,11 +576,13 @@ static int component_select(struct ompi_win_t *win, void **base, size_t size, pt
                             int flavor, int *model) {
     ompi_osc_ucx_module_t *module = NULL;
     char *name = NULL;
-    long values[4];
+    long values[5];
     int ret = OMPI_SUCCESS;
+    bool exchange_addrs;
     int val_count = 0;
     int i, comm_size = ompi_comm_size(comm);
     bool env_initialized = false;
+    opal_process_name_t *proc_names = NULL;
     void *state_base = NULL;
     opal_common_ucx_mem_type_t mem_type;
     char *my_mem_addr;
@@ -608,9 +638,28 @@ static int component_select(struct ompi_win_t *win, void **base, size_t size, pt
             OSC_UCX_VERBOSE(1, "opal_common_ucx_wpool_init failed: %d", ret);
             goto select_unlock;
         }
-        if (!opal_common_ucx_thread_enabled) {
-            mca_osc_ucx_component.comm_world_size = ompi_proc_world_size();
-            mca_osc_ucx_component.endpoints = calloc(mca_osc_ucx_component.comm_world_size, sizeof(ucp_ep_h));
+        /* Unconditional: the slots hold this process's references on the
+         * shared endpoints, and a threaded job has those too -- its extra
+         * per-thread workers are the only thing that needs endpoints of its
+         * own. */
+        mca_osc_ucx_component.comm_world_size = ompi_proc_world_size();
+        mca_osc_ucx_component.endpoints = calloc(mca_osc_ucx_component.comm_world_size,
+                                                 sizeof(ucp_ep_h));
+        mca_osc_ucx_component.endpoint_procs
+            = calloc(mca_osc_ucx_component.comm_world_size,
+                     sizeof(*mca_osc_ucx_component.endpoint_procs));
+        if ((NULL == mca_osc_ucx_component.endpoints)
+            || (NULL == mca_osc_ucx_component.endpoint_procs)) {
+            ret = OMPI_ERR_OUT_OF_RESOURCE;
+            goto select_unlock;
+        }
+
+        /* Recorded now, while the communicators still exist, because
+         * finalize needs them to hand the endpoint references back. */
+        for (i = 0; i < mca_osc_ucx_component.comm_world_size; i++) {
+            ompi_proc_t *proc = ompi_comm_peer_lookup(&ompi_mpi_comm_world.comm, i);
+
+            mca_osc_ucx_component.endpoint_procs[i] = proc->super.proc_name;
         }
         /* Make sure that all memory updates performed above are globally
          * observable before (mca_osc_ucx_component.env_initialized = true)
@@ -709,7 +758,19 @@ select_unlock:
     values[2] = adjusted_size;
     values[3] = -(long)adjusted_size;
 
-    ret = module->comm->c_coll->coll_allreduce(MPI_IN_PLACE, values, 4, MPI_LONG,
+    /* Our worker address only reached the business card if our worker existed
+     * before MPI_Init closed it, which it did whenever the ucx PML published
+     * it on everyone's behalf.  If it did not -- an ob1 job that still uses
+     * us for one-sided -- we have to gather addresses over this communicator
+     * instead.  Negated so that this reduction's MPI_MIN gives the maximum,
+     * the same trick the sizes above use: the answer has to be unanimous,
+     * because a communicator merged out of two jobs launched with different
+     * PMLs can disagree, and then one side would enter a collective the
+     * other skipped. */
+    values[4] = opal_common_ucx_worker_is_published(
+                    &mca_osc_ucx_component.wpool->worker_user) ? 0 : -1;
+
+    ret = module->comm->c_coll->coll_allreduce(MPI_IN_PLACE, values, 5, MPI_LONG,
                                                MPI_MIN, module->comm,
                                                module->comm->c_coll->coll_allreduce_module);
     if (OMPI_SUCCESS != ret) {
@@ -718,6 +779,7 @@ select_unlock:
 
     bool same_disp_unit = (values[0] == -values[1]);
     bool same_size = (values[2] == -values[3]);
+    exchange_addrs = (0 != values[4]);
 
     if (same_disp_unit) { /* everyone has the same disp_unit, we do not need O(p) space */
         module->disp_unit = disp_unit;
@@ -770,9 +832,25 @@ select_unlock:
         free(peer_values);
     }
 
-    ret = opal_common_ucx_wpctx_create(mca_osc_ucx_component.wpool, comm_size,
-                                     &exchange_len_info, (void *)module->comm,
-                                     &module->ctx);
+    /* Normally no worker address allgather over this communicator at all: the
+     * addresses are in the business card, published once for the whole
+     * process, so all the context needs is who its peers are.  Only when
+     * nobody published in time do we fall back to gathering them here, which
+     * is also the only thing that works for a communicator whose members
+     * were not in the initial job. */
+    proc_names = malloc(comm_size * sizeof(*proc_names));
+    if (NULL == proc_names) {
+        ret = OMPI_ERR_TEMP_OUT_OF_RESOURCE;
+        goto error;
+    }
+    for (i = 0; i < comm_size; i++) {
+        proc_names[i] = ompi_comm_peer_lookup(module->comm, i)->super.proc_name;
+    }
+
+    ret = opal_common_ucx_wpctx_create(mca_osc_ucx_component.wpool, comm_size, proc_names,
+                                       exchange_addrs ? &exchange_len_info : NULL,
+                                       (void *) module->comm, &module->ctx);
+    free(proc_names);
     if (OMPI_SUCCESS != ret) {
         goto error;
     }

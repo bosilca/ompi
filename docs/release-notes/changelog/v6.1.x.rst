@@ -25,6 +25,22 @@ Open MPI version v6.1.0
   ``0`` gives that component a context of its own and also keeps its
   requirements out of the context the others share.
 
+- The UCX PML and the UCX one-sided component now share a single UCP
+  worker, and with it a single endpoint per peer. An endpoint belongs
+  to the worker it was opened on, so a process using both previously
+  held two endpoints — two sets of queue pairs and per-endpoint
+  buffers — to every peer it talked to, which at scale costs far more
+  than the worker itself. One address is published in the business
+  card for the whole process in place of the PML's own key, the
+  one-sided component no longer gathers worker addresses over each
+  window's communicator, and the shared worker is progressed once per
+  cycle rather than once per component. The new ``share_worker`` MCA
+  parameter — ``pml_ucx_share_worker`` and ``osc_ucx_share_worker`` —
+  is on by default; setting one to ``0`` gives that component a worker
+  and endpoints of its own as before. A component that needs a
+  stronger thread mode than the shared worker was built with also gets
+  its own, so sharing never weakens thread safety.
+
 - UCX components that work directly with UCT now share one set of open
   memory domains per process instead of each opening the node's devices
   for itself. Opening a memory domain opens the device and builds a
