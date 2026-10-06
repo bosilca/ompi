@@ -20,6 +20,7 @@
 #include "ompi/communicator/communicator.h"
 #include "ompi/request/request.h"
 #include "opal/mca/common/ucx/common_ucx.h"
+#include "opal/mca/common/ucx/common_ucx_context.h"
 
 #include <ucp/api/ucp.h>
 #include "pml_ucx_freelist.h"
@@ -41,6 +42,8 @@ struct mca_pml_ucx_module {
     mca_pml_base_module_t     super;
 
     /* UCX global objects */
+    opal_common_ucx_context_user_t ucx_context;
+    bool                      share_context;
     ucp_context_h             ucp_context;
     ucp_worker_h              ucp_worker;
 
@@ -52,6 +55,10 @@ struct mca_pml_ucx_module {
     mca_pml_ucx_freelist_t    persistent_reqs;
     ompi_request_t            completed_send_req;
     size_t                    request_size;
+    /* Offset of our ompi_request_t inside the user area of a UCP request.
+     * Zero when we have the context to ourselves; past the other users'
+     * reservations when we share it. */
+    size_t                    request_offset;
     int                       num_disconnect;
 
     /* Converters pool */
@@ -65,8 +72,17 @@ struct mca_pml_ucx_module {
 extern mca_pml_base_component_2_1_0_t mca_pml_ucx_component;
 extern mca_pml_ucx_module_t ompi_pml_ucx;
 
+/* Translate between a UCP request and the ompi_request_t we keep inside
+ * it.  Only meaningful for a request UCX really allocated, so convert
+ * after the NULL and UCS_PTR_IS_ERR() checks, never before. */
+#define PML_UCX_REQ_TO_OMPI(_req) \
+    ((ompi_request_t *)((char *)(_req) + ompi_pml_ucx.request_offset))
+#define PML_UCX_OMPI_TO_REQ(_ompi_req) \
+    ((void *)((char *)(_ompi_req) - ompi_pml_ucx.request_offset))
+
 int mca_pml_ucx_open(void);
 int mca_pml_ucx_close(void);
+int mca_pml_ucx_context_init(void);
 int mca_pml_ucx_init(int enable_mpi_threads);
 int mca_pml_ucx_cleanup(void);
 

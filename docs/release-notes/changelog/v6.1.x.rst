@@ -10,6 +10,41 @@ Open MPI version v6.1.0
 
 - Updated the embedded hwloc to v2.15.0.
 
+- The UCX PML and the UCX one-sided component now share a single UCP
+  context instead of each creating its own. A UCP context opens a
+  memory domain and builds a registration cache per device, so a
+  process that had both in use paid for all of that twice and
+  registered every buffer twice. The components now declare what they
+  need from UCX when they are opened and the context is built from the
+  union of those requirements the first time one of them has real work
+  to do; a component whose requirements cannot be met by the shared
+  context still gets one of its own, so sharing never changes what is
+  supported. Each participating component has a new ``share_context``
+  MCA parameter — ``pml_ucx_share_context`` and
+  ``osc_ucx_share_context`` — that is on by default; setting one to
+  ``0`` gives that component a context of its own and also keeps its
+  requirements out of the context the others share.
+
+- UCX components that work directly with UCT now share one set of open
+  memory domains per process instead of each opening the node's devices
+  for itself. Opening a memory domain opens the device and builds a
+  registration cache, and both the ``uct`` BTL and the check that
+  decides whether UCX is usable on a node look at the same devices.
+
+- Whether UCX's internal memory hooks are replaced by Open MPI's is now
+  decided once per process, by ``opal_common_ucx_mem_hooks``, rather
+  than separately by each UCX component. The ``uct`` BTL used to make
+  the same replacement a second time on its own, which registered the
+  unmap callback twice. The parameter was previously spelled
+  ``opal_common_ucx_opal_mem_hooks``, and the BTL's
+  ``btl_uct_disable_ucx_memory_hooks`` selected the same behavior; both
+  old names still work as deprecated synonyms.
+
+- A buffered send over the UCX PML that does not fit in the buffer
+  attached with ``MPI_Buffer_attach`` now fails with
+  ``MPI_ERR_BUFFER``, as it does over the ob1 PML, rather than with an
+  internal error and a misleading UCX diagnostic.
+
 - ``MPI_Comm_connect``, ``MPI_Comm_accept`` and ``MPI_Comm_spawn`` now
   detect that the two jobs are running different versions of Open MPI,
   or that they selected different PMLs, and fail with a message naming

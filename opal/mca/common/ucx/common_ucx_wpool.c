@@ -47,14 +47,23 @@ static void _mem_rec_destructor(void *arg);
 /* -----------------------------------------------------------------------------
  * Worker information (winfo) management functionality
  *----------------------------------------------------------------------------*/
-static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool)
+/*
+ * Create a worker info.
+ *
+ * is_dflt says whether this is the pool's default worker -- the one whose
+ * address goes out in the modex -- rather than one handed to a thread.  The
+ * caller knows which it is asking for, so it is told rather than inferred
+ * from the state of the pool.
+ */
+static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool,
+                                              bool is_dflt)
 {
     ucp_worker_params_t worker_params;
     ucp_worker_h worker;
     ucs_status_t status;
     opal_common_ucx_winfo_t *winfo = NULL;
 
-    if (opal_common_ucx_thread_enabled || wpool->dflt_winfo == NULL) {
+    if (opal_common_ucx_thread_enabled || is_dflt) {
         memset(&worker_params, 0, sizeof(worker_params));
         worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
         worker_params.thread_mode = opal_common_ucx_single_threaded ? UCS_THREAD_MODE_SINGLE : UCS_THREAD_MODE_SERIALIZED;
@@ -65,6 +74,7 @@ static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool)
         }
     } else {
         /* Single threaded application can reuse the default worker */
+        assert(NULL != wpool->dflt_winfo);
         worker = wpool->dflt_winfo->worker;
     }
 
@@ -81,12 +91,14 @@ static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool)
     winfo->inflight_ops = NULL;
     winfo->global_inflight_ops = 0;
     winfo->inflight_req = UCS_OK;
-    winfo->is_dflt_winfo = false;
+    winfo->is_dflt_winfo = is_dflt;
 
     return winfo;
 
 release_worker:
-    ucp_worker_destroy(worker);
+    if (opal_common_ucx_thread_enabled || is_dflt) {
+        ucp_worker_destroy(worker);
+    }
 exit:
     return winfo;
 }
@@ -165,13 +177,12 @@ OPAL_DECLSPEC int opal_common_ucx_wpool_init(opal_common_ucx_wpool_t *wpool)
 
     wpool->dflt_winfo = NULL;
 
-    winfo = _winfo_create(wpool);
+    winfo = _winfo_create(wpool, true);
     if (NULL == winfo) {
         MCA_COMMON_UCX_ERROR("Failed to create receive worker");
         rc = OPAL_ERROR;
         goto err_worker_create;
     }
-    winfo->is_dflt_winfo = true;
     wpool->dflt_winfo = winfo;
     OBJ_RETAIN(wpool->dflt_winfo);
 
@@ -198,7 +209,10 @@ err_get_addr:
 err_worker_create:
     OBJ_DESTRUCT(&wpool->idle_workers);
     OBJ_DESTRUCT(&wpool->active_workers);
-    ucp_cleanup(wpool->ucp_ctx);
+    if (wpool->ucp_ctx_owned) {
+        ucp_cleanup(wpool->ucp_ctx);
+        wpool->ucp_ctx = NULL;
+    }
     return rc;
 }
 
@@ -239,7 +253,7 @@ void opal_common_ucx_wpool_finalize(opal_common_ucx_wpool_t *wpool)
     wpool->dflt_winfo = NULL;
 
     OBJ_DESTRUCT(&wpool->mutex);
-    if (NULL != wpool->ucp_ctx) {
+    if (wpool->ucp_ctx_owned && (NULL != wpool->ucp_ctx)) {
         ucp_cleanup(wpool->ucp_ctx);
         wpool->ucp_ctx = NULL;
     }
@@ -309,7 +323,7 @@ static opal_common_ucx_winfo_t *_wpool_get_winfo(opal_common_ucx_wpool_t *wpool,
     opal_mutex_lock(&wpool->mutex);
     winfo = _wpool_list_get(wpool, &wpool->idle_workers);
     if (!winfo) {
-        winfo = _winfo_create(wpool);
+        winfo = _winfo_create(wpool, false);
         if (!winfo) {
             MCA_COMMON_UCX_ERROR("Failed to allocate worker info structure");
             opal_mutex_unlock(&wpool->mutex);

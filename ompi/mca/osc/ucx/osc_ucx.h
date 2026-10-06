@@ -17,6 +17,7 @@
 #include "ompi/group/group.h"
 #include "ompi/communicator/communicator.h"
 #include "opal/mca/common/ucx/common_ucx.h"
+#include "opal/mca/common/ucx/common_ucx_context.h"
 #include "opal/mca/common/ucx/common_ucx_wpool.h"
 #include "opal/mca/shmem/shmem.h"
 #include "opal/mca/shmem/base/base.h"
@@ -32,6 +33,10 @@
 
 typedef struct ompi_osc_ucx_component {
     ompi_osc_base_component_t super;
+    /* This component's claim on the process-wide UCP context, and whether
+     * it wants to take part in sharing one at all */
+    opal_common_ucx_context_user_t ucx_context;
+    bool share_context;
     opal_common_ucx_wpool_t *wpool;
     bool enable_mpi_threads;
     opal_free_list_t requests; /* request free list for the r* communication variants */

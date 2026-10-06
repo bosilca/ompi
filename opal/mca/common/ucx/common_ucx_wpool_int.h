@@ -12,7 +12,7 @@ static int _tlocal_mem_create_rkey(_mem_record_t *mem_rec, ucp_ep_h ep, int targ
 /* Sorted declarations */
 
 /* Internal Worker Information (winfo) management */
-static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool);
+static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool, bool is_dflt);
 static void _winfo_destructor(opal_common_ucx_winfo_t *winfo);
 
 /* Internal Worker Pool Memory management */

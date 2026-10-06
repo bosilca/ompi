@@ -50,6 +50,10 @@ typedef struct {
 
     /* UCX data */
     ucp_context_h ucp_ctx;
+    /* Whether this pool destroys ucp_ctx when it is finalized.  False when
+     * the context comes from opal_common_ucx_context_get(), which may be
+     * handing out a context other users are still working with. */
+    bool ucp_ctx_owned;
     opal_common_ucx_winfo_t *dflt_winfo;
     ucp_address_t *recv_waddr;
     size_t recv_waddr_len;

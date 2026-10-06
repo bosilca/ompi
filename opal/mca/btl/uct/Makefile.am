@@ -74,7 +74,8 @@ mcacomponentdir = $(opallibdir)
 mcacomponent_LTLIBRARIES = $(component)
 mca_btl_uct_la_SOURCES = $(component_sources) $(component_headers)
 mca_btl_uct_la_LDFLAGS = -module -avoid-version $(btl_uct_LDFLAGS)
-mca_btl_uct_la_LIBADD = $(top_builddir)/opal/lib@OPAL_LIB_NAME@.la $(btl_uct_LIBS)
+mca_btl_uct_la_LIBADD = $(top_builddir)/opal/lib@OPAL_LIB_NAME@.la $(btl_uct_LIBS) \
+                        $(OPAL_TOP_BUILDDIR)/opal/mca/common/ucx/lib@OPAL_LIB_NAME@mca_common_ucx.la
 
 noinst_LTLIBRARIES = $(lib)
 libmca_btl_uct_la_SOURCES = $(lib_sources) $(lib_headers)

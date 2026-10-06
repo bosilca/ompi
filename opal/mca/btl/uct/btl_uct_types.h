@@ -3,6 +3,7 @@
  * Copyright (c) 2018      Los Alamos National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2025      Google, LLC. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -21,6 +22,7 @@
 #include "opal/class/opal_fifo.h"
 #include "opal/class/opal_list.h"
 #include "opal/class/opal_object.h"
+#include "opal/mca/common/ucx/common_ucx_md.h"
 #include "opal/mca/timer/base/base.h"
 
 /* forward declarations */
@@ -91,6 +93,10 @@ struct mca_btl_uct_md_t {
 
 #if UCT_API >= UCT_VERSION(1, 7)
     uct_component_h uct_component;
+
+    /** registry entry uct_md was acquired from, and which owns it.  NULL
+     * when we opened the domain ourselves and must close it. */
+    opal_common_ucx_md_t *shared_md;
 #endif
 };
 

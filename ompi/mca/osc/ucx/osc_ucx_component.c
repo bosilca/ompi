@@ -153,12 +153,30 @@ static bool check_config_value_bool (char *key, opal_info_t *info)
 }
 
 static int component_open(void) {
+    opal_common_ucx_context_attr_t attr = {
+        .name = "osc/ucx",
+        .config_prefix = "MPI",
+        .share_context = mca_osc_ucx_component.share_context,
+        .features = UCP_FEATURE_RMA | UCP_FEATURE_AMO32 | UCP_FEATURE_AMO64,
+        /* The wpool hands a worker to every thread that asks, so the
+         * context has to expect concurrent workers whenever this process
+         * may run MPI calls on more than one thread.  Declared here rather
+         * than in component_init() because another user may well build the
+         * context before our init() runs, and a context built without this
+         * is one we cannot safely share. */
+        .mt_workers_shared = opal_using_threads(),
+    };
+
     opal_common_ucx_mca_register();
 
-    return OMPI_SUCCESS;
+    /* Declare now, even though no window may ever be created: a context
+     * built for another user before we get here has to have RMA and the
+     * atomics in it, or we will not be able to share it. */
+    return opal_common_ucx_context_declare(&mca_osc_ucx_component.ucx_context, &attr);
 }
 
 static int component_close(void) {
+    opal_common_ucx_context_undeclare(&mca_osc_ucx_component.ucx_context);
     opal_common_ucx_mca_deregister();
 
     return OMPI_SUCCESS;
@@ -222,6 +240,9 @@ static int component_register(void) {
                                            MCA_BASE_VAR_SCOPE_GROUP, &ompi_osc_ucx_outstanding_ops_flush_threshold);
     free(description_str);
 
+    opal_common_ucx_context_var_register(&mca_osc_ucx_component.super.osc_version,
+                                         &mca_osc_ucx_component.share_context);
+
     opal_common_ucx_mca_var_register(&mca_osc_ucx_component.super.osc_version);
 
     if (0 == access ("/dev/shm", W_OK)) {
@@ -247,52 +268,10 @@ static int progress_callback(void) {
     return 0;
 }
 
-static int ucp_context_init(bool enable_mt, int proc_world_size) {
-    int ret = OMPI_SUCCESS;
-    ucs_status_t status;
-    ucp_config_t *config = NULL;
-    ucp_params_t context_params;
-
-    status = ucp_config_read("MPI", NULL, &config);
-    if (UCS_OK != status) {
-        OSC_UCX_VERBOSE(1, "ucp_config_read failed: %d", status);
-        return OMPI_ERROR;
-    }
-
-    /* initialize UCP context */
-    memset(&context_params, 0, sizeof(context_params));
-    context_params.field_mask = UCP_PARAM_FIELD_FEATURES | UCP_PARAM_FIELD_MT_WORKERS_SHARED
-                                | UCP_PARAM_FIELD_ESTIMATED_NUM_EPS | UCP_PARAM_FIELD_REQUEST_INIT
-                                | UCP_PARAM_FIELD_REQUEST_SIZE;
-    context_params.features = UCP_FEATURE_RMA | UCP_FEATURE_AMO32 | UCP_FEATURE_AMO64;
-    context_params.mt_workers_shared = (enable_mt ? 1 : 0);
-    context_params.estimated_num_eps = proc_world_size;
-    context_params.request_init = opal_common_ucx_req_init;
-    context_params.request_size = sizeof(opal_common_ucx_request_t);
-
-#if HAVE_DECL_UCP_PARAM_FIELD_ESTIMATED_NUM_PPN
-    context_params.estimated_num_ppn = opal_process_info.num_local_peers + 1;
-    context_params.field_mask |= UCP_PARAM_FIELD_ESTIMATED_NUM_PPN;
-#endif
-
-#if HAVE_DECL_UCP_PARAM_FIELD_NODE_LOCAL_ID
-    context_params.node_local_id = opal_process_info.my_local_rank;
-    context_params.field_mask |= UCP_PARAM_FIELD_NODE_LOCAL_ID;
-#endif
-
-    status = ucp_init(&context_params, config, &mca_osc_ucx_component.wpool->ucp_ctx);
-    if (UCS_OK != status) {
-        OSC_UCX_VERBOSE(1, "ucp_init failed: %d", status);
-        ret = OMPI_ERROR;
-    }
-    ucp_config_release(config);
-
-    return ret;
-}
-
 static int component_init(bool enable_progress_threads, bool enable_mpi_threads) {
 
     mca_osc_ucx_component.enable_mpi_threads = enable_mpi_threads;
+    mca_osc_ucx_component.ucx_context.attr.mt_workers_shared |= enable_mpi_threads;
     mca_osc_ucx_component.wpool = opal_common_ucx_wpool_allocate();
     mca_osc_ucx_component.priority_is_set = false;
     mca_osc_ucx_component.support_level = OPAL_COMMON_UCX_SUPPORT_NONE;
@@ -312,24 +291,32 @@ static int component_set_priority(int flavor) {
         return OMPI_SUCCESS;
     }
 
+    /* Asked before the context exists, so that a node with nothing for UCX
+     * to use costs us no ucp_init().  Shared-memory windows do not need a
+     * usable network, so they go on regardless. */
+    mca_osc_ucx_component.support_level = opal_common_ucx_support_level();
+    if (OPAL_COMMON_UCX_SUPPORT_NONE == mca_osc_ucx_component.support_level
+        && MPI_WIN_FLAVOR_SHARED != flavor) {
+        return OMPI_ERR_NOT_AVAILABLE;
+    }
+
     if (mca_osc_ucx_component.wpool == NULL) {
         mca_osc_ucx_component.wpool = opal_common_ucx_wpool_allocate();
     }
 
     if (mca_osc_ucx_component.wpool->ucp_ctx == NULL) {
-        ret = ucp_context_init(mca_osc_ucx_component.enable_mpi_threads,  ompi_proc_world_size());
-        if (OMPI_ERROR == ret) {
+        mca_osc_ucx_component.ucx_context.attr.estimated_num_eps = ompi_proc_world_size();
+
+        ret = opal_common_ucx_context_get(&mca_osc_ucx_component.ucx_context);
+        if (OMPI_SUCCESS != ret) {
             return OMPI_ERR_NOT_AVAILABLE;
         }
-    }
 
-    mca_osc_ucx_component.support_level =
-        opal_common_ucx_support_level(mca_osc_ucx_component.wpool->ucp_ctx);
-    if (OPAL_COMMON_UCX_SUPPORT_NONE == mca_osc_ucx_component.support_level
-        && MPI_WIN_FLAVOR_SHARED != flavor) {
-        ucp_cleanup(mca_osc_ucx_component.wpool->ucp_ctx);
-        mca_osc_ucx_component.wpool->ucp_ctx = NULL;
-        return OMPI_ERR_NOT_AVAILABLE;
+        /* The wpool works through the context but does not own it: another
+         * UCX user may still be working with the same one. */
+        mca_osc_ucx_component.wpool->ucp_ctx
+            = opal_common_ucx_context_handle(&mca_osc_ucx_component.ucx_context);
+        mca_osc_ucx_component.wpool->ucp_ctx_owned = false;
     }
 
     param = mca_base_var_find("ompi","osc","ucx","priority");
@@ -372,7 +359,12 @@ static int component_finalize(void) {
         OBJ_DESTRUCT(&mca_osc_ucx_component.accumulate_requests);
         OBJ_DESTRUCT(&mca_osc_ucx_component.requests);
     }
+    mca_osc_ucx_component.wpool->ucp_ctx = NULL;
     opal_common_ucx_wpool_free(mca_osc_ucx_component.wpool);
+
+    /* Unconditional: a job that queried us and then created no window at
+     * all still took a reference in component_set_priority(). */
+    opal_common_ucx_context_put(&mca_osc_ucx_component.ucx_context);
 
     assert(opal_common_ucx_ep_counts == 0);
     assert(opal_common_ucx_unpacked_rkey_counts == 0);

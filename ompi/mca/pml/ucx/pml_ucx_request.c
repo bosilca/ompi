@@ -30,13 +30,13 @@ static int mca_pml_ucx_request_free(ompi_request_t **rptr)
 
     *rptr = MPI_REQUEST_NULL;
     mca_pml_ucx_request_reset(req);
-    ucp_request_free(req);
+    ucp_request_free(PML_UCX_OMPI_TO_REQ(req));
     return OMPI_SUCCESS;
 }
 
 int mca_pml_ucx_request_cancel(ompi_request_t *req, int flag)
 {
-    ucp_request_cancel(ompi_pml_ucx.ucp_worker, req);
+    ucp_request_cancel(ompi_pml_ucx.ucp_worker, PML_UCX_OMPI_TO_REQ(req));
     return OMPI_SUCCESS;
 }
 
@@ -51,7 +51,7 @@ int mca_pml_ucx_request_cancel_send(ompi_request_t *req, int flag)
 __opal_attribute_always_inline__ static inline void
 mca_pml_ucx_send_completion_internal(void *request, ucs_status_t status)
 {
-    ompi_request_t *req = request;
+    ompi_request_t *req = PML_UCX_REQ_TO_OMPI(request);
 
     PML_UCX_VERBOSE(8, "send request %p completed with status %s", (void*)req,
                     ucs_status_string(status));
@@ -64,7 +64,7 @@ mca_pml_ucx_send_completion_internal(void *request, ucs_status_t status)
 __opal_attribute_always_inline__ static inline void
 mca_pml_ucx_bsend_completion_internal(void *request, ucs_status_t status)
 {
-    ompi_request_t *req = request;
+    ompi_request_t *req = PML_UCX_REQ_TO_OMPI(request);
     ompi_communicator_t *comm;
 
     PML_UCX_VERBOSE(8, "bsend request %p buffer %p completed with status %s", (void*)req,
@@ -81,7 +81,7 @@ __opal_attribute_always_inline__ static inline void
 mca_pml_ucx_recv_completion_internal(void *request, ucs_status_t status,
                                      const ucp_tag_recv_info_t *info)
 {
-    ompi_request_t *req = request;
+    ompi_request_t *req = PML_UCX_REQ_TO_OMPI(request);
 
     PML_UCX_VERBOSE(8, "receive request %p completed with status %s tag %"PRIx64" len %zu",
                     (void*)req, ucs_status_string(status), info->sender_tag,
@@ -149,7 +149,7 @@ mca_pml_ucx_persistent_request_complete(mca_pml_ucx_persistent_request_t *preq,
     preq->ompi.req_status = tmp_req->req_status;
     mca_pml_ucx_request_reset(tmp_req);
     mca_pml_ucx_persistent_request_detach(preq, tmp_req);
-    ucp_request_free(tmp_req);
+    ucp_request_free(PML_UCX_OMPI_TO_REQ(tmp_req));
     ompi_request_complete(&preq->ompi, true);
 }
 
@@ -167,7 +167,7 @@ static inline void mca_pml_ucx_preq_completion(ompi_request_t *tmp_req)
 
 void mca_pml_ucx_psend_completion(void *request, ucs_status_t status)
 {
-    ompi_request_t *tmp_req = request;
+    ompi_request_t *tmp_req = PML_UCX_REQ_TO_OMPI(request);
 
     PML_UCX_VERBOSE(8, "persistent send request %p completed with status %s",
                     (void*)tmp_req, ucs_status_string(status));
@@ -179,7 +179,7 @@ void mca_pml_ucx_psend_completion(void *request, ucs_status_t status)
 void mca_pml_ucx_precv_completion(void *request, ucs_status_t status,
                                   ucp_tag_recv_info_t *info)
 {
-    ompi_request_t *tmp_req = request;
+    ompi_request_t *tmp_req = PML_UCX_REQ_TO_OMPI(request);
 
     PML_UCX_VERBOSE(8, "persistent receive request %p completed with status %s tag %"PRIx64" len %zu",
                     (void*)tmp_req, ucs_status_string(status), info->sender_tag,
@@ -234,7 +234,7 @@ static int mca_pml_ucx_persistent_request_free(ompi_request_t **rptr)
     preq->ompi.req_state = OMPI_REQUEST_INVALID;
     if (tmp_req != NULL) {
         mca_pml_ucx_persistent_request_detach(preq, tmp_req);
-        ucp_request_free(tmp_req);
+        ucp_request_free(PML_UCX_OMPI_TO_REQ(tmp_req));
     }
     OMPI_DATATYPE_RELEASE(preq->ompi_datatype);
     OMPI_REQUEST_FINI(&preq->ompi);
@@ -248,7 +248,7 @@ static int mca_pml_ucx_persistent_request_cancel(ompi_request_t *req, int flag)
     mca_pml_ucx_persistent_request_t* preq = (mca_pml_ucx_persistent_request_t*)req;
 
     if (preq->tmp_req != NULL) {
-        ucp_request_cancel(ompi_pml_ucx.ucp_worker, preq->tmp_req);
+        ucp_request_cancel(ompi_pml_ucx.ucp_worker, PML_UCX_OMPI_TO_REQ(preq->tmp_req));
     }
     return OMPI_SUCCESS;
 }
