@@ -139,6 +139,17 @@ OPAL_DECLSPEC void opal_common_ucx_mca_var_register(const mca_base_component_t *
 OPAL_DECLSPEC ucs_thread_mode_t opal_common_ucx_thread_mode(int ompi_mode);
 
 /**
+ * The UCS thread mode this job calls for.
+ *
+ * Derived from what OPAL knows about the thread level rather than from an
+ * MPI-level variable, so that every UCX user in the process arrives at the
+ * same answer -- which is what lets them share a worker, since a user asking
+ * for a stronger mode than the shared worker was built with has to go off and
+ * build its own.
+ */
+OPAL_DECLSPEC ucs_thread_mode_t opal_common_ucx_job_thread_mode(void);
+
+/**
  * Load an integer value of \c size bytes from \c ptr and cast it to uint64_t.
  */
 static inline uint64_t opal_common_ucx_load_uint64(const void *ptr, size_t size)

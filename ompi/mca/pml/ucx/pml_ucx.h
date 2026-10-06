@@ -21,6 +21,7 @@
 #include "ompi/request/request.h"
 #include "opal/mca/common/ucx/common_ucx.h"
 #include "opal/mca/common/ucx/common_ucx_context.h"
+#include "opal/mca/common/ucx/common_ucx_worker.h"
 
 #include <ucp/api/ucp.h>
 #include "pml_ucx_freelist.h"
@@ -45,6 +46,9 @@ struct mca_pml_ucx_module {
     opal_common_ucx_context_user_t ucx_context;
     bool                      share_context;
     ucp_context_h             ucp_context;
+    opal_common_ucx_worker_user_t ucx_worker;
+    /* The handle from ucx_worker, cached because it is read on every
+     * progress call and every operation. */
     ucp_worker_h              ucp_worker;
 
     /* Datatypes */

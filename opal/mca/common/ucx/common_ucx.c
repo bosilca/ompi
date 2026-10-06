@@ -25,6 +25,7 @@
 #include "opal/mca/base/mca_base_framework.h"
 #include "opal/mca/base/mca_base_var.h"
 #include "opal/mca/pmix/pmix-internal.h"
+#include "opal/mca/threads/thread_usage.h"
 #include "opal/memoryhooks/memory.h"
 #include "opal/util/argv.h"
 #include "opal/util/printf.h"
@@ -87,6 +88,22 @@ ucs_thread_mode_t opal_common_ucx_thread_mode(int ompi_mode)
                             ompi_mode);
         return UCS_THREAD_MODE_MULTI;
     }
+}
+
+ucs_thread_mode_t opal_common_ucx_job_thread_mode(void)
+{
+    if (opal_single_threaded) {
+        return UCS_THREAD_MODE_SINGLE;
+    }
+
+    if (opal_using_threads()) {
+        return UCS_THREAD_MODE_MULTI;
+    }
+
+    /* Funneled or serialized: more than one thread may touch a worker, but
+     * never two at once.  Costs nothing over SINGLE in UCP, which only takes
+     * locks for MULTI, and saves us from caring which of the two it is. */
+    return UCS_THREAD_MODE_SERIALIZED;
 }
 
 OPAL_DECLSPEC void opal_common_ucx_mca_var_register(const mca_base_component_t *component)

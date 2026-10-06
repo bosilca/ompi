@@ -102,6 +102,8 @@ static int mca_pml_ucx_component_register(void)
 
     opal_common_ucx_context_var_register(&mca_pml_ucx_component.pmlm_version,
                                          &ompi_pml_ucx.share_context);
+    opal_common_ucx_worker_var_register(&mca_pml_ucx_component.pmlm_version,
+                                        &ompi_pml_ucx.ucx_worker.share_worker);
 
     opal_common_ucx_mca_var_register(&mca_pml_ucx_component.pmlm_version);
     return 0;
