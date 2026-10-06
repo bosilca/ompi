@@ -47,6 +47,7 @@ opal_common_ucx_module_t opal_common_ucx =
 {
     .progress_iterations = 100,
     .mem_hooks = 1,
+    .thread_workers = 1,
     .tls = NULL,
     .devices = NULL,
 };
@@ -141,6 +142,15 @@ OPAL_DECLSPEC void opal_common_ucx_mca_var_register(const mca_base_component_t *
     /* Was opal_common_ucx_opal_mem_hooks through v6.0. */
     mca_base_var_register_synonym(hook_index, "opal", "opal_common", "ucx", "opal_mem_hooks",
                                   MCA_BASE_VAR_SYN_FLAG_DEPRECATED);
+    mca_base_var_register("opal", "opal_common", "ucx", "thread_workers",
+                          "In a MPI_THREAD_MULTIPLE job, give each thread a UCP worker of "
+                          "its own rather than having them share one.  A worker to itself "
+                          "spares a thread any contention with the others, and costs an "
+                          "endpoint per peer and a progress call per cycle for every "
+                          "thread that communicates.  Has no effect below "
+                          "MPI_THREAD_MULTIPLE, where there is nothing to separate",
+                          MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0, OPAL_INFO_LVL_5,
+                          MCA_BASE_VAR_SCOPE_LOCAL, &opal_common_ucx.thread_workers);
 
     if (NULL == opal_common_ucx.tls) {
         // Extra level of string indirection needed to make ompi_info

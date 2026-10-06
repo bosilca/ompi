@@ -68,7 +68,6 @@ typedef struct {
     opal_list_t active_workers;
 } opal_common_ucx_wpool_t;
 
-extern bool opal_common_ucx_thread_enabled;
 extern bool opal_common_ucx_single_threaded;
 extern opal_atomic_int64_t opal_common_ucx_ep_counts;
 extern opal_atomic_int64_t opal_common_ucx_unpacked_rkey_counts;
@@ -167,6 +166,10 @@ struct opal_common_ucx_winfo {
      * `endpoints' are then borrowed from the context's registry references
      * and must not be destroyed here, and neither must the worker. */
     bool shared_worker;
+
+    /* The private worker `worker' came out of, to give back when we are
+     * done with it.  NULL when shared_worker is true. */
+    opal_common_ucx_worker_t *private_worker;
 };
 OBJ_CLASS_DECLARATION(opal_common_ucx_winfo_t);
 

@@ -44,6 +44,23 @@ BEGIN_C_DECLS
  *
  * Endpoints are refcounted, because two users that both connect to the same
  * peer get the same handle back and either may finish with it first.
+ *
+ * Not every worker can be the shared one.  A user that wants a worker to
+ * itself -- a thread that would rather not contend for the shared one, or an
+ * OpenSHMEM context, which is a user-visible object carrying its own thread
+ * mode -- asks opal_common_ucx_worker_acquire() instead, and gets a worker
+ * that nobody else will be handed.  Those are client-side only: they publish
+ * no address, and peers reach this process through the shared worker however
+ * many private ones it is driving.
+ *
+ * TODO: the ucx PML drives exactly one worker, because MPI requires messages
+ * between a pair of processes to be matched in the order they were sent and
+ * two workers means two endpoints with no ordering between them.  That is
+ * only true within one matching scope, though: distinct communicators match
+ * independently, and a communicator that asserts mpi_assert_allow_overtaking
+ * gives up ordering outright.  Either would let the PML spread its traffic
+ * over several workers and endpoints, which is what this machinery is here
+ * to make possible.
  */
 
 /* Enough slots for the UCX users that exist (pml/ucx, osc/ucx, spml/ucx)
@@ -82,6 +99,10 @@ struct opal_common_ucx_worker_t {
     opal_hash_table_t endpoints;
 
     opal_mutex_t mutex;
+
+    /** Link for the idle pool a released private worker waits in.  Unused
+     *  while the worker is held. */
+    struct opal_common_ucx_worker_t *next;
 };
 typedef struct opal_common_ucx_worker_t opal_common_ucx_worker_t;
 
@@ -141,6 +162,50 @@ OPAL_DECLSPEC int opal_common_ucx_worker_get(opal_common_ucx_worker_user_t *user
  * Harmless on a user that holds none.
  */
 OPAL_DECLSPEC void opal_common_ucx_worker_put(opal_common_ucx_worker_user_t *user);
+
+/**
+ * Take a worker nobody else will be given, at least \c thread_mode strong.
+ *
+ * Unlike opal_common_ucx_worker_get() this never hands back the shared
+ * worker; the caller wanted one to itself and gets one.  Creating a UCP
+ * worker is not free, so a worker released earlier is reused when it came
+ * from the same context and is strong enough, which matters for a caller
+ * that makes and destroys them repeatedly -- OpenSHMEM contexts, say.
+ *
+ * The caller drives it: this layer registers no progress callback for a
+ * private worker, and publishes no address for it.
+ */
+OPAL_DECLSPEC int opal_common_ucx_worker_acquire(ucp_context_h ucp_context,
+                                                 ucs_thread_mode_t thread_mode,
+                                                 opal_common_ucx_worker_t **worker_ptr);
+
+/**
+ * Give back a worker from opal_common_ucx_worker_acquire().  It goes into
+ * the idle pool rather than being destroyed, so that the next caller wanting
+ * one like it does not pay to create it again.
+ */
+OPAL_DECLSPEC void opal_common_ucx_worker_release(opal_common_ucx_worker_t *worker);
+
+/**
+ * Destroy the idle workers belonging to \c ucp_context, or all of them when
+ * it is NULL.
+ *
+ * A worker holds its context alive, so this has to happen before the context
+ * is let go -- there is nothing else that will come along and clear the pool
+ * out.
+ */
+OPAL_DECLSPEC void opal_common_ucx_worker_drain_idle(ucp_context_h ucp_context);
+
+/**
+ * Whether a thread that would otherwise share should take a private worker.
+ *
+ * The thread_workers MCA parameter, which is a real trade rather than a
+ * tuning detail: a private worker per thread takes the contention off the
+ * shared one, and costs an endpoint per peer per thread plus a progress call
+ * per worker per cycle.  Only meaningful in a MPI_THREAD_MULTIPLE job, since
+ * below that there are no concurrent callers to separate.
+ */
+OPAL_DECLSPEC bool opal_common_ucx_worker_per_thread(void);
 
 /**
  * Fetch a peer's published worker address out of the modex.

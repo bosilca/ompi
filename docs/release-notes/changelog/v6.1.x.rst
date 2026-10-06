@@ -41,6 +41,19 @@ Open MPI version v6.1.0
   stronger thread mode than the shared worker was built with also gets
   its own, so sharing never weakens thread safety.
 
+- Giving each thread a UCP worker of its own in an
+  ``MPI_THREAD_MULTIPLE`` job is now controlled by
+  ``opal_common_ucx_thread_workers`` and applies to every UCX user of
+  the process, rather than being the one-sided component's own
+  arrangement. ``osc_ucx_enable_wpool_thread_multiple`` is kept as a
+  deprecated synonym. The default is unchanged: threads get private
+  workers in an ``MPI_THREAD_MULTIPLE`` job and share one otherwise.
+  Setting the parameter to ``0`` puts every thread on the shared
+  worker, which keeps the process to one endpoint per peer at the
+  price of contending for that worker; the setting no longer has any
+  effect below ``MPI_THREAD_MULTIPLE``, where threads never overlap
+  and private workers bought nothing.
+
 - UCX components that work directly with UCT now share one set of open
   memory domains per process instead of each opening the node's devices
   for itself. Opening a memory domain opens the device and builds a

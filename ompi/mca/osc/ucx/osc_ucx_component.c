@@ -187,6 +187,7 @@ static int component_register(void) {
     unsigned minor          = 0;
     unsigned release_number = 0;
     char *description_str;
+    int thread_workers_index;
 
     ucp_get_version(&major, &minor, &release_number);
 
@@ -209,7 +210,6 @@ static int component_register(void) {
                                            MCA_BASE_VAR_SCOPE_GROUP, &mca_osc_ucx_component.no_locks);
     free(description_str);
 
-    opal_common_ucx_thread_enabled = opal_using_threads();
     opal_common_ucx_single_threaded = opal_single_threaded;
     mca_osc_ucx_component.acc_single_intrinsic = false;
 
@@ -226,13 +226,6 @@ static int component_register(void) {
                                            description_str, MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0, OPAL_INFO_LVL_5,
                                            MCA_BASE_VAR_SCOPE_GROUP, &enable_nonblocking_accumulate);
 
-    opal_asprintf(&description_str, "Enable optimizations for multi-threaded applications by allocating a separate worker "
-                                    "for each thread and a separate endpoint for each window  (default: %s)",
-                                         opal_common_ucx_thread_enabled  ? "true" : "false");
-    (void) mca_base_component_var_register(&mca_osc_ucx_component.super.osc_version, "enable_wpool_thread_multiple",
-                                           description_str, MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0, OPAL_INFO_LVL_5,
-                                           MCA_BASE_VAR_SCOPE_GROUP, &opal_common_ucx_thread_enabled);
-
     opal_asprintf(&description_str, "Threshold on number of nonblocking accumulate calls on which there is a  periodical "
                                         "flush (default: %ld)", ompi_osc_ucx_outstanding_ops_flush_threshold);
     (void) mca_base_component_var_register(&mca_osc_ucx_component.super.osc_version, "outstanding_ops_flush_threshold",
@@ -246,6 +239,16 @@ static int component_register(void) {
                                         &mca_osc_ucx_component.share_worker);
 
     opal_common_ucx_mca_var_register(&mca_osc_ucx_component.super.osc_version);
+
+    /* Was ours alone through v6.0, when a worker per thread was something
+     * only the one-sided worker pool did.  The machinery now lives in
+     * common/ucx, so the parameter does too. */
+    thread_workers_index = mca_base_var_find("opal", "opal_common", "ucx", "thread_workers");
+    if (0 <= thread_workers_index) {
+        (void) mca_base_var_register_synonym(thread_workers_index, "ompi", "osc", "ucx",
+                                             "enable_wpool_thread_multiple",
+                                             MCA_BASE_VAR_SYN_FLAG_DEPRECATED);
+    }
 
     if (0 == access ("/dev/shm", W_OK)) {
         mca_osc_ucx_component.backing_directory = "/dev/shm";

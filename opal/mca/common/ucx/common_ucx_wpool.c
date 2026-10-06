@@ -32,7 +32,6 @@ __thread FILE *tls_pf = NULL;
 __thread int initialized = 0;
 #endif
 
-bool opal_common_ucx_thread_enabled = false;
 bool opal_common_ucx_single_threaded = true;
 opal_atomic_int64_t opal_common_ucx_ep_counts = 0;
 opal_atomic_int64_t opal_common_ucx_unpacked_rkey_counts = 0;
@@ -58,31 +57,36 @@ static void _mem_rec_destructor(void *arg);
  * The default winfo runs on the process-wide shared worker, which the pool
  * already holds a reference on; so does every winfo in a job that is not
  * threaded, since there is then no reason for a thread to have one of its
- * own.  Only a thread in a threaded job gets a private worker, and that one
- * is purely client-side: it publishes no address, and peers reach this
- * process through the shared worker regardless.
+ * own.  Only a thread in a threaded job gets a private worker, and only if
+ * the thread_workers parameter says it should -- the shared worker is built
+ * for concurrency in such a job, so this is a trade between contention on
+ * one worker and an endpoint per peer on each of several.  A private worker
+ * is purely client-side either way: it publishes no address, and peers reach
+ * this process through the shared worker regardless.
  */
 static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool,
                                               bool is_dflt)
 {
-    ucp_worker_params_t worker_params;
-    bool shared_worker = is_dflt || !opal_common_ucx_thread_enabled;
-    ucp_worker_h worker;
-    ucs_status_t status;
+    bool shared_worker = is_dflt || !opal_common_ucx_worker_per_thread();
+    opal_common_ucx_worker_t *private_worker = NULL;
     opal_common_ucx_winfo_t *winfo = NULL;
+    ucs_thread_mode_t thread_mode;
+    ucp_worker_h worker;
+    int rc;
 
     if (shared_worker) {
         worker = opal_common_ucx_worker_handle(&wpool->worker_user);
         assert(NULL != worker);
     } else {
-        memset(&worker_params, 0, sizeof(worker_params));
-        worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
-        worker_params.thread_mode = opal_common_ucx_single_threaded ? UCS_THREAD_MODE_SINGLE : UCS_THREAD_MODE_SERIALIZED;
-        status = ucp_worker_create(wpool->ucp_ctx, &worker_params, &worker);
-        if (UCS_OK != status) {
-            MCA_COMMON_UCX_ERROR("ucp_worker_create failed: %d", status);
+        /* One thread drives this one, so it needs no more than serialized
+         * access, whatever the job's thread level. */
+        thread_mode = opal_common_ucx_single_threaded ? UCS_THREAD_MODE_SINGLE
+                                                      : UCS_THREAD_MODE_SERIALIZED;
+        rc = opal_common_ucx_worker_acquire(wpool->ucp_ctx, thread_mode, &private_worker);
+        if (OPAL_SUCCESS != rc) {
             goto exit;
         }
+        worker = private_worker->ucp_worker;
     }
 
     winfo = OBJ_NEW(opal_common_ucx_winfo_t);
@@ -100,13 +104,12 @@ static opal_common_ucx_winfo_t *_winfo_create(opal_common_ucx_wpool_t *wpool,
     winfo->inflight_req = UCS_OK;
     winfo->is_dflt_winfo = is_dflt;
     winfo->shared_worker = shared_worker;
+    winfo->private_worker = private_worker;
 
     return winfo;
 
 release_worker:
-    if (!shared_worker) {
-        ucp_worker_destroy(worker);
-    }
+    opal_common_ucx_worker_release(private_worker);
 exit:
     return winfo;
 }
@@ -142,7 +145,8 @@ static void _winfo_destructor(opal_common_ucx_winfo_t *winfo)
 
     OBJ_DESTRUCT(&winfo->mutex);
     if (!winfo->shared_worker) {
-        ucp_worker_destroy(winfo->worker);
+        opal_common_ucx_worker_release(winfo->private_worker);
+        winfo->private_worker = NULL;
     }
 
 }
@@ -267,6 +271,11 @@ void opal_common_ucx_wpool_finalize(opal_common_ucx_wpool_t *wpool)
 
     OBJ_RELEASE(wpool->dflt_winfo);
     wpool->dflt_winfo = NULL;
+
+    /* The winfos above gave their private workers back to the idle pool,
+     * where they would sit holding the context alive.  Nothing else will
+     * come along and clear them out. */
+    opal_common_ucx_worker_drain_idle(wpool->ucp_ctx);
 
     /* After the winfos, which were running on it. */
     opal_common_ucx_worker_put(&wpool->worker_user);

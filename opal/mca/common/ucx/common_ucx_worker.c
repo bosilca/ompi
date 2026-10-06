@@ -44,6 +44,13 @@ typedef struct {
 } opal_common_ucx_worker_ep_t;
 
 static opal_common_ucx_worker_t *opal_common_ucx_worker_shared = NULL;
+
+/* Private workers that have been released and not yet reclaimed, newest
+ * first.  Kept rather than destroyed because creating a UCP worker is not
+ * free and a caller that makes and destroys them repeatedly would pay for it
+ * every time. */
+static opal_common_ucx_worker_t *opal_common_ucx_worker_idle = NULL;
+
 static opal_mutex_t opal_common_ucx_worker_mutex = OPAL_MUTEX_STATIC_INIT;
 
 /*
@@ -292,6 +299,97 @@ void opal_common_ucx_worker_put(opal_common_ucx_worker_user_t *user)
     opal_common_ucx_worker_destroy(worker);
 
     OPAL_THREAD_UNLOCK(&opal_common_ucx_worker_mutex);
+}
+
+int opal_common_ucx_worker_acquire(ucp_context_h ucp_context, ucs_thread_mode_t thread_mode,
+                                   opal_common_ucx_worker_t **worker_ptr)
+{
+    opal_common_ucx_worker_t *worker, **prev;
+
+    *worker_ptr = NULL;
+
+    if (NULL == ucp_context) {
+        return OPAL_ERR_BAD_PARAM;
+    }
+
+    OPAL_THREAD_LOCK(&opal_common_ucx_worker_mutex);
+
+    /* A worker belongs to its context and its mode cannot be strengthened
+     * after the fact, so an idle one is only of use if it came from the same
+     * context and is at least as strong as what is being asked for. */
+    for (prev = &opal_common_ucx_worker_idle; NULL != *prev; prev = &(*prev)->next) {
+        worker = *prev;
+        if ((ucp_context != worker->ucp_context) || (worker->thread_mode < thread_mode)) {
+            continue;
+        }
+
+        *prev = worker->next;
+        worker->next = NULL;
+        worker->refcnt = 1;
+        OPAL_THREAD_UNLOCK(&opal_common_ucx_worker_mutex);
+
+        MCA_COMMON_UCX_VERBOSE(1, "reclaimed idle ucp worker %p", (void *) worker->ucp_worker);
+        *worker_ptr = worker;
+        return OPAL_SUCCESS;
+    }
+
+    worker = opal_common_ucx_worker_create(ucp_context, thread_mode, 0, false);
+    if (NULL == worker) {
+        OPAL_THREAD_UNLOCK(&opal_common_ucx_worker_mutex);
+        return OPAL_ERROR;
+    }
+    worker->refcnt = 1;
+
+    OPAL_THREAD_UNLOCK(&opal_common_ucx_worker_mutex);
+
+    *worker_ptr = worker;
+    return OPAL_SUCCESS;
+}
+
+void opal_common_ucx_worker_release(opal_common_ucx_worker_t *worker)
+{
+    if (NULL == worker) {
+        return;
+    }
+
+    /* The shared worker is reference counted among its users and goes back
+     * through put(); this one was nobody else's to begin with. */
+    assert(!worker->shared);
+    assert(1 == worker->refcnt);
+
+    OPAL_THREAD_LOCK(&opal_common_ucx_worker_mutex);
+    worker->refcnt = 0;
+    worker->next = opal_common_ucx_worker_idle;
+    opal_common_ucx_worker_idle = worker;
+    OPAL_THREAD_UNLOCK(&opal_common_ucx_worker_mutex);
+}
+
+void opal_common_ucx_worker_drain_idle(ucp_context_h ucp_context)
+{
+    opal_common_ucx_worker_t *worker, **prev;
+
+    OPAL_THREAD_LOCK(&opal_common_ucx_worker_mutex);
+
+    prev = &opal_common_ucx_worker_idle;
+    while (NULL != *prev) {
+        worker = *prev;
+        if ((NULL != ucp_context) && (ucp_context != worker->ucp_context)) {
+            prev = &worker->next;
+            continue;
+        }
+        *prev = worker->next;
+        opal_common_ucx_worker_destroy(worker);
+    }
+
+    OPAL_THREAD_UNLOCK(&opal_common_ucx_worker_mutex);
+}
+
+bool opal_common_ucx_worker_per_thread(void)
+{
+    /* opal_using_threads() is true for MPI_THREAD_MULTIPLE and nothing
+     * weaker, which is the only level at which separating threads onto
+     * workers of their own buys anything. */
+    return opal_common_ucx.thread_workers && opal_using_threads();
 }
 
 #if HAVE_UCP_WORKER_ADDRESS_FLAGS
