@@ -91,7 +91,7 @@ typedef struct opal_common_ucx_module {
     int verbose;
     int progress_iterations;
     int registered;
-    bool opal_mem_hooks;
+    bool mem_hooks;
     char **tls;
     char **devices;
 } opal_common_ucx_module_t;
@@ -117,7 +117,14 @@ extern opal_common_ucx_module_t opal_common_ucx;
 
 OPAL_DECLSPEC void opal_common_ucx_mca_register(void);
 OPAL_DECLSPEC void opal_common_ucx_mca_deregister(void);
-OPAL_DECLSPEC opal_common_ucx_support_level_t opal_common_ucx_support_level(ucp_context_h context);
+/*
+ * Does UCX have a transport, and a device, worth using on this node?
+ *
+ * Answered from a UCT inventory of the node rather than from a UCP context,
+ * so a component can ask before it has committed to any set of UCP features
+ * -- and decline without anyone paying for a ucp_init().
+ */
+OPAL_DECLSPEC opal_common_ucx_support_level_t opal_common_ucx_support_level(void);
 OPAL_DECLSPEC void opal_common_ucx_mca_proc_added(void);
 OPAL_DECLSPEC void opal_common_ucx_empty_complete_cb(void *request, ucs_status_t status);
 OPAL_DECLSPEC int opal_common_ucx_mca_pmix_fence(ucp_worker_h worker);

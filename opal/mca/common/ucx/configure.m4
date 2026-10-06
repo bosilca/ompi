@@ -2,6 +2,7 @@
 #
 # Copyright (c) 2018      Mellanox Technologies.  All rights reserved.
 # Copyright (c) 2022      Amazon.com, Inc. or its affiliates.  All Rights reserved.
+# Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
 # $COPYRIGHT$
 #
 # Additional copyrights may follow
@@ -20,10 +21,13 @@ AC_DEFUN([MCA_opal_common_ucx_CONFIG],[
                [common_ucx_happy="yes"],
                [common_ucx_happy="no"])
 
-    AC_CHECK_DECLS([open_memstream], [], [], [[#include <stdio.h>]])
-
+    dnl opal_common_ucx_support_level() inventories the node's transports
+    dnl through UCT.  OMPI_CHECK_UCX already requires UCX >= 1.9, so the
+    dnl uct_component_h API (UCT 1.7) is always available here.
     AS_IF([test "$common_ucx_happy" = "yes"],
-          [$1],
+          [$1
+           common_ucx_LIBS="$common_ucx_LIBS -luct"
+          ],
           [$2])
 
     # substitute in the things needed to build common_ucx

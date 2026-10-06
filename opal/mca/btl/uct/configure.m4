@@ -86,6 +86,14 @@ dnl
         OPAL_VAR_SCOPE_POP
     fi
 
+dnl
+dnl The memory domains this component opens come from the process-wide UCT
+dnl registry in opal/mca/common/ucx, so that the UCX transport inventory does
+dnl not open the same devices a second time.
+dnl
+    AS_IF([test "$btl_uct_happy" = "yes"],
+          [OPAL_MCA_CHECK_DEPENDENCY([opal], [btl], [uct], [opal], [common], [ucx])])
+
     AS_IF([test "$btl_uct_happy" = "yes"],
           [$1
            btl_uct_LIBS="$btl_uct_LIBS -luct"

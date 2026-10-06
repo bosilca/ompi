@@ -416,6 +416,9 @@ static void mca_btl_uct_md_construct(mca_btl_uct_md_t *md)
     md->uct_component = NULL;
     md->uct_md = NULL;
     md->md_name = NULL;
+#if UCT_API >= UCT_VERSION(1, 7)
+    md->shared_md = NULL;
+#endif
     OBJ_CONSTRUCT(&md->tls, opal_list_t);
 }
 
@@ -424,6 +427,19 @@ static void mca_btl_uct_md_destruct(mca_btl_uct_md_t *md)
     OPAL_LIST_DESTRUCT(&md->tls);
 
     free(md->md_name);
+    md->md_name = NULL;
+
+#if UCT_API >= UCT_VERSION(1, 7)
+    if (NULL != md->shared_md) {
+        /* The registry owns the handle and closes it once we are the last
+         * user of this domain. */
+        opal_common_ucx_md_release(md->shared_md);
+        md->shared_md = NULL;
+        md->uct_md = NULL;
+        return;
+    }
+#endif
+
     if (md->uct_md) {
         uct_md_close(md->uct_md);
         md->uct_md = NULL;

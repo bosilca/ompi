@@ -16,6 +16,7 @@
  * Copyright (c) 2019      Intel, Inc.  All rights reserved.
  * Copyright (c) 2020      Amazon.com, Inc. or its affiliates.
  *                         All Rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -150,11 +151,12 @@ struct mca_btl_uct_component_t {
     bool bind_threads_to_contexts;
 #endif
 
-    /** disable UCX memory hooks */
-    bool disable_ucx_memory_hooks;
-
     /** connection retry timeout */
     unsigned int connection_retry_timeout;
+
+    /** whether we hold a reference on opal_common_ucx, which owns the UCM
+     * memory hooks and the memory domain registry. controls cleanup. */
+    bool common_ucx_registered;
 
 #if UCT_API >= UCT_VERSION(1, 7)
     uct_component_h *uct_components;
@@ -301,7 +303,8 @@ ucs_status_t mca_btl_uct_am_handler(void *arg, void *data, size_t length, unsign
 struct mca_btl_base_endpoint_t *mca_btl_uct_get_ep(struct mca_btl_base_module_t *module,
                                                    opal_proc_t *proc);
 
-int mca_btl_uct_populate_tls(mca_btl_uct_md_t *md, uct_tl_resource_desc_t *tl_descs, unsigned tl_count);
+int mca_btl_uct_populate_tls(mca_btl_uct_md_t *md, const uct_tl_resource_desc_t *tl_descs,
+                             unsigned tl_count);
 int mca_btl_uct_process_connection_request(mca_btl_uct_module_t *module,
                                            mca_btl_uct_conn_req_t *req);
 

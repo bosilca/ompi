@@ -100,6 +100,9 @@ static int mca_pml_ucx_component_register(void)
     }
 #endif
 
+    opal_common_ucx_context_var_register(&mca_pml_ucx_component.pmlm_version,
+                                         &ompi_pml_ucx.share_context);
+
     opal_common_ucx_mca_var_register(&mca_pml_ucx_component.pmlm_version);
     return 0;
 }
@@ -131,8 +134,19 @@ mca_pml_ucx_component_init(int* priority, bool enable_progress_threads,
     opal_common_ucx_support_level_t support_level;
     int ret;
 
-    support_level = opal_common_ucx_support_level(ompi_pml_ucx.ucp_context);
+    /* Asked before the context exists, so that on a node UCX has nothing to
+     * offer we decline without anyone -- us or the other UCX components --
+     * paying for a ucp_init().  mca_pml_ucx_close() then withdraws our
+     * declaration, keeping UCP_FEATURE_TAG out of a context we never use. */
+    support_level = opal_common_ucx_support_level();
     if (support_level == OPAL_COMMON_UCX_SUPPORT_NONE) {
+        return NULL;
+    }
+
+    /* Deferred from open() so that every UCX user that declared in the
+     * meantime gets its features into the context we are about to share
+     * with them. */
+    if (OMPI_SUCCESS != mca_pml_ucx_context_init()) {
         return NULL;
     }
 

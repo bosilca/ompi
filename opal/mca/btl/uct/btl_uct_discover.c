@@ -20,6 +20,7 @@
  * Copyright (c) 2019-2025 Google, LLC. All rights reserved.
  * Copyright (c) 2019      Intel, Inc.  All rights reserved.
  * Copyright (c) 2022      IBM Corporation.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -45,12 +46,17 @@ static int mca_btl_uct_component_process_uct_md(uct_component_h component,
 static int mca_btl_uct_component_process_uct_md(uct_md_resource_desc_t *md_desc)
 #endif
 {
+#if UCT_API >= UCT_VERSION(1, 7)
+    const uct_tl_resource_desc_t *tl_desc;
+#else
     uct_tl_resource_desc_t *tl_desc;
     uct_md_config_t *uct_config;
+    ucs_status_t ucs_status;
+#endif
     mca_btl_uct_md_t *md;
     int list_rank;
     unsigned num_tls;
-    ucs_status_t ucs_status;
+    int rc;
     int connection_list_rank = -1;
     bool consider_for_connection_module = false;
 
@@ -74,6 +80,9 @@ static int mca_btl_uct_component_process_uct_md(uct_md_resource_desc_t *md_desc)
     }
 
     md = OBJ_NEW(mca_btl_uct_md_t);
+    if (OPAL_UNLIKELY(NULL == md)) {
+        return OPAL_ERR_OUT_OF_RESOURCE;
+    }
     md->md_name = strdup(md_desc->md_name);
 #if UCT_API >= UCT_VERSION(1, 7)
     md->uct_component = component;
@@ -81,50 +90,75 @@ static int mca_btl_uct_component_process_uct_md(uct_md_resource_desc_t *md_desc)
     md->connection_only_domain = consider_for_connection_module;
 
 #if UCT_API >= UCT_VERSION(1, 7)
-    ucs_status = uct_md_config_read(component, NULL, NULL, &uct_config);
-    if (UCS_OK != ucs_status) {
-        BTL_VERBOSE(("uct_md_config_read failed %d (%s)", ucs_status, ucs_status_string(ucs_status)));
-        return OPAL_ERR_NOT_AVAILABLE;
+    /* Take the domain from the process-wide registry rather than opening it
+     * ourselves: opening a domain builds a registration cache, and the UCX
+     * transport inventory wants to look at the same domains we do. */
+    md->shared_md = opal_common_ucx_md_lookup(component, md->md_name);
+    if (NULL == md->shared_md) {
+        BTL_VERBOSE(("memory domain %s is not in the UCT registry", md->md_name));
+        rc = OPAL_ERR_NOT_AVAILABLE;
+        goto error;
     }
 
-    ucs_status = uct_md_open(component, md->md_name, uct_config, &md->uct_md);
-    if (UCS_OK != ucs_status) {
-        BTL_VERBOSE(("uct_md_open failed %d (%s)", ucs_status, ucs_status_string(ucs_status)));
-        return OPAL_ERR_NOT_AVAILABLE;
+    rc = opal_common_ucx_md_acquire(md->shared_md);
+    if (OPAL_SUCCESS != rc) {
+        BTL_VERBOSE(("could not open memory domain %s", md->md_name));
+        md->shared_md = NULL;
+        goto error;
+    }
+
+    md->uct_md = md->shared_md->uct_md;
+    md->md_attr = md->shared_md->md_attr;
+
+    rc = opal_common_ucx_md_tl_resources(md->shared_md, &tl_desc, &num_tls);
+    if (OPAL_SUCCESS != rc) {
+        BTL_VERBOSE(("could not query transports of memory domain %s", md->md_name));
+        goto error;
     }
 #else
     ucs_status = uct_md_config_read(md->md_name, NULL, NULL, &uct_config);
     if (UCS_OK != ucs_status) {
         BTL_VERBOSE(("uct_md_config_read failed %d (%s)", ucs_status, ucs_status_string(ucs_status)));
-        return OPAL_ERR_NOT_AVAILABLE;
+        rc = OPAL_ERR_NOT_AVAILABLE;
+        goto error;
     }
 
     ucs_status = uct_md_open(md->md_name, uct_config, &md->uct_md);
+    uct_config_release(uct_config);
     if (UCS_OK != ucs_status) {
         BTL_VERBOSE(("uct_md_open failed %d (%s)", ucs_status, ucs_status_string(ucs_status)));
-        return OPAL_ERR_NOT_AVAILABLE;
+        rc = OPAL_ERR_NOT_AVAILABLE;
+        goto error;
     }
-#endif
-    uct_config_release(uct_config);
 
     ucs_status = uct_md_query(md->uct_md, &md->md_attr);
     if (UCS_OK != ucs_status) {
-        BTL_VERBOSE(("uct_config_release failed %d (%s)", ucs_status, ucs_status_string(ucs_status)));
-        return OPAL_ERR_NOT_AVAILABLE;
+        BTL_VERBOSE(("uct_md_query failed %d (%s)", ucs_status, ucs_status_string(ucs_status)));
+        rc = OPAL_ERR_NOT_AVAILABLE;
+        goto error;
     }
 
     ucs_status = uct_md_query_tl_resources(md->uct_md, &tl_desc, &num_tls);
     if (UCS_OK != ucs_status) {
-        BTL_VERBOSE(("uct_config_release failed %d (%s)", ucs_status, ucs_status_string(ucs_status)));
-        return OPAL_ERR_NOT_AVAILABLE;
+        BTL_VERBOSE(("uct_md_query_tl_resources failed %d (%s)", ucs_status,
+                     ucs_status_string(ucs_status)));
+        rc = OPAL_ERR_NOT_AVAILABLE;
+        goto error;
     }
+#endif
 
     (void) mca_btl_uct_populate_tls(md, tl_desc, num_tls);
 
+#if UCT_API < UCT_VERSION(1, 7)
     uct_release_tl_resource_list(tl_desc);
+#endif
     opal_list_append(&mca_btl_uct_component.md_list, &md->super);
 
     return OPAL_SUCCESS;
+
+error:
+    OBJ_RELEASE(md);
+    return rc;
 }
 
 #if UCT_API >= UCT_VERSION(1, 7)

@@ -7,6 +7,7 @@
  * Copyright (c) 2018      Triad National Security, LLC. All rights
  *                         reserved.
  * Copyright (c) 2019-2025 Google, LLC. All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -315,7 +316,8 @@ static int mca_btl_uct_populate_tl_attr(mca_btl_uct_tl_t *tl) {
 }
 
 static mca_btl_uct_tl_t *mca_btl_uct_create_tl(mca_btl_uct_md_t *md,
-                                               uct_tl_resource_desc_t *tl_desc, int priority)
+                                               const uct_tl_resource_desc_t *tl_desc,
+                                               int priority)
 {
     mca_btl_uct_tl_t *tl = OBJ_NEW(mca_btl_uct_tl_t);
 
@@ -465,7 +467,8 @@ int mca_btl_uct_evaluate_tl(mca_btl_uct_module_t *module, mca_btl_uct_tl_t *tl)
     return OPAL_SUCCESS;
 }
 
-int mca_btl_uct_populate_tls(mca_btl_uct_md_t *md, uct_tl_resource_desc_t *tl_descs, unsigned tl_count)
+int mca_btl_uct_populate_tls(mca_btl_uct_md_t *md, const uct_tl_resource_desc_t *tl_descs,
+                             unsigned tl_count)
 {
     BTL_VERBOSE(("processing %u tls in memory domain %s", tl_count, md->md_name));
 
