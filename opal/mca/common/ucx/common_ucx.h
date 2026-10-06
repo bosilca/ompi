@@ -92,6 +92,7 @@ typedef struct opal_common_ucx_module {
     int progress_iterations;
     int registered;
     bool mem_hooks;
+    bool thread_workers;
     char **tls;
     char **devices;
 } opal_common_ucx_module_t;
