@@ -128,6 +128,23 @@ static int mca_coll_ucc_register(void)
                                     OPAL_INFO_LVL_5,
                                     MCA_BASE_VAR_SCOPE_ALL, &cm->max_domains);
 
+    cm->derived_sharp = false;
+    mca_base_component_var_register(c, "derived_sharp",
+                                    "Allow SHARP on communicators other than MPI_COMM_WORLD that do not set the ompi_comm_coll_ucc_sharp info key; "
+                                    "when false they use a UCC context with tl/sharp disabled, which costs one extra UCC context per process when tl/sharp is configured",
+                                    MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
+                                    OPAL_INFO_LVL_5,
+                                    MCA_BASE_VAR_SCOPE_ALL, &cm->derived_sharp);
+
+#if OPAL_ENABLE_DEBUG
+    cm->sharp_flavor_force = false;
+    mca_base_component_var_register(c, "sharp_flavor_force",
+                                    "Testing only: create SHARP-free UCC contexts even when tl/sharp is not in the UCC library",
+                                    MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
+                                    OPAL_INFO_LVL_9,
+                                    MCA_BASE_VAR_SCOPE_ALL, &cm->sharp_flavor_force);
+#endif
+
 #if OPAL_ENABLE_DEBUG
     cm->fail_domain_no_resource = false;
     mca_base_component_var_register(c, "fail_domain_no_resource",
@@ -336,6 +353,9 @@ static int mca_coll_ucc_open(void)
     cm->lib_failed               = false;
     cm->orphans                  = 0;
     cm->domains_created          = 0;
+    cm->sharp_in_lib             = false;
+    cm->sharp_domain_count       = 0;
+    cm->sharp_flavor_force       = false;    /* registered only in debug builds, read unconditionally */
     OBJ_CONSTRUCT(&cm->domains, opal_list_t);
     OBJ_CONSTRUCT(&cm->lock, opal_mutex_t);
     OBJ_CONSTRUCT(&cm->modules, opal_pointer_array_t);

@@ -44,6 +44,9 @@ BEGIN_C_DECLS
                          "iallgatherv,ireduce,igather,igatherv,ireduce_scatter_block,"\
                          "ireduce_scatter,iscatterv,iscatter"
 
+/* Communicator info key: boolean, SHARP wanted on this communicator; read at creation only. */
+#define MCA_COLL_UCC_SHARP_KEY "ompi_comm_coll_ucc_sharp"
+
 struct mca_coll_ucc_module_t;
 typedef struct mca_coll_ucc_req {
     ompi_request_t super;
@@ -88,6 +91,7 @@ typedef struct mca_coll_ucc_oob_domain_t {
     bool                 parked;         /* bootstrap comm freed while a rank still held a derived comm */
     bool                 orphaned;       /* peers lack this context: never destroyed (would barrier alone) */
     bool                 quarantined;    /* holds a never-active team UCC refused to destroy: never destroyed */
+    bool                 nosharp;        /* tl/sharp disabled in its config: no SHARP job, trees or teams */
 } mca_coll_ucc_oob_domain_t;
 OBJ_CLASS_DECLARATION(mca_coll_ucc_oob_domain_t);
 
@@ -145,9 +149,13 @@ struct mca_coll_ucc_component_t {
     bool                            team_post_agreement; /* agree all ranks posted before waiting on a team */
     bool                            sessions_teardown;   /* destroy contexts at a fence-less (Sessions) finalize */
     int                             max_domains;         /* cap on live contexts; <=0 = unlimited */
-    int                             refused_at_count;    /* live contexts when resources were refused; 0 = never */
+    int                             refused_at_count;    /* live SHARP-capable contexts when resources were refused; 0 = never */
     bool                            fail_domain_no_resource; /* debug knob: injected failure counts as refusal */
     int                             team_id_force;       /* debug knob: force the team id of non-global-index comms (-1 = off) */
+    bool                            derived_sharp;       /* comms other than MPI_COMM_WORLD may use SHARP by default */
+    bool                            sharp_in_lib;        /* tl/sharp is part of the UCC library */
+    bool                            sharp_flavor_force;  /* debug knob: create SHARP-free contexts without tl/sharp */
+    int                             sharp_domain_count;  /* live (or reserved) SHARP-capable contexts */
 };
 typedef struct mca_coll_ucc_component_t mca_coll_ucc_component_t;
 
@@ -175,6 +183,10 @@ struct mca_coll_ucc_module_t {
     int                                             state;   /* MCA_COLL_UCC_*; PENDING until lazy_enable runs */
     bool                                            lazy;    /* nonblocking creation: UCC for blocking collectives only */
     opal_atomic_int32_t                             active;  /* in-flight colls; drained before team destroy */
+    bool                                            nosharp;        /* SHARP unwanted: prefer a SHARP-free context */
+    bool                                            sharp_explicit; /* nosharp from the info key, own or dup parent's */
+    bool                                            sharp_key;      /* info key set here: peers confirm the flavour */
+    mca_coll_ucc_oob_domain_t*                      twin;           /* SHARP-free context on the same bootstrap comm */
     mca_coll_base_module_allreduce_fn_t             previous_allreduce;
     mca_coll_base_module_t*                         previous_allreduce_module;
     mca_coll_base_module_iallreduce_fn_t            previous_iallreduce;

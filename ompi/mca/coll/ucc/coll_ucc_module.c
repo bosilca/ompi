@@ -138,6 +138,10 @@ static void mca_coll_ucc_module_construct(mca_coll_ucc_module_t *ucc_module)
     ucc_module->team_id = -1;
     ucc_module->state   = MCA_COLL_UCC_PENDING;
     ucc_module->domain  = NULL;
+    ucc_module->nosharp = false;
+    ucc_module->twin    = NULL;
+    ucc_module->sharp_explicit = false;
+    ucc_module->sharp_key      = false;
 }
 
 static inline void mca_coll_ucc_req_account(mca_coll_ucc_req_t *coll_req, int delta)
@@ -271,6 +275,7 @@ static int mca_coll_ucc_progress(void)
 static void mca_coll_ucc_domain_destroy(mca_coll_ucc_oob_domain_t *domain)
 {
     mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
+    bool                      sharp = !domain->nosharp;
 
     OPAL_THREAD_LOCK(&cm->lock);
     opal_list_remove_item(&cm->domains, &domain->super);
@@ -287,6 +292,7 @@ static void mca_coll_ucc_domain_destroy(mca_coll_ucc_oob_domain_t *domain)
     OBJ_RELEASE(domain);
 
     OPAL_THREAD_LOCK(&cm->lock);
+    cm->sharp_domain_count -= sharp;
     if (0 == --cm->domain_count && 0 == cm->orphans) {
         if (cm->progress_registered) {
             opal_progress_unregister(mca_coll_ucc_progress);
@@ -365,7 +371,7 @@ static void mca_coll_ucc_domain_release(mca_coll_ucc_oob_domain_t *domain,
 }
 
 
-/* Total order on bootstrap extended cids: the same on every rank, unlike local list order. */
+/* Total order on (bootstrap extended cid, flavour): the same on every rank, unlike local list order. */
 static int mca_coll_ucc_domain_cmp(const void *pa, const void *pb)
 {
     const mca_coll_ucc_oob_domain_t *a = *(mca_coll_ucc_oob_domain_t * const *)pa;
@@ -378,7 +384,7 @@ static int mca_coll_ucc_domain_cmp(const void *pa, const void *pb)
     if (ca.cid_sub.u64 != cb.cid_sub.u64) {
         return ca.cid_sub.u64 < cb.cid_sub.u64 ? -1 : 1;
     }
-    return 0;
+    return (int)a->nosharp - (int)b->nosharp;
 }
 
 /* Runs from ompi_mpi_instance_finalize_common(), before communicators and the PML go away. */
@@ -431,6 +437,7 @@ static void mca_coll_ucc_instance_finalize(void)
         if (NULL != m) {
             mca_coll_ucc_team_id_release(m);
             m->domain      = NULL;
+            m->twin        = NULL;
             m->modules_idx = -1;
             opal_pointer_array_set_item(&cm->modules, i, NULL);
         }
@@ -481,6 +488,7 @@ static void mca_coll_ucc_instance_finalize(void)
             if (!OMPI_COMM_IS_INTRINSIC(domain->comm)) {
                 OBJ_RELEASE(domain->comm);
             }
+            cm->sharp_domain_count -= !domain->nosharp;
             OBJ_RELEASE(domain);
             cm->domain_count--;
             leaked++;
@@ -568,7 +576,7 @@ static int ucc_comm_attr_del_fn(MPI_Comm comm, int keyval, void *attr_val, void 
         ucc_module->modules_idx = -1;
     }
     ucc_module->state = MCA_COLL_UCC_DISABLED;    /* posts pending after the free use the previous modules */
-    if (NULL == ucc_module->ucc_team && NULL == ucc_module->domain) {
+    if (NULL == ucc_module->ucc_team && NULL == ucc_module->domain && NULL == ucc_module->twin) {
         return OMPI_SUCCESS;
     }
 
@@ -603,6 +611,8 @@ static int ucc_comm_attr_del_fn(MPI_Comm comm, int keyval, void *attr_val, void 
        ranks agree no reference remains (see mca_coll_ucc_domain_release). */
     mca_coll_ucc_domain_release(ucc_module->domain, comm, ucc_module);
     ucc_module->domain = NULL;
+    mca_coll_ucc_domain_release(ucc_module->twin, comm, ucc_module);
+    ucc_module->twin = NULL;
 
     return (UCC_OK == status) ? OMPI_SUCCESS : OMPI_ERROR;
 }
@@ -731,6 +741,38 @@ static int mca_coll_ucc_keyval_init(void)
     return OMPI_SUCCESS;
 }
 
+/* Disables tl/sharp in a context config: no SHARP job at context create, and every SHARP team declines. */
+static ucc_status_t mca_coll_ucc_config_nosharp(ucc_context_config_h ctx_config)
+{
+    ucc_status_t status;
+
+    status = ucc_context_config_modify(ctx_config, "tl/sharp", "CONTEXT_PER_TEAM", "y");
+    if (UCC_OK == status) {
+        status = ucc_context_config_modify(ctx_config, "tl/sharp", "TEAM_MAX_PPN", "0");
+    }
+    return status;
+}
+
+/* Whether tl/sharp is part of the library: without it every context is SHARP-free already. */
+static void mca_coll_ucc_sharp_detect(void)
+{
+    mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
+    ucc_context_config_h      ctx_config;
+    ucc_status_t              status;
+
+    cm->sharp_in_lib = false;
+    if (UCC_OK != ucc_context_config_read(cm->ucc_lib, NULL, &ctx_config)) {
+        return;
+    }
+    status = mca_coll_ucc_config_nosharp(ctx_config);
+    ucc_context_config_release(ctx_config);
+    if (UCC_OK != status && UCC_ERR_NOT_FOUND != status) {
+        UCC_VERBOSE(1, "cannot disable tl/sharp in a ucc context (%s): all contexts allow SHARP",
+                    ucc_status_string(status));
+    }
+    cm->sharp_in_lib = (UCC_OK == status);
+}
+
 /*
  * One-time initialization of the shared UCC library, the request free list
  * and the per-communicator attribute keyval.  Called when the first UCC
@@ -781,6 +823,7 @@ static int mca_coll_ucc_lib_init(void)
         UCC_ERROR("UCC library doesn't support MPI_THREAD_MULTIPLE");
         goto cleanup_lib;
     }
+    mca_coll_ucc_sharp_detect();
 
     if (!cm->requests_initialized) {
         OBJ_CONSTRUCT(&cm->requests, opal_free_list_t);
@@ -801,7 +844,7 @@ static int mca_coll_ucc_lib_init(void)
         cm->finalize_hook_registered = true;
     }
 
-    UCC_VERBOSE(1, "initialized ucc library");
+    UCC_VERBOSE(1, "initialized ucc library, tl/sharp configured: %d", (int)cm->sharp_in_lib);
     return OMPI_SUCCESS;
 
 cleanup_lib:
@@ -810,15 +853,15 @@ cleanup_lib:
     return OMPI_ERROR;
 }
 
-/* Resources (e.g. SHARP trees) were refused with this many contexts alive: back off until some are gone. */
+/* SHARP resources were refused with this many SHARP-capable contexts alive: back off until some are gone. */
 static void mca_coll_ucc_note_refusal(void)
 {
     mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
 
     OPAL_THREAD_LOCK(&cm->lock);
-    if (0 == cm->refused_at_count || cm->domain_count < cm->refused_at_count) {
-        cm->refused_at_count = cm->domain_count;
-        UCC_VERBOSE(1, "ucc context creation refused resources at %d live contexts: backing off",
+    if (0 == cm->refused_at_count || cm->sharp_domain_count < cm->refused_at_count) {
+        cm->refused_at_count = cm->sharp_domain_count;
+        UCC_VERBOSE(1, "ucc context creation refused resources at %d live sharp-capable contexts: backing off",
                     cm->refused_at_count);
     }
     OPAL_THREAD_UNLOCK(&cm->lock);
@@ -830,7 +873,7 @@ static void mca_coll_ucc_note_refusal(void)
  * its own reference to @comm so the OOB communicator stays valid for the
  * whole life of the context even if the user frees its handle to @comm.
  */
-static int mca_coll_ucc_domain_create(ompi_communicator_t *comm,
+static int mca_coll_ucc_domain_create(ompi_communicator_t *comm, bool nosharp,
                                       mca_coll_ucc_oob_domain_t **domain_out)
 {
     ucc_status_t               ucc_status;
@@ -857,6 +900,7 @@ static int mca_coll_ucc_domain_create(ompi_communicator_t *comm,
         return OMPI_ERROR;
     }
     cm->domain_count++;                       /* reserve: keeps the lib alive while we create */
+    cm->sharp_domain_count += !nosharp;
     inject = false;
 #if OPAL_ENABLE_DEBUG
     inject = (cm->fail_domain_index == cm->domains_created++);
@@ -864,7 +908,7 @@ static int mca_coll_ucc_domain_create(ompi_communicator_t *comm,
     OPAL_THREAD_UNLOCK(&cm->lock);
     if (inject) {
         UCC_VERBOSE(1, "injected failure for ucc context create #%d", cm->fail_domain_index);
-        if (cm->fail_domain_no_resource) {
+        if (cm->fail_domain_no_resource && !nosharp) {
             mca_coll_ucc_note_refusal();
         }
         goto cleanup_lib;
@@ -892,6 +936,7 @@ static int mca_coll_ucc_domain_create(ompi_communicator_t *comm,
     domain->parked   = false;
     domain->orphaned = false;
     domain->quarantined = false;
+    domain->nosharp  = nosharp;
 
     ctx_params.mask          = UCC_CONTEXT_PARAM_FIELD_OOB;
     ctx_params.oob.allgather = oob_allgather;
@@ -931,10 +976,18 @@ static int mca_coll_ucc_domain_create(ompi_communicator_t *comm,
         }
     }
 
+    if (nosharp) {
+        ucc_status = mca_coll_ucc_config_nosharp(ctx_config);
+        if (UCC_OK != ucc_status && !(UCC_ERR_NOT_FOUND == ucc_status && cm->sharp_flavor_force)) {
+            UCC_ERROR("UCC context config modify failed for tl/sharp: %s", ucc_status_string(ucc_status));
+            goto cleanup_config;
+        }
+    }
+
     if (UCC_OK != (ucc_status = ucc_context_create(cm->ucc_lib, &ctx_params, ctx_config,
                                                    &domain->ucc_context))) {
         UCC_ERROR("UCC context create failed: %s", ucc_status_string(ucc_status));
-        if (UCC_ERR_NO_RESOURCE == ucc_status) {
+        if (UCC_ERR_NO_RESOURCE == ucc_status && !nosharp) {
             mca_coll_ucc_note_refusal();
         }
         goto cleanup_config;
@@ -949,8 +1002,8 @@ static int mca_coll_ucc_domain_create(ompi_communicator_t *comm,
     }
     OPAL_THREAD_UNLOCK(&cm->lock);
 
-    UCC_VERBOSE(1, "created ucc oob domain %p for comm %p (size %d)",
-                (void*)domain, (void*)comm, ompi_comm_size(comm));
+    UCC_VERBOSE(1, "created ucc oob domain %p for comm %p (size %d)%s",
+                (void*)domain, (void*)comm, ompi_comm_size(comm), nosharp ? ", sharp disabled" : "");
     *domain_out = domain;
     return OMPI_SUCCESS;
 
@@ -964,6 +1017,7 @@ cleanup_domain:
     OBJ_RELEASE(domain);
 cleanup_lib:
     OPAL_THREAD_LOCK(&cm->lock);
+    cm->sharp_domain_count -= !nosharp;
     /* Only undo the library init if no other domain (live or orphaned) keeps it alive. */
     if (0 == --cm->domain_count && 0 == cm->orphans) {
         if (cm->progress_registered) {
@@ -992,8 +1046,8 @@ static bool mca_coll_ucc_domain_preferred(mca_coll_ucc_oob_domain_t *a, mca_coll
     return ca.cid_sub.u64 < cb.cid_sub.u64;
 }
 
-/* Best live domain covering all of comm's ranks (same choice on every rank); takes a reference. */
-static mca_coll_ucc_oob_domain_t *mca_coll_ucc_domain_find_covering(ompi_communicator_t *comm)
+/* Best live domain of this flavour covering all of comm's ranks (same choice on every rank); takes a reference. */
+static mca_coll_ucc_oob_domain_t *mca_coll_ucc_domain_find_covering(ompi_communicator_t *comm, bool nosharp)
 {
     mca_coll_ucc_component_t  *cm = &mca_coll_ucc_component;
     mca_coll_ucc_oob_domain_t *domain, *best = NULL;
@@ -1013,8 +1067,8 @@ static mca_coll_ucc_oob_domain_t *mca_coll_ucc_domain_find_covering(ompi_communi
     OPAL_THREAD_LOCK(&cm->lock);
     OPAL_LIST_FOREACH(domain, &cm->domains, mca_coll_ucc_oob_domain_t) {
         /* Parked domains are excluded: their refcount must only fall for the last-child agreement. */
-        if (domain->orphaned || domain->parked || OMPI_COMM_IS_DYNAMIC(domain->comm) ||
-            ompi_comm_size(domain->comm) < n ||
+        if (domain->orphaned || domain->parked || domain->nosharp != nosharp ||
+            OMPI_COMM_IS_DYNAMIC(domain->comm) || ompi_comm_size(domain->comm) < n ||
             OMPI_SUCCESS != ompi_group_translate_ranks(comm->c_local_group, n, ranks,
                                                        domain->comm->c_local_group, out)) {
             continue;
@@ -1033,15 +1087,16 @@ static mca_coll_ucc_oob_domain_t *mca_coll_ucc_domain_find_covering(ompi_communi
     return best;
 }
 
-/* Live, usable domain bootstrapped by the comm with this extended cid; takes a reference. */
-static mca_coll_ucc_oob_domain_t *mca_coll_ucc_domain_lookup(uint64_t cid_base, uint64_t cid_sub)
+/* Live, usable domain of this flavour bootstrapped by the comm with this extended cid; takes a reference. */
+static mca_coll_ucc_oob_domain_t *mca_coll_ucc_domain_lookup(uint64_t cid_base, uint64_t cid_sub,
+                                                             bool nosharp)
 {
     mca_coll_ucc_component_t  *cm = &mca_coll_ucc_component;
     mca_coll_ucc_oob_domain_t *domain, *found = NULL;
 
     OPAL_THREAD_LOCK(&cm->lock);
     OPAL_LIST_FOREACH(domain, &cm->domains, mca_coll_ucc_oob_domain_t) {
-        if (!domain->orphaned && !domain->parked &&
+        if (!domain->orphaned && !domain->parked && domain->nosharp == nosharp &&
             domain->comm->c_contextid.cid_base == cid_base &&
             domain->comm->c_contextid.cid_sub.u64 == cid_sub) {
             OPAL_THREAD_ADD_FETCH32(&domain->refcount, 1);
@@ -1053,34 +1108,55 @@ static mca_coll_ucc_oob_domain_t *mca_coll_ucc_domain_lookup(uint64_t cid_base, 
     return found;
 }
 
-/* Collective: all ranks reuse one domain, all create one, or all fall back. */
+/* Effective flavour: SHARP-free contexts exist only when tl/sharp is in the library (or forced). */
+static bool mca_coll_ucc_want_nosharp(bool requested)
+{
+    mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
+
+    return requested && (cm->sharp_in_lib || cm->sharp_flavor_force);
+}
+
+/* Collective: all ranks reuse one domain of the flavour, all create one, or all fall back. */
 static int mca_coll_ucc_domain_agree(ompi_communicator_t *comm, mca_coll_ucc_module_t *module,
-                                     mca_coll_ucc_oob_domain_t *inherited,
-                                     mca_coll_ucc_oob_domain_t **domain_out, bool *created)
+                                     mca_coll_ucc_oob_domain_t *inherited, bool nosharp,
+                                     mca_coll_ucc_oob_domain_t **domain_out, bool *created,
+                                     bool *twin_ok)
 {
     mca_coll_ucc_component_t  *cm    = &mca_coll_ucc_component;
     mca_coll_ucc_oob_domain_t *cover = inherited;    /* already referenced by comm_query */
-    uint64_t                   in[5], out[5];
+    uint64_t                   in[9], out[9];
     int                        rc;
 
     *domain_out = NULL;
     *created    = false;
+    *twin_ok    = false;
     if (NULL == cover && cm->domain_reuse) {
-        cover = mca_coll_ucc_domain_find_covering(comm);
+        cover = mca_coll_ucc_domain_find_covering(comm, nosharp);
     }
     OPAL_THREAD_LOCK(&cm->lock);
+    /* Only a SHARP-capable context can be refused SHARP resources. */
     in[0] = !cm->lib_failed &&
             !(cm->max_domains > 0 && cm->domain_count >= cm->max_domains) &&
-            !(cm->refused_at_count > 0 && cm->domain_count + 1 >= cm->refused_at_count);
+            !(!nosharp && cm->refused_at_count > 0 && cm->sharp_domain_count + 1 >= cm->refused_at_count);
     OPAL_THREAD_UNLOCK(&cm->lock);
     in[1] = (NULL != cover) ? cover->comm->c_contextid.cid_base    : UINT64_MAX;
     in[2] = (NULL != cover) ? cover->comm->c_contextid.cid_sub.u64 : UINT64_MAX;
     in[3] = ~in[1];
     in[4] = ~in[2];
-    rc = ompi_coll_base_allreduce_intra_recursivedoubling(in, out, 5, &ompi_mpi_uint64_t.dt,
+    in[5] = nosharp;
+    in[6] = !nosharp;
+    /* A SHARP-capable context gets a twin only if every rank can make one and wants it. */
+    in[7] = mca_coll_ucc_want_nosharp(true);
+    in[8] = !cm->derived_sharp;
+    rc = ompi_coll_base_allreduce_intra_recursivedoubling(in, out, 9, &ompi_mpi_uint64_t.dt,
                                                           &ompi_mpi_op_min.op, comm, &module->super);
     if (OMPI_SUCCESS != rc) {
         UCC_VERBOSE(1, "no ucc context for comm %p: agreement failed", (void*)comm);
+        goto drop_cover;
+    }
+    *twin_ok = out[7] && out[8];
+    if (0 == out[5] && 0 == out[6]) {
+        UCC_VERBOSE(1, "no ucc context for comm %p: ranks disagree on ompi_comm_coll_ucc_sharp", (void*)comm);
         goto drop_cover;
     }
     if (UINT64_MAX != out[1] && out[1] == ~out[3] && out[2] == ~out[4]) {
@@ -1090,7 +1166,7 @@ static int mca_coll_ucc_domain_agree(ompi_communicator_t *comm, mca_coll_ucc_mod
             if (NULL != cover) {
                 OPAL_THREAD_ADD_FETCH32(&cover->refcount, -1);
             }
-            cover = mca_coll_ucc_domain_lookup(out[1], out[2]);
+            cover = mca_coll_ucc_domain_lookup(out[1], out[2], nosharp);
             if (NULL == cover) {
                 /* Not visible here yet: stay without a domain, the stage agreement falls back. */
                 UCC_VERBOSE(1, "agreed covering domain not found locally for comm %p", (void*)comm);
@@ -1111,7 +1187,7 @@ static int mca_coll_ucc_domain_agree(ompi_communicator_t *comm, mca_coll_ucc_mod
     if (NULL != cover) {
         OPAL_THREAD_ADD_FETCH32(&cover->refcount, -1);
     }
-    if (OMPI_SUCCESS != mca_coll_ucc_domain_create(comm, domain_out)) {
+    if (OMPI_SUCCESS != mca_coll_ucc_domain_create(comm, nosharp, domain_out)) {
         return OMPI_ERROR;
     }
     *created = true;
@@ -1122,6 +1198,48 @@ drop_cover:
         OPAL_THREAD_ADD_FETCH32(&cover->refcount, -1);
     }
     return OMPI_ERROR;
+}
+
+/* Some peer has no context: this one can never run its destroy barrier. */
+static void mca_coll_ucc_domain_orphan(mca_coll_ucc_oob_domain_t *domain)
+{
+    mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
+
+    domain->orphaned = true;
+    OPAL_THREAD_LOCK(&cm->lock);
+    cm->orphans++;
+    OPAL_THREAD_UNLOCK(&cm->lock);
+    OPAL_THREAD_ADD_FETCH32(&domain->refcount, -1);
+}
+
+/* Collective: give a newly created SHARP-capable context a SHARP-free twin. */
+static void mca_coll_ucc_twin_acquire(mca_coll_ucc_module_t *module)
+{
+    ompi_communicator_t       *comm = module->comm;
+    mca_coll_ucc_oob_domain_t *twin = NULL;
+    bool                       created = false, unused;
+    int                        have, all = 0;
+
+    if (OMPI_SUCCESS != mca_coll_ucc_domain_agree(comm, module, NULL, true, &twin, &created, &unused)) {
+        twin = NULL;
+    }
+    have = (NULL != twin);
+    if (OMPI_SUCCESS == ompi_coll_base_allreduce_intra_recursivedoubling(&have, &all, 1, &ompi_mpi_int.dt,
+                                                                         &ompi_mpi_op_min.op, comm,
+                                                                         &module->super) && all) {
+        module->twin = twin;
+        UCC_VERBOSE(1, "acquired sharp-free twin %p for ucc oob domain %p (comm %p)",
+                    (void*)twin, (void*)module->domain, (void*)comm);
+        return;
+    }
+    UCC_VERBOSE(1, "no sharp-free twin for comm %p", (void*)comm);
+    if (NULL != twin) {
+        if (created) {
+            mca_coll_ucc_domain_orphan(twin);
+        } else {
+            mca_coll_ucc_domain_release(twin, comm, module);
+        }
+    }
 }
 
 /* UCC team ep_map backing-array callback: translate a team endpoint (a rank in
@@ -1336,7 +1454,7 @@ int mca_coll_ucc_lazy_enable(mca_coll_ucc_module_t *ucc_module)
     mca_coll_ucc_component_t  *cm         = &mca_coll_ucc_component;
     ompi_communicator_t       *comm       = ucc_module->comm;
     mca_coll_ucc_oob_domain_t *domain     = ucc_module->domain;
-    bool                       created    = false;
+    bool                       created    = false, twin_ok = false;
     bool                       inject, no_team_id = false;
     int                        stage = 0, agreed = 0;
     double                     t0 = 0.0, t_domain = 0.0, t_post = 0.0, t_wait = 0.0;
@@ -1352,9 +1470,12 @@ int mca_coll_ucc_lazy_enable(mca_coll_ucc_module_t *ucc_module)
     if (cm->ucc_verbose >= 3) {
         t0 = ompi_wtime();
     }
-    /* Agree on a domain when none is inherited or the comm is lazy. */
-    if (NULL == domain || ucc_module->lazy) {
-        if (OMPI_SUCCESS != mca_coll_ucc_domain_agree(comm, ucc_module, domain, &domain, &created)) {
+    /* Agree on a domain when none is inherited, the comm is lazy, or the info key sets the flavour. */
+    if (NULL == domain || ucc_module->lazy ||
+        (ucc_module->sharp_key && mca_coll_ucc_want_nosharp(true))) {
+        if (OMPI_SUCCESS != mca_coll_ucc_domain_agree(comm, ucc_module, domain,
+                                                      mca_coll_ucc_want_nosharp(ucc_module->nosharp),
+                                                      &domain, &created, &twin_ok)) {
             domain = NULL;
         }
         ucc_module->domain = domain;
@@ -1470,6 +1591,9 @@ int mca_coll_ucc_lazy_enable(mca_coll_ucc_module_t *ucc_module)
                     (t_wait - t_post) * 1e6, (t_agree - t_wait) * 1e6);
     }
     if (2 == agreed) {
+        if (created && !domain->nosharp && twin_ok) {
+            mca_coll_ucc_twin_acquire(ucc_module);
+        }
         ucc_module->state = MCA_COLL_UCC_READY;
         return OMPI_SUCCESS;
     }
@@ -1482,12 +1606,7 @@ int mca_coll_ucc_lazy_enable(mca_coll_ucc_module_t *ucc_module)
     mca_coll_ucc_team_id_release(ucc_module);
     if (NULL != domain) {
         if (created && 0 == agreed) {
-            /* Some peer has no context: this one can never run its destroy barrier. */
-            domain->orphaned = true;
-            OPAL_THREAD_LOCK(&cm->lock);
-            cm->orphans++;
-            OPAL_THREAD_UNLOCK(&cm->lock);
-            OPAL_THREAD_ADD_FETCH32(&domain->refcount, -1);
+            mca_coll_ucc_domain_orphan(domain);
         } else {
             mca_coll_ucc_domain_release(domain, comm, ucc_module);
         }
@@ -1572,6 +1691,34 @@ mca_coll_ucc_module_disable(mca_coll_base_module_t *module,
 }
 
 
+/* True if the info key holds a boolean (returned in *on); *present if it is set at all. */
+static bool mca_coll_ucc_sharp_info(ompi_communicator_t *comm, bool *present, bool *on)
+{
+    opal_cstring_t *str;
+    int             flag = 0, rc;
+
+    *present = false;
+    if (NULL == comm->super.s_info) {
+        return false;
+    }
+    rc = opal_info_get_bool(comm->super.s_info, MCA_COLL_UCC_SHARP_KEY, on, &flag);
+    if (!flag) {
+        return false;
+    }
+    *present = true;
+    if (OPAL_SUCCESS == rc) {
+        return true;
+    }
+    if (OPAL_SUCCESS == opal_info_get(comm->super.s_info, MCA_COLL_UCC_SHARP_KEY, &str, &flag) && flag) {
+        if (0 != strcasecmp(str->string, "default") && 0 != strcasecmp(str->string, "auto")) {
+            UCC_VERBOSE(1, "comm %p: %s=%s is not a boolean, using the default",
+                        (void*)comm, MCA_COLL_UCC_SHARP_KEY, str->string);
+        }
+        OBJ_RELEASE(str);
+    }
+    return false;
+}
+
 /*
  * Invoked when there's a new communicator that has been created.
  * Look at the communicator and decide which set of functions and
@@ -1583,7 +1730,11 @@ mca_coll_ucc_comm_query(struct ompi_communicator_t *comm, int *priority)
     mca_coll_ucc_component_t  *cm = &mca_coll_ucc_component;
     mca_coll_ucc_module_t     *ucc_module;
     mca_coll_ucc_oob_domain_t *domain = NULL;
+    mca_coll_ucc_module_t     *parent_module = NULL;
     ompi_communicator_t       *parent;
+    bool                       nosharp, on, key, sharp_explicit = false;
+    int                        cmp;
+    const char                *source;
     *priority = 0;
 
     if (!cm->ucc_enable){
@@ -1604,17 +1755,48 @@ mca_coll_ucc_comm_query(struct ompi_communicator_t *comm, int *priority)
      * parent, so it is compatible with the parent's context through the ep
      * map, and the whole family shares one heavyweight context.  Otherwise
      * lazy_enable agrees on reusing a covering domain or bootstrapping a
-     * fresh one over this communicator.
+     * fresh one over this communicator.  Only a parent domain (or its
+     * SHARP-free twin) of the SHARP flavour chosen below is inherited.
      */
     parent = comm->c_coll->parent;
     if (cm->keyval_created && NULL != parent && parent != comm &&
         NULL != parent->c_keyhash) {
-        int                    flag = 0;
-        mca_coll_ucc_module_t *parent_module = NULL;
-        if (OMPI_SUCCESS == ompi_attr_get_c(parent->c_keyhash, ucc_comm_attr_keyval,
-                                            (void **)&parent_module, &flag)
-            && flag && NULL != parent_module && NULL != parent_module->domain) {
+        int flag = 0;
+        if (OMPI_SUCCESS != ompi_attr_get_c(parent->c_keyhash, ucc_comm_attr_keyval,
+                                            (void **)&parent_module, &flag) || !flag) {
+            parent_module = NULL;
+        }
+    }
+
+    /* SHARP choice: WORLD on, else info key, else explicit value inherited over the same group, else default. */
+    if (comm == &ompi_mpi_comm_world.comm) {
+        nosharp = false;
+        key     = false;
+        source  = "world";
+    } else if (mca_coll_ucc_sharp_info(comm, &key, &on)) {
+        nosharp        = !on;
+        sharp_explicit = true;
+        source         = "info";
+    } else if (NULL != parent_module && parent_module->sharp_explicit &&
+               OMPI_SUCCESS == ompi_group_compare(comm->c_local_group, parent->c_local_group, &cmp) &&
+               MPI_IDENT == cmp) {
+        nosharp        = parent_module->nosharp;
+        sharp_explicit = true;
+        source         = "inherited";
+    } else {
+        nosharp = !cm->derived_sharp;
+        source  = "default";
+    }
+    UCC_VERBOSE(2, "comm %p: sharp %s (%s)", (void*)comm, nosharp ? "off" : "on", source);
+
+    if (NULL != parent_module) {
+        bool want = mca_coll_ucc_want_nosharp(nosharp);
+        if (NULL != parent_module->domain && parent_module->domain->nosharp == want) {
             domain = parent_module->domain;
+        } else if (NULL != parent_module->twin && parent_module->twin->nosharp == want) {
+            domain = parent_module->twin;
+        }
+        if (NULL != domain) {
             OPAL_THREAD_ADD_FETCH32(&domain->refcount, 1);
         }
     }
@@ -1628,6 +1810,9 @@ mca_coll_ucc_comm_query(struct ompi_communicator_t *comm, int *priority)
     }
     ucc_module->comm                      = comm;
     ucc_module->domain                    = domain;
+    ucc_module->nosharp                   = nosharp;
+    ucc_module->sharp_explicit            = sharp_explicit;
+    ucc_module->sharp_key                 = key;
     ucc_module->super.coll_module_enable  = mca_coll_ucc_module_enable;
     ucc_module->super.coll_module_disable = mca_coll_ucc_module_disable;
     *priority                             = cm->ucc_priority;
