@@ -71,7 +71,8 @@ OBJ_CLASS_DECLARATION(mca_coll_ucc_req_t);
  * The bootstrap communicator therefore stays valid for the OOB for as long
  * as the context exists.  Communicators created without a usable parent
  * domain (MPI_Comm_create_from_group, MPI_Intercomm_merge) bootstrap their
- * own domain, since no existing context is guaranteed to span their ranks.
+ * own domain unless every rank finds the same live context spanning their
+ * ranks.
  */
 typedef struct mca_coll_ucc_oob_domain_t {
     opal_list_item_t     super;
@@ -83,10 +84,22 @@ typedef struct mca_coll_ucc_oob_domain_t {
     /* Number of UCC modules (communicators) currently referencing it. */
     opal_atomic_int32_t  refcount;
     opal_atomic_int32_t  active;         /* in-flight colls; only domains with active > 0 are progressed */
+    uint64_t             team_ids[512];  /* UCC team ids in use on this context (external, < 32768) */
     bool                 parked;         /* bootstrap comm freed while a rank still held a derived comm */
     bool                 orphaned;       /* peers lack this context: never destroyed (would barrier alone) */
+    bool                 quarantined;    /* holds a never-active team UCC refused to destroy: never destroyed */
 } mca_coll_ucc_oob_domain_t;
 OBJ_CLASS_DECLARATION(mca_coll_ucc_oob_domain_t);
+
+/* Team UCC refused to destroy (never became active), kept with what it still references. */
+typedef struct mca_coll_ucc_abandoned_t {
+    opal_list_item_t           super;
+    ucc_team_h                 team;
+    int                       *ep_map_ranks;
+    mca_coll_ucc_oob_domain_t *domain;
+    int                        team_id;
+} mca_coll_ucc_abandoned_t;
+OBJ_CLASS_DECLARATION(mca_coll_ucc_abandoned_t);
 
 struct mca_coll_ucc_component_t {
     mca_coll_base_component_3_0_0_t super;
@@ -104,24 +117,37 @@ struct mca_coll_ucc_component_t {
     ucc_coll_type_t                 nb_cts_requested;
     ucc_coll_type_t                 ps_cts_requested;
     /* List of live mca_coll_ucc_oob_domain_t.  Each holds its own UCC
-       context; the single shared ucc_lib is created with the first domain
-       and finalized with the last.  The progress callback iterates this
-       list to progress every live context with collectives in flight. */
+       context; the single shared ucc_lib is created at the first module
+       enable and finalized with the last domain.  The progress callback
+       iterates this list to progress every live context with collectives
+       in flight. */
     opal_list_t                     domains;
     int                             domain_count;
     /* The UCC library and the per-communicator attribute keyval are created
-       lazily with the first domain and persist across domain churn. */
+       lazily at the first module enable and persist across domain churn. */
     bool                            keyval_created;
     bool                            requests_initialized;
     opal_free_list_t                requests;
     opal_pointer_array_t            modules;             /* enabled modules, swept at instance finalize */
-    opal_mutex_t                    lock;                /* guards domains/modules/lib init; held in progress */
+    opal_list_t                     abandoned;           /* mca_coll_ucc_abandoned_t records */
+    opal_mutex_t                    lock;                /* guards domains/modules/team_ids/abandoned/lib; held in progress */
     bool                            finalize_hook_registered;
     bool                            lib_failed;
     int                             orphans;
     int                             domains_created;
     int                             fail_domain_index;   /* debug knob: fail the N-th context create */
+    int                             teams_posted;
+    int                             fail_team_index;     /* debug knob: fail the N-th team create post */
+    int                             fail_team_rank;      /* debug knob: only on this WORLD rank (-1 = all) */
+    bool                            domain_reuse;        /* ride on a covering context instead of creating one */
+    bool                            progress_registered; /* mca_coll_ucc_progress is in opal_progress */
+    int                             team_create_timeout; /* seconds to wait for a team create; <=0 = forever */
+    bool                            team_post_agreement; /* agree all ranks posted before waiting on a team */
     bool                            sessions_teardown;   /* destroy contexts at a fence-less (Sessions) finalize */
+    int                             max_domains;         /* cap on live contexts; <=0 = unlimited */
+    int                             refused_at_count;    /* live contexts when resources were refused; 0 = never */
+    bool                            fail_domain_no_resource; /* debug knob: injected failure counts as refusal */
+    int                             team_id_force;       /* debug knob: force the team id of non-global-index comms (-1 = off) */
 };
 typedef struct mca_coll_ucc_component_t mca_coll_ucc_component_t;
 
@@ -145,6 +171,9 @@ struct mca_coll_ucc_module_t {
        alive for the team's lifetime and freed at module destruct. */
     int*                                            ep_map_ranks;
     int                                             modules_idx;
+    int                                             team_id; /* id taken from domain->team_ids, or -1 */
+    int                                             state;   /* MCA_COLL_UCC_*; PENDING until lazy_enable runs */
+    bool                                            lazy;    /* nonblocking creation: UCC for blocking collectives only */
     opal_atomic_int32_t                             active;  /* in-flight colls; drained before team destroy */
     mca_coll_base_module_allreduce_fn_t             previous_allreduce;
     mca_coll_base_module_t*                         previous_allreduce_module;
@@ -233,6 +262,9 @@ struct mca_coll_ucc_module_t {
 };
 typedef struct mca_coll_ucc_module_t mca_coll_ucc_module_t;
 OBJ_CLASS_DECLARATION(mca_coll_ucc_module_t);
+
+enum { MCA_COLL_UCC_PENDING = 0, MCA_COLL_UCC_INITIALIZING, MCA_COLL_UCC_READY, MCA_COLL_UCC_DISABLED };
+int mca_coll_ucc_lazy_enable(mca_coll_ucc_module_t *ucc_module);
 
 int mca_coll_ucc_init_query(bool enable_progress_threads, bool enable_mpi_threads);
 mca_coll_base_module_t *mca_coll_ucc_comm_query(struct ompi_communicator_t *comm, int *priority);
