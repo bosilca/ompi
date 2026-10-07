@@ -15,6 +15,7 @@
 #include "coll_ucc.h"
 #include "coll_ucc_dtypes.h"
 #include "opal/util/argv.h"
+#include <limits.h>
 
 static int mca_coll_ucc_open(void);
 static int mca_coll_ucc_close(void);
@@ -82,6 +83,23 @@ static int mca_coll_ucc_register(void)
                                     MCA_BASE_VAR_TYPE_INT, NULL, 0, MCA_BASE_VAR_FLAG_SETTABLE,
                                     OPAL_INFO_LVL_9,
                                     MCA_BASE_VAR_SCOPE_ALL, &cm->ucc_np);
+
+#if OPAL_ENABLE_DEBUG
+    cm->fail_domain_index = -1;
+    mca_base_component_var_register(c, "fail_domain_index",
+                                    "Testing only: make the N-th UCC context creation in this process fail (-1 = never)",
+                                    MCA_BASE_VAR_TYPE_INT, NULL, 0, 0,
+                                    OPAL_INFO_LVL_9,
+                                    MCA_BASE_VAR_SCOPE_ALL, &cm->fail_domain_index);
+#endif
+
+    cm->sessions_teardown = false;
+    mca_base_component_var_register(c, "sessions_teardown",
+                                    "Destroy UCC contexts when the last session finalizes without an MPI_Finalize fence; "
+                                    "waits on peers that may be in unrelated sessions, so off by default (contexts are leaked)",
+                                    MCA_BASE_VAR_TYPE_BOOL, NULL, 0, 0,
+                                    OPAL_INFO_LVL_9,
+                                    MCA_BASE_VAR_SCOPE_ALL, &cm->sessions_teardown);
 
     mca_base_component_var_register(c, MCA_COMPILETIME_VER,
                                     "Version of the libucc library with which Open MPI was compiled",
@@ -252,7 +270,14 @@ static int mca_coll_ucc_open(void)
     cm->domain_count             = 0;
     cm->keyval_created           = false;
     cm->requests_initialized     = false;
+    cm->finalize_hook_registered = false;
+    cm->lib_failed               = false;
+    cm->orphans                  = 0;
+    cm->domains_created          = 0;
     OBJ_CONSTRUCT(&cm->domains, opal_list_t);
+    OBJ_CONSTRUCT(&cm->lock, opal_mutex_t);
+    OBJ_CONSTRUCT(&cm->modules, opal_pointer_array_t);
+    opal_pointer_array_init(&cm->modules, 8, INT_MAX, 8);
     opal_output_set_verbosity(mca_coll_ucc_output, cm->ucc_verbose);
     mca_coll_ucc_init_default_cts();
     return OMPI_SUCCESS;
@@ -269,6 +294,15 @@ static int mca_coll_ucc_close(void)
         OBJ_DESTRUCT(&cm->requests);
         cm->requests_initialized = false;
     }
+    if (!opal_list_is_empty(&cm->domains)) {
+        UCC_VERBOSE(1, "%d ucc oob domain(s) still alive at component close",
+                    (int)opal_list_get_size(&cm->domains));
+    }
+    if (NULL != cm->ucc_lib) {
+        UCC_VERBOSE(1, "ucc library still initialized at component close");
+    }
+    OBJ_DESTRUCT(&cm->modules);
+    OBJ_DESTRUCT(&cm->lock);
     OBJ_DESTRUCT(&cm->domains);
     return OMPI_SUCCESS;
 }

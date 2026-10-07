@@ -68,6 +68,7 @@
         _coll_req->super.req_free             = mca_coll_ucc_req_free;  \
         _coll_req->super.req_type             = OMPI_REQUEST_COLL;      \
         _coll_req->super.req_mpi_object.comm  = _comm;                  \
+        _coll_req->module                     = NULL;                   \
     } while(0)
 
 #define COLL_UCC_GET_REQ_PERSISTENT(_coll_req, _comm)                   \
@@ -88,6 +89,7 @@
         _coll_req->super.req_type = OMPI_REQUEST_COLL;                  \
         _coll_req->super.req_mpi_object.comm = _comm;                   \
         _coll_req->ucc_req = NULL;                                      \
+        _coll_req->module = NULL;                                       \
     } while (0)
 
 #define COLL_UCC_REQ_INIT(_coll_req, _req, _coll, _module) do{          \
@@ -103,6 +105,11 @@
                                            _module->ucc_team));         \
         if (_coll_req) {                                                \
             _coll_req->ucc_req = *(_req);                               \
+            _coll_req->module  = _module;                               \
+            if (!_coll_req->super.req_persistent) {                     \
+                OPAL_THREAD_ADD_FETCH32(&_module->active, 1);           \
+                OPAL_THREAD_ADD_FETCH32(&_module->domain->active, 1);   \
+            }                                                           \
         }                                                               \
     } while(0)
 

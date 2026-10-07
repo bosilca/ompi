@@ -19,6 +19,8 @@
 #include "opal/memoryhooks/memory.h"
 #include "opal/mca/memory/base/base.h"
 #include "ompi/mca/coll/coll.h"
+#include "opal/mca/threads/mutex.h"
+#include "opal/mca/threads/thread_usage.h"
 #include "ompi/communicator/communicator.h"
 #include "ompi/attribute/attribute.h"
 #include "ompi/op/op.h"
@@ -42,9 +44,11 @@ BEGIN_C_DECLS
                          "iallgatherv,ireduce,igather,igatherv,ireduce_scatter_block,"\
                          "ireduce_scatter,iscatterv,iscatter"
 
+struct mca_coll_ucc_module_t;
 typedef struct mca_coll_ucc_req {
     ompi_request_t super;
     ucc_coll_req_h ucc_req;
+    struct mca_coll_ucc_module_t *module;  /* posting module; counted in module/domain ->active in flight */
 } mca_coll_ucc_req_t;
 OBJ_CLASS_DECLARATION(mca_coll_ucc_req_t);
 
@@ -77,7 +81,10 @@ typedef struct mca_coll_ucc_oob_domain_t {
     ompi_communicator_t *comm;
     ucc_context_h        ucc_context;
     /* Number of UCC modules (communicators) currently referencing it. */
-    int                  refcount;
+    opal_atomic_int32_t  refcount;
+    opal_atomic_int32_t  active;         /* in-flight colls; only domains with active > 0 are progressed */
+    bool                 parked;         /* bootstrap comm freed while a rank still held a derived comm */
+    bool                 orphaned;       /* peers lack this context: never destroyed (would barrier alone) */
 } mca_coll_ucc_oob_domain_t;
 OBJ_CLASS_DECLARATION(mca_coll_ucc_oob_domain_t);
 
@@ -99,7 +106,7 @@ struct mca_coll_ucc_component_t {
     /* List of live mca_coll_ucc_oob_domain_t.  Each holds its own UCC
        context; the single shared ucc_lib is created with the first domain
        and finalized with the last.  The progress callback iterates this
-       list to progress every live context. */
+       list to progress every live context with collectives in flight. */
     opal_list_t                     domains;
     int                             domain_count;
     /* The UCC library and the per-communicator attribute keyval are created
@@ -107,6 +114,14 @@ struct mca_coll_ucc_component_t {
     bool                            keyval_created;
     bool                            requests_initialized;
     opal_free_list_t                requests;
+    opal_pointer_array_t            modules;             /* enabled modules, swept at instance finalize */
+    opal_mutex_t                    lock;                /* guards domains/modules/lib init; held in progress */
+    bool                            finalize_hook_registered;
+    bool                            lib_failed;
+    int                             orphans;
+    int                             domains_created;
+    int                             fail_domain_index;   /* debug knob: fail the N-th context create */
+    bool                            sessions_teardown;   /* destroy contexts at a fence-less (Sessions) finalize */
 };
 typedef struct mca_coll_ucc_component_t mca_coll_ucc_component_t;
 
@@ -129,6 +144,8 @@ struct mca_coll_ucc_module_t {
        endpoint).  NULL for the FULL/STRIDED cases that need no array.  Kept
        alive for the team's lifetime and freed at module destruct. */
     int*                                            ep_map_ranks;
+    int                                             modules_idx;
+    opal_atomic_int32_t                             active;  /* in-flight colls; drained before team destroy */
     mca_coll_base_module_allreduce_fn_t             previous_allreduce;
     mca_coll_base_module_t*                         previous_allreduce_module;
     mca_coll_base_module_iallreduce_fn_t            previous_iallreduce;
