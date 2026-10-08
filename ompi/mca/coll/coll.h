@@ -833,6 +833,10 @@ struct mca_coll_base_comm_coll_t {
        the two creation paths that have no usable parent context, where it is
        NULL: MPI_Comm_create_from_group and MPI_Intercomm_merge. */
     struct ompi_communicator_t *parent;
+
+    /* Set with parent when no caller blocks in this creation (MPI_Comm_idup):
+       module_enable must not wait on peers, each rank completes it on its own. */
+    bool nonblocking;
 };
 typedef struct mca_coll_base_comm_coll_t mca_coll_base_comm_coll_t;
 

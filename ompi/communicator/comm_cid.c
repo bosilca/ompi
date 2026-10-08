@@ -95,6 +95,7 @@ struct ompi_comm_cid_context_t {
     int nextcid_epoch;
 #endif /* OPAL_ENABLE_FT_MPI */
     int start;
+    bool blocking;  /* set by a blocking creation call; its callers wait on this request */
     int flag, rflag;
     int local_leader;
     int remote_leader;
@@ -931,7 +932,7 @@ static int ompi_comm_activate_complete (ompi_comm_cid_context_t *context)
     if (context->comm == *newcomm || OMPI_COMM_IS_INTER(context->comm)) {
         parent = NULL;
     }
-    if (OMPI_SUCCESS != (ret = mca_coll_base_comm_select(*newcomm, parent))) {
+    if (OMPI_SUCCESS != (ret = mca_coll_base_comm_select(*newcomm, parent, !context->blocking))) {
         OBJ_RELEASE(*newcomm);
         *newcomm = MPI_COMM_NULL;
         return ret;
@@ -1066,6 +1067,8 @@ int ompi_comm_activate (ompi_communicator_t **newcomm, ompi_communicator_t *comm
     }
 
     if (&ompi_request_empty != req) {
+        /* Mark this activation (and only this one) as blocking before anything can complete it. */
+        ((ompi_comm_cid_context_t *) ((ompi_comm_request_t *) req)->context)->blocking = true;
         ompi_request_wait_completion (req);
         rc = req->req_status.MPI_ERROR;
         ompi_comm_request_return ((ompi_comm_request_t *) req);

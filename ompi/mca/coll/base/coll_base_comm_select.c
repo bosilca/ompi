@@ -214,7 +214,8 @@ static void mca_coll_base_print_component_names(ompi_communicator_t *comm)
  *
  * This selection logic is not for the weak.
  */
-int mca_coll_base_comm_select(ompi_communicator_t * comm, ompi_communicator_t * parent)
+int mca_coll_base_comm_select(ompi_communicator_t * comm, ompi_communicator_t * parent,
+                              bool nonblocking)
 {
     opal_list_t *selectable;
     opal_list_item_t *item;
@@ -237,6 +238,7 @@ int mca_coll_base_comm_select(ompi_communicator_t * comm, ompi_communicator_t * 
      * than bootstrapping a new one.  It is cleared again before returning so
      * it can never be dereferenced past the selection window. */
     comm->c_coll->parent = parent;
+    comm->c_coll->nonblocking = nonblocking;
 
     opal_output_verbose(10, ompi_coll_base_framework.framework_output,
                         "coll:base:comm_select: Checking all available modules");
@@ -287,6 +289,7 @@ int mca_coll_base_comm_select(ompi_communicator_t * comm, ompi_communicator_t * 
     /* The parent communicator is only meaningful during selection; clear it
      * so it cannot be dereferenced (and cannot dangle) afterwards. */
     comm->c_coll->parent = NULL;
+    comm->c_coll->nonblocking = false;
 
     /* check to make sure no NULLs */
     if (CHECK_NULL(which_func, comm, allgather) ||

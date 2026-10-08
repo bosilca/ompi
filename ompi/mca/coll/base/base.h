@@ -97,9 +97,13 @@ int mca_coll_base_find_available(bool enable_progress_threads,
  * this function, new communicators may be created, and therefore
  * communicator creation functions may be re-entered (albeit with
  * different arguments).
+ *
+ * nonblocking: the creation call does not block its callers (see
+ * mca_coll_base_comm_coll_t.nonblocking).
  */
 int mca_coll_base_comm_select(struct ompi_communicator_t *comm,
-                              struct ompi_communicator_t *parent);
+                              struct ompi_communicator_t *parent,
+                              bool nonblocking);
 
 /**
  * Finalize a coll component on a specific communicator.
