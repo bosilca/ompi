@@ -589,6 +589,13 @@ int ompi_comm_create_w_info (ompi_communicator_t *comm, ompi_group_t *group, opa
         free ( rranks );
     }
 
+    /* a failed ompi_comm_nextcid leaves the communicator to us; a failed
+     * ompi_comm_activate has already released it and left MPI_COMM_NULL */
+    if ( OMPI_SUCCESS != rc && NULL != newcomp && MPI_COMM_NULL != newcomp ) {
+        OBJ_RELEASE(newcomp);
+        newcomp = MPI_COMM_NULL;
+    }
+
     *newcomm = newcomp;
     return ( rc );
 }
@@ -830,6 +837,13 @@ int ompi_comm_split_with_info( ompi_communicator_t* comm, int color, int key,
     free ( rsorted );
     free ( lranks );
     free ( rranks );
+
+    /* a failed ompi_comm_nextcid leaves the communicator to us; a failed
+     * ompi_comm_activate has already released it and left MPI_COMM_NULL */
+    if ( OMPI_SUCCESS != rc && NULL != newcomp && MPI_COMM_NULL != newcomp ) {
+        OBJ_RELEASE(newcomp);
+        newcomp = MPI_COMM_NULL;
+    }
 
     /* Step 4: if we are not part of the comm, free the struct   */
     /* --------------------------------------------------------- */
@@ -2109,6 +2123,7 @@ int ompi_comm_create_from_group (ompi_group_t *group, const char *tag, opal_info
     rc = ompi_comm_nextcid (newcomp, NULL, NULL, (void *) tag, NULL, false,
                             OMPI_COMM_CID_GROUP_NEW);
     if ( OMPI_SUCCESS != rc ) {
+        OBJ_RELEASE(newcomp);
         return rc;
     }
 

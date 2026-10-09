@@ -1083,6 +1083,11 @@ OMPI_DECLSPEC int ompi_comm_free (ompi_communicator_t **comm);
  * @param send_first: to avoid a potential deadlock for
  *                    the OOB version.
  * This routine has to be thread safe in the final version.
+ *
+ * Unlike ompi_comm_activate(), this leaves newcomm to its caller: no failure
+ * path here, synchronous or reported through the request of the non-blocking
+ * variant, releases it. A caller that bails out after a failed context id
+ * assignment must release the communicator itself.
  */
 OMPI_DECLSPEC int ompi_comm_nextcid (ompi_communicator_t *newcomm, ompi_communicator_t *comm,
                                      ompi_communicator_t *bridgecomm, const void *arg0, const void *arg1,
@@ -1090,6 +1095,11 @@ OMPI_DECLSPEC int ompi_comm_nextcid (ompi_communicator_t *newcomm, ompi_communic
 
 /**
  * allocate new communicator ID (non-blocking)
+ *
+ * Same ownership rule as ompi_comm_nextcid(): newcomm stays the caller's on
+ * failure, whether this call returns the error directly or req completes
+ * with it.
+ *
  * @param newcomm:    pointer to the new communicator
  * @param oldcomm:    original comm
  * @param bridgecomm: bridge comm for intercomm_create

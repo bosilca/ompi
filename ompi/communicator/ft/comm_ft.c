@@ -409,6 +409,12 @@ int ompi_comm_shrink_internal(ompi_communicator_t* comm, ompi_communicator_t** n
         alive_rgroup = NULL;
     }
 
+    /* a failed ompi_comm_nextcid leaves the communicator to us; a failed
+     * ompi_comm_activate has already released it and left MPI_COMM_NULL */
+    if( OMPI_SUCCESS != exit_status && NULL != newcomp && MPI_COMM_NULL != newcomp ) {
+        OBJ_RELEASE(newcomp);
+    }
+
     return exit_status;
 }
 
