@@ -347,7 +347,6 @@ static int mca_coll_ucc_open(void)
     mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
     mca_coll_ucc_output          = opal_output_open(NULL);
     cm->domain_count             = 0;
-    cm->keyval_created           = false;
     cm->requests_initialized     = false;
     cm->finalize_hook_registered = false;
     cm->lib_failed               = false;

@@ -29,7 +29,6 @@
 #include "ompi/runtime/params.h"
 #include "ompi/instance/instance.h"
 
-static int ucc_comm_attr_keyval;
 /*
  * Initial query function that is invoked during MPI_INIT, allowing
  * this module to indicate what level of thread support it provides.
@@ -197,23 +196,12 @@ static void mca_coll_ucc_abandoned_destruct(mca_coll_ucc_abandoned_t *ab)
 }
 OBJ_CLASS_INSTANCE(mca_coll_ucc_abandoned_t, opal_list_item_t, NULL, mca_coll_ucc_abandoned_destruct);
 
-/* UCC keeps a never-active team it refuses to destroy: quarantine it; its context leaks at finalize. */
-static void mca_coll_ucc_team_abandon(mca_coll_ucc_module_t *ucc_module, const char *why)
+/* UCC keeps a team it cannot destroy now: quarantine it; its context leaks at finalize. */
+static void mca_coll_ucc_team_quarantine(mca_coll_ucc_module_t *ucc_module, ucc_status_t status)
 {
     mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
     mca_coll_ucc_abandoned_t *ab;
-    ucc_status_t              status;
 
-    UCC_VERBOSE(1, "abandoning ucc team for comm %p: %s", (void*)ucc_module->comm, why);
-    while (UCC_INPROGRESS == (status = ucc_team_destroy(ucc_module->ucc_team))) {
-        ucc_context_progress(ucc_module->domain->ucc_context);
-        opal_progress();
-    }
-    if (UCC_OK == status) {
-        ucc_module->ucc_team = NULL;
-        mca_coll_ucc_team_id_release(ucc_module);
-        return;
-    }
     ab = OBJ_NEW(mca_coll_ucc_abandoned_t);
     if (NULL == ab) {
         UCC_ERROR("cannot record quarantined team for comm %p: leaking it", (void*)ucc_module->comm);
@@ -228,11 +216,46 @@ static void mca_coll_ucc_team_abandon(mca_coll_ucc_module_t *ucc_module, const c
         OPAL_THREAD_UNLOCK(&cm->lock);
     }
     ucc_module->domain->quarantined = true;
-    UCC_VERBOSE(1, "quarantined never-active ucc team for comm %p on domain %p (%s)",
+    UCC_VERBOSE(1, "quarantined ucc team for comm %p on domain %p (%s)",
                 (void*)ucc_module->comm, (void*)ucc_module->domain, ucc_status_string(status));
     ucc_module->ucc_team     = NULL;
     ucc_module->ep_map_ranks = NULL;    /* owned by the record now, as is the team id bit */
     ucc_module->team_id      = -1;
+}
+
+/* Nonblocking team destroy, waited on for at most team_create_timeout seconds (<= 0: no bound). */
+static ucc_status_t mca_coll_ucc_team_destroy_wait(mca_coll_ucc_module_t *ucc_module)
+{
+    mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
+    double                    deadline = 0.0;
+    ucc_status_t              status;
+
+    if (cm->team_create_timeout > 0) {
+        deadline = ompi_wtime() + cm->team_create_timeout;
+    }
+    while (UCC_INPROGRESS == (status = ucc_team_destroy(ucc_module->ucc_team))) {
+        ucc_context_progress(ucc_module->domain->ucc_context);
+        opal_progress();
+        if (deadline > 0.0 && ompi_wtime() > deadline) {
+            return UCC_ERR_TIMED_OUT;
+        }
+    }
+    return status;
+}
+
+/* A never-active team a peer did not post: destroy it, or quarantine it. */
+static void mca_coll_ucc_team_abandon(mca_coll_ucc_module_t *ucc_module, const char *why)
+{
+    ucc_status_t status;
+
+    UCC_VERBOSE(1, "abandoning ucc team for comm %p: %s", (void*)ucc_module->comm, why);
+    status = mca_coll_ucc_team_destroy_wait(ucc_module);
+    if (UCC_OK == status) {
+        ucc_module->ucc_team = NULL;
+        mca_coll_ucc_team_id_release(ucc_module);
+        return;
+    }
+    mca_coll_ucc_team_quarantine(ucc_module, status);
 }
 
 /* Retry quarantined team destroys and recompute domain->quarantined. */
@@ -305,69 +328,12 @@ static void mca_coll_ucc_domain_destroy(mca_coll_ucc_oob_domain_t *domain)
     OPAL_THREAD_UNLOCK(&cm->lock);
 }
 
-/*
- * Release a reference to an OOB domain.
- *
- * A domain is shared by the communicator that bootstrapped it and every
- * communicator derived from it; each holds one reference.  The domain is
- * destroyed only when every rank agrees that no reference remains: at the
- * free of the bootstrap communicator, or else (the domain is parked) at the
- * free of its last child spanning the bootstrap group or at instance
- * finalize.  Then the UCC context is destroyed (collective over domain->comm,
- * see mca_coll_ucc_domain_destroy), the reference the domain took on its
- * bootstrap communicator is dropped, and -- when the last domain goes away --
- * the shared UCC library is finalized and the progress callback is
- * unregistered.
- *
- * Context teardown may itself drive the OOB; that is safe because the domain
- * kept its own reference to the bootstrap communicator (see
- * mca_coll_ucc_domain_create), so the OOB communicator is still valid here
- * even if the user has already freed its handle to it.
- */
-static void mca_coll_ucc_domain_release(mca_coll_ucc_oob_domain_t *domain,
-                                        ompi_communicator_t *comm,
-                                        mca_coll_ucc_module_t *module)
+/* Drop one module's reference; contexts are destroyed only by the instance finalize sweep. */
+static void mca_coll_ucc_domain_unref(mca_coll_ucc_oob_domain_t *domain)
 {
-    int still, any = 0, rc;
-
-    if (NULL == domain) {
-        return;
+    if (NULL != domain) {
+        OPAL_THREAD_ADD_FETCH32(&domain->refcount, -1);
     }
-
-    if (comm != domain->comm) {
-        int refs = OPAL_THREAD_ADD_FETCH32(&domain->refcount, -1);
-        /* A parked domain can go with its last child when that child spans the bootstrap group. */
-        if (!domain->parked || domain->orphaned || OMPI_COMM_IS_INTER(comm) ||
-            OMPI_SUCCESS != ompi_group_compare(comm->c_local_group, domain->comm->c_local_group, &rc) ||
-            (MPI_IDENT != rc && MPI_SIMILAR != rc)) {
-            return;
-        }
-        still = (refs > 0) || domain->quarantined;
-        rc = ompi_coll_base_allreduce_intra_recursivedoubling(&still, &any, 1, &ompi_mpi_int.dt,
-                                                              &ompi_mpi_op_max.op, comm, &module->super);
-        if (OMPI_SUCCESS == rc && !any) {
-            UCC_VERBOSE(1, "destroyed parked ucc oob domain %p at last child free", (void*)domain);
-            mca_coll_ucc_domain_destroy(domain);
-        }
-        return;
-    }
-
-    still = (domain->refcount > 1) || domain->quarantined;
-    rc = ompi_coll_base_allreduce_intra_recursivedoubling(&still, &any, 1, &ompi_mpi_int.dt,
-                                                          &ompi_mpi_op_max.op, comm,
-                                                          &module->super);
-    if (OMPI_SUCCESS != rc) {
-        UCC_ERROR("domain release allreduce failed (%d); parking domain %p", rc, (void*)domain);
-        any = 1;
-    }
-    OPAL_THREAD_ADD_FETCH32(&domain->refcount, -1);
-    if (any || domain->orphaned) {
-        domain->parked = true;
-        UCC_VERBOSE(1, "parked ucc oob domain %p for comm %p (local refs %d)",
-                    (void*)domain, (void*)comm, (int)domain->refcount);
-        return;
-    }
-    mca_coll_ucc_domain_destroy(domain);
 }
 
 
@@ -436,6 +402,8 @@ static void mca_coll_ucc_instance_finalize(void)
         m = (mca_coll_ucc_module_t *)opal_pointer_array_get_item(&cm->modules, i);
         if (NULL != m) {
             mca_coll_ucc_team_id_release(m);
+            mca_coll_ucc_domain_unref(m->domain);
+            mca_coll_ucc_domain_unref(m->twin);
             m->domain      = NULL;
             m->twin        = NULL;
             m->modules_idx = -1;
@@ -465,6 +433,11 @@ static void mca_coll_ucc_instance_finalize(void)
         bool destroyable;
         int  q, anyq = 0;
         destroyable = teardown && !domain->orphaned && !OMPI_COMM_IS_DYNAMIC(domain->comm);
+        if (destroyable && 0 != domain->refcount) {
+            UCC_ERROR("domain %p still referenced by %d modules at finalize: leaking it",
+                      (void*)domain, (int)domain->refcount);
+            destroyable = false;
+        }
         if (destroyable) {
             /* A quarantined team on any rank forbids the destroy there, so all ranks must leak. */
             q = domain->quarantined;
@@ -477,9 +450,6 @@ static void mca_coll_ucc_instance_finalize(void)
             }
         }
         if (destroyable) {
-            if (domain->parked) {
-                UCC_VERBOSE(1, "destroyed parked ucc oob domain %p", (void*)domain);
-            }
             mca_coll_ucc_domain_destroy(domain);
             torn++;
         } else {
@@ -519,102 +489,62 @@ static void mca_coll_ucc_instance_finalize(void)
     OPAL_THREAD_UNLOCK(&cm->lock);
 }
 
-static void mca_coll_ucc_module_destruct(mca_coll_ucc_module_t *ucc_module)
+/*
+ * Tear down a module's UCC state: drain its in-flight operations, destroy its
+ * team and drop its domain references.  Runs when the coll base releases the
+ * module at communicator destruct (coll_module_disable), so on each rank at
+ * its own time: nothing here agrees with peers or uses the communicator's
+ * point-to-point, which the destructor tears down next.  Team destroy is
+ * collective over the team's own ranks but needs no simultaneity and, with
+ * coll/ucc supplying team ids, no UCC-level OOB; the context lives until the
+ * instance finalize sweep.
+ */
+static void mca_coll_ucc_module_teardown(mca_coll_ucc_module_t *ucc_module)
 {
     mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
+    ucc_status_t              status;
 
-    /* The per-communicator keyval is a process-global resource shared by all
-       UCC communicators.  Free it once there are no live OOB domains left.
-       This runs in the module destructor (not in the attribute delete
-       callback below) on purpose: freeing a keyval while we are inside one of
-       its own delete callbacks -- i.e. while ompi_attr_delete_all() is still
-       iterating that comm's attributes -- is unsafe.  The destructor runs
-       after the comm's attributes have already been deleted, with the
-       attribute subsystem still alive, which matches the proven-safe timing
-       of the original code.  If a new UCC communicator appears later the
-       keyval is simply recreated lazily by mca_coll_ucc_keyval_init(). */
-    if (cm->keyval_created && 0 == cm->domain_count) {
-        if (OMPI_SUCCESS != ompi_attr_free_keyval(COMM_ATTR, &ucc_comm_attr_keyval, 0)) {
-            UCC_ERROR("ucc ompi_attr_free_keyval failed");
-        }
-        cm->keyval_created = false;
-    }
-    /* The team (the only user of the ep_map backing array) has already been
-       destroyed by the attribute delete callback at this point, so it is safe
-       to release the array now. */
-    if (NULL != ucc_module->domain) {
-        UCC_VERBOSE(1, "module for comm %p destructed with live domain %p",
-                    (void*)ucc_module->comm, (void*)ucc_module->domain);
-    }
-    free(ucc_module->ep_map_ranks);
-    mca_coll_ucc_module_clear(ucc_module);
-}
-
-/*
-** Communicator free callback.
-**
-** Registered through an MPI attribute keyval and invoked by
-** ompi_attr_delete_all() while the communicator is being freed -- i.e.
-** synchronously inside the *collective* MPI_Comm_free / MPI_Comm_disconnect
-** path, before the communicator object is destructed.  Because the
-** communicator is freed collectively, every rank reaches this callback for
-** the same communicator, so team teardown (a collective over exactly this
-** communicator's ranks) and the domain refcount drop happen consistently on
-** all ranks.  Doing the teardown here, while the attribute subsystem is still
-** alive, also matches the proven-safe timing of the original code.
-*/
-static int ucc_comm_attr_del_fn(MPI_Comm comm, int keyval, void *attr_val, void *extra)
-{
-    mca_coll_ucc_module_t *ucc_module = (mca_coll_ucc_module_t*) attr_val;
-    ucc_status_t           status     = UCC_OK;
-
-    /* Unregister first: a module that fell back (no team, no domain) is still in the registry. */
     if (ucc_module->modules_idx >= 0) {
-        OPAL_THREAD_LOCK(&mca_coll_ucc_component.lock);
-        opal_pointer_array_set_item(&mca_coll_ucc_component.modules, ucc_module->modules_idx, NULL);
-        OPAL_THREAD_UNLOCK(&mca_coll_ucc_component.lock);
+        OPAL_THREAD_LOCK(&cm->lock);
+        opal_pointer_array_set_item(&cm->modules, ucc_module->modules_idx, NULL);
+        OPAL_THREAD_UNLOCK(&cm->lock);
         ucc_module->modules_idx = -1;
     }
-    ucc_module->state = MCA_COLL_UCC_DISABLED;    /* posts pending after the free use the previous modules */
-    if (NULL == ucc_module->ucc_team && NULL == ucc_module->domain && NULL == ucc_module->twin) {
-        return OMPI_SUCCESS;
-    }
-
-    /* Tear down this communicator's UCC team.  Team destroy is collective
-       over the team's own ranks (this communicator), not over the domain's
-       OOB, so it is safe even when this communicator is a subset of the
-       domain's bootstrap communicator. */
     if (NULL != ucc_module->ucc_team) {
         /* MPI_Comm_free lets pending operations complete: drain them before the team goes. */
         if (ucc_module->active > 0) {
             UCC_VERBOSE(1, "draining %d in-flight collectives for comm %p",
-                        (int)ucc_module->active, (void*)comm);
+                        (int)ucc_module->active, (void*)ucc_module->comm);
             while (ucc_module->active > 0) {
                 ucc_context_progress(ucc_module->domain->ucc_context);
                 opal_progress();
             }
         }
-        while (UCC_INPROGRESS == (status = ucc_team_destroy(ucc_module->ucc_team))) {
-            ucc_context_progress(ucc_module->domain->ucc_context);
-            opal_progress();
-        }
-        if (UCC_OK != status) {
-            UCC_ERROR("UCC team destroy failed for comm %p: %s", (void*)comm,
+        /* The team's transports destroy locally; one that does not is quarantined, not waited on. */
+        status = mca_coll_ucc_team_destroy_wait(ucc_module);
+        if (UCC_OK == status) {
+            ucc_module->ucc_team = NULL;
+        } else {
+            UCC_ERROR("UCC team destroy failed for comm %p: %s", (void*)ucc_module->comm,
                       ucc_status_string(status));
+            mca_coll_ucc_team_quarantine(ucc_module, status);
         }
-        ucc_module->ucc_team = NULL;
     }
     mca_coll_ucc_team_id_release(ucc_module);
-
-    /* Drop this communicator's reference to the shared OOB domain; the
-       context is destroyed and the bootstrap comm released only when all
-       ranks agree no reference remains (see mca_coll_ucc_domain_release). */
-    mca_coll_ucc_domain_release(ucc_module->domain, comm, ucc_module);
+    mca_coll_ucc_domain_unref(ucc_module->domain);
     ucc_module->domain = NULL;
-    mca_coll_ucc_domain_release(ucc_module->twin, comm, ucc_module);
+    mca_coll_ucc_domain_unref(ucc_module->twin);
     ucc_module->twin = NULL;
+}
 
-    return (UCC_OK == status) ? OMPI_SUCCESS : OMPI_ERROR;
+static void mca_coll_ucc_module_destruct(mca_coll_ucc_module_t *ucc_module)
+{
+    /* Normally a no-op after coll_module_disable; covers a module whose enable failed. */
+    mca_coll_ucc_module_teardown(ucc_module);
+    /* The team (the only user of the ep_map backing array) has already been
+       destroyed at this point, so it is safe to release the array now. */
+    free(ucc_module->ep_map_ranks);
+    mca_coll_ucc_module_clear(ucc_module);
 }
 
 typedef struct oob_allgather_req{
@@ -720,27 +650,6 @@ static ucc_status_t oob_allgather(void *sbuf, void *rbuf, size_t msglen,
 
 static void mca_coll_ucc_instance_finalize(void);
 
-/* The per-communicator keyval; recreated lazily if it was freed with the last domain. */
-static int mca_coll_ucc_keyval_init(void)
-{
-    mca_coll_ucc_component_t     *cm = &mca_coll_ucc_component;
-    ompi_attribute_fn_ptr_union_t del_fn;
-    ompi_attribute_fn_ptr_union_t copy_fn;
-
-    if (cm->keyval_created) {
-        return OMPI_SUCCESS;
-    }
-    copy_fn.attr_communicator_copy_fn  = MPI_COMM_NULL_COPY_FN;
-    del_fn.attr_communicator_delete_fn = ucc_comm_attr_del_fn;
-    if (OMPI_SUCCESS != ompi_attr_create_keyval(COMM_ATTR, copy_fn, del_fn,
-                                                &ucc_comm_attr_keyval, NULL, 0, NULL)) {
-        UCC_ERROR("UCC comm keyval create failed");
-        return OMPI_ERROR;
-    }
-    cm->keyval_created = true;
-    return OMPI_SUCCESS;
-}
-
 /* Disables tl/sharp in a context config: no SHARP job at context create, and every SHARP team declines. */
 static ucc_status_t mca_coll_ucc_config_nosharp(ucc_context_config_h ctx_config)
 {
@@ -774,12 +683,11 @@ static void mca_coll_ucc_sharp_detect(void)
 }
 
 /*
- * One-time initialization of the shared UCC library, the request free list
- * and the per-communicator attribute keyval.  Called when the first UCC
- * module is enabled or the first OOB domain is created; the resources persist
- * across domain churn and are torn down when the last domain is destroyed or
- * at the instance finalize hook (library) / at module destruct (keyval) / at
- * component close (request free list).
+ * One-time initialization of the shared UCC library and the request free
+ * list.  Called when the first UCC module is enabled or the first OOB domain
+ * is created; the resources persist across domain churn and are torn down
+ * when the last domain is destroyed or at the instance finalize hook
+ * (library) / at component close (request free list).
  */
 static int mca_coll_ucc_lib_init(void)
 {
@@ -833,10 +741,6 @@ static int mca_coll_ucc_lib_init(void)
                             8, -1, 8,                 /* num_to_alloc, max, per alloc */
                             NULL, 0, NULL, NULL, NULL /* no Mpool or init function */);
         cm->requests_initialized = true;
-    }
-
-    if (OMPI_SUCCESS != mca_coll_ucc_keyval_init()) {
-        goto cleanup_lib;
     }
 
     if (!cm->finalize_hook_registered) {
@@ -933,7 +837,6 @@ static int mca_coll_ucc_domain_create(ompi_communicator_t *comm, bool nosharp,
     domain->refcount = 1;
     domain->active   = 0;
     memset(domain->team_ids, 0, sizeof(domain->team_ids));
-    domain->parked   = false;
     domain->orphaned = false;
     domain->quarantined = false;
     domain->nosharp  = nosharp;
@@ -1066,8 +969,7 @@ static mca_coll_ucc_oob_domain_t *mca_coll_ucc_domain_find_covering(ompi_communi
     }
     OPAL_THREAD_LOCK(&cm->lock);
     OPAL_LIST_FOREACH(domain, &cm->domains, mca_coll_ucc_oob_domain_t) {
-        /* Parked domains are excluded: their refcount must only fall for the last-child agreement. */
-        if (domain->orphaned || domain->parked || domain->nosharp != nosharp ||
+        if (domain->orphaned || domain->nosharp != nosharp ||
             OMPI_COMM_IS_DYNAMIC(domain->comm) || ompi_comm_size(domain->comm) < n ||
             OMPI_SUCCESS != ompi_group_translate_ranks(comm->c_local_group, n, ranks,
                                                        domain->comm->c_local_group, out)) {
@@ -1096,7 +998,7 @@ static mca_coll_ucc_oob_domain_t *mca_coll_ucc_domain_lookup(uint64_t cid_base, 
 
     OPAL_THREAD_LOCK(&cm->lock);
     OPAL_LIST_FOREACH(domain, &cm->domains, mca_coll_ucc_oob_domain_t) {
-        if (!domain->orphaned && !domain->parked && domain->nosharp == nosharp &&
+        if (!domain->orphaned && domain->nosharp == nosharp &&
             domain->comm->c_contextid.cid_base == cid_base &&
             domain->comm->c_contextid.cid_sub.u64 == cid_sub) {
             OPAL_THREAD_ADD_FETCH32(&domain->refcount, 1);
@@ -1237,7 +1139,7 @@ static void mca_coll_ucc_twin_acquire(mca_coll_ucc_module_t *module)
         if (created) {
             mca_coll_ucc_domain_orphan(twin);
         } else {
-            mca_coll_ucc_domain_release(twin, comm, module);
+            mca_coll_ucc_domain_unref(twin);
         }
     }
 }
@@ -1410,24 +1312,14 @@ static int mca_coll_ucc_module_enable(mca_coll_base_module_t *module,
     mca_coll_ucc_module_t     *ucc_module = (mca_coll_ucc_module_t *)module;
     int                        rc;
 
-    /* The library and keyval are local resources: have them before the attribute is set. */
     OPAL_THREAD_LOCK(&cm->lock);
-    if (cm->lib_failed ||
-        (NULL == cm->ucc_lib && OMPI_SUCCESS != mca_coll_ucc_lib_init()) ||
-        OMPI_SUCCESS != mca_coll_ucc_keyval_init()) {
+    if (cm->lib_failed || (NULL == cm->ucc_lib && OMPI_SUCCESS != mca_coll_ucc_lib_init())) {
         cm->lib_failed = true;
         OPAL_THREAD_UNLOCK(&cm->lock);
         rc = OMPI_ERROR;
         goto drop_domain;
     }
-    OPAL_THREAD_UNLOCK(&cm->lock);
-
-    if (OMPI_SUCCESS != (rc = ompi_attr_set_c(COMM_ATTR, comm, &comm->c_keyhash,
-                                              ucc_comm_attr_keyval, (void *)module, false))) {
-        UCC_ERROR("ucc ompi_attr_set_c failed");
-        goto drop_domain;
-    }
-    OPAL_THREAD_LOCK(&cm->lock);
+    /* Registered until coll_module_disable: the sweep and derived comms find the module here. */
     ucc_module->modules_idx = opal_pointer_array_add(&cm->modules, ucc_module);
     OPAL_THREAD_UNLOCK(&cm->lock);
     ucc_module->state = MCA_COLL_UCC_PENDING;
@@ -1440,7 +1332,7 @@ static int mca_coll_ucc_module_enable(mca_coll_base_module_t *module,
     return OMPI_SUCCESS;
 
 drop_domain:
-    /* Unregistered and without its attribute: no free callback will drop this. */
+    /* Never registered: no release hook will drop this. */
     if (NULL != ucc_module->domain) {
         OPAL_THREAD_ADD_FETCH32(&ucc_module->domain->refcount, -1);
         ucc_module->domain = NULL;
@@ -1599,7 +1491,6 @@ int mca_coll_ucc_lazy_enable(mca_coll_ucc_module_t *ucc_module)
     }
 
     UCC_VERBOSE(1, "ucc disabled for comm %p: enable stage %d (agreed %d)", (void*)comm, stage, agreed);
-    /* Enable failed: no comm free callback ran, so release the team and domain here. */
     if (NULL != ucc_module->ucc_team) {
         mca_coll_ucc_team_abandon(ucc_module, "peers did not reach the same stage");
     }
@@ -1608,15 +1499,9 @@ int mca_coll_ucc_lazy_enable(mca_coll_ucc_module_t *ucc_module)
         if (created && 0 == agreed) {
             mca_coll_ucc_domain_orphan(domain);
         } else {
-            mca_coll_ucc_domain_release(domain, comm, ucc_module);
+            mca_coll_ucc_domain_unref(domain);
         }
         ucc_module->domain = NULL;
-    }
-    if (ucc_module->modules_idx >= 0) {
-        OPAL_THREAD_LOCK(&cm->lock);
-        opal_pointer_array_set_item(&cm->modules, ucc_module->modules_idx, NULL);
-        OPAL_THREAD_UNLOCK(&cm->lock);
-        ucc_module->modules_idx = -1;
     }
     ucc_module->state = MCA_COLL_UCC_DISABLED;
     return OMPI_ERROR;
@@ -1687,9 +1572,30 @@ mca_coll_ucc_module_disable(mca_coll_base_module_t *module,
     UCC_UNINSTALL_COLL_API(comm, ucc_module, scatter_init);
     UCC_UNINSTALL_COLL_API(comm, ucc_module, scatterv_init);
 
+    mca_coll_ucc_module_teardown(ucc_module);
     return OMPI_SUCCESS;
 }
 
+
+/* The enabled module of comm, if any (registered in module_enable, removed at disable). */
+static mca_coll_ucc_module_t *mca_coll_ucc_module_find(ompi_communicator_t *comm)
+{
+    mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
+    mca_coll_ucc_module_t    *m, *found = NULL;
+    int                       i, n;
+
+    OPAL_THREAD_LOCK(&cm->lock);
+    n = opal_pointer_array_get_size(&cm->modules);
+    for (i = 0; i < n; i++) {
+        m = (mca_coll_ucc_module_t *)opal_pointer_array_get_item(&cm->modules, i);
+        if (NULL != m && m->comm == comm) {
+            found = m;
+            break;
+        }
+    }
+    OPAL_THREAD_UNLOCK(&cm->lock);
+    return found;
+}
 
 /* True if the info key holds a boolean (returned in *on); *present if it is set at all. */
 static bool mca_coll_ucc_sharp_info(ompi_communicator_t *comm, bool *present, bool *on)
@@ -1759,13 +1665,8 @@ mca_coll_ucc_comm_query(struct ompi_communicator_t *comm, int *priority)
      * SHARP-free twin) of the SHARP flavour chosen below is inherited.
      */
     parent = comm->c_coll->parent;
-    if (cm->keyval_created && NULL != parent && parent != comm &&
-        NULL != parent->c_keyhash) {
-        int flag = 0;
-        if (OMPI_SUCCESS != ompi_attr_get_c(parent->c_keyhash, ucc_comm_attr_keyval,
-                                            (void **)&parent_module, &flag) || !flag) {
-            parent_module = NULL;
-        }
+    if (NULL != parent && parent != comm) {
+        parent_module = mca_coll_ucc_module_find(parent);
     }
 
     /* SHARP choice: WORLD on, else info key, else explicit value inherited over the same group, else default. */

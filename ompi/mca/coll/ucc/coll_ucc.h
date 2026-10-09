@@ -22,7 +22,6 @@
 #include "opal/mca/threads/mutex.h"
 #include "opal/mca/threads/thread_usage.h"
 #include "ompi/communicator/communicator.h"
-#include "ompi/attribute/attribute.h"
 #include "ompi/op/op.h"
 #include "coll_ucc_debug.h"
 #include <ucc/api/ucc.h>
@@ -88,7 +87,6 @@ typedef struct mca_coll_ucc_oob_domain_t {
     opal_atomic_int32_t  refcount;
     opal_atomic_int32_t  active;         /* in-flight colls; only domains with active > 0 are progressed */
     uint64_t             team_ids[512];  /* UCC team ids in use on this context (external, < 32768) */
-    bool                 parked;         /* bootstrap comm freed while a rank still held a derived comm */
     bool                 orphaned;       /* peers lack this context: never destroyed (would barrier alone) */
     bool                 quarantined;    /* holds a never-active team UCC refused to destroy: never destroyed */
     bool                 nosharp;        /* tl/sharp disabled in its config: no SHARP job, trees or teams */
@@ -127,12 +125,11 @@ struct mca_coll_ucc_component_t {
        in flight. */
     opal_list_t                     domains;
     int                             domain_count;
-    /* The UCC library and the per-communicator attribute keyval are created
-       lazily at the first module enable and persist across domain churn. */
-    bool                            keyval_created;
+    /* The UCC library is created lazily at the first module enable and
+       persists across domain churn. */
     bool                            requests_initialized;
     opal_free_list_t                requests;
-    opal_pointer_array_t            modules;             /* enabled modules, swept at instance finalize */
+    opal_pointer_array_t            modules;             /* enabled modules: parent lookup, swept at instance finalize */
     opal_list_t                     abandoned;           /* mca_coll_ucc_abandoned_t records */
     opal_mutex_t                    lock;                /* guards domains/modules/team_ids/abandoned/lib; held in progress */
     bool                            finalize_hook_registered;
