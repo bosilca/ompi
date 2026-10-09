@@ -1174,6 +1174,32 @@ OMPI_DECLSPEC int ompi_comm_set_nb ( ompi_communicator_t **ncomm,
                                      ompi_request_t **req);
 
 /**
+ * The body of ompi_comm_set_nb(), acting on a communicator the caller has
+ * already allocated. Use this instead of ompi_comm_set_nb() when the
+ * communicator object must exist before the operation that fills it can run:
+ * MPIX_Comm_ishrink() publishes the handle to its caller up front, the way
+ * MPI_Comm_idup() does, but cannot build the object until the agreement on
+ * the failed group has completed.
+ *
+ * On failure newcomm is left to the caller to release.
+ *
+ * Takes the same arguments as ompi_comm_set_nb(), except that newcomm is the
+ * communicator to fill rather than a place to store a new one.
+ */
+OMPI_DECLSPEC int ompi_comm_fill_nb ( ompi_communicator_t *newcomm,
+                                      ompi_communicator_t *oldcomm,
+                                      int local_size,
+                                      int *local_ranks,
+                                      int remote_size,
+                                      int *remote_ranks,
+                                      opal_hash_table_t *attr,
+                                      ompi_errhandler_t *errh,
+                                      ompi_group_t *local_group,
+                                      ompi_group_t *remote_group,
+                                      uint32_t flags,
+                                      ompi_request_t **req);
+
+/**
  * This is a routine determining whether the local or the
  * remote group will be first in the new intra-comm.
  * Just used from within MPI_Intercomm_merge.

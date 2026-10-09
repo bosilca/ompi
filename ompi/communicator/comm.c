@@ -276,14 +276,13 @@ static int ompi_comm_set_simple (ompi_communicator_t **ncomm, ompi_errhandler_t 
  * if remote_group == &ompi_mpi_group_null, then the new communicator
  * is forced to be an inter communicator.
  */
-int ompi_comm_set_nb (ompi_communicator_t **ncomm, ompi_communicator_t *oldcomm, int local_size,
-                      int *local_ranks, int remote_size, int *remote_ranks, opal_hash_table_t *attr,
-                      ompi_errhandler_t *errh, ompi_group_t *local_group, ompi_group_t *remote_group,
-                      uint32_t flags, ompi_request_t **req)
+int ompi_comm_fill_nb (ompi_communicator_t *newcomm, ompi_communicator_t *oldcomm, int local_size,
+                       int *local_ranks, int remote_size, int *remote_ranks, opal_hash_table_t *attr,
+                       ompi_errhandler_t *errh, ompi_group_t *local_group, ompi_group_t *remote_group,
+                       uint32_t flags, ompi_request_t **req)
 {
     bool copy_topocomponent = !!(flags & OMPI_COMM_SET_FLAG_COPY_TOPOLOGY);
     bool dup_comm = !(flags & OMPI_COMM_SET_FLAG_LOCAL_COMM_NODUP);
-    ompi_communicator_t *newcomm = NULL;
     int ret;
 
     if (NULL != local_group) {
@@ -296,11 +295,6 @@ int ompi_comm_set_nb (ompi_communicator_t **ncomm, ompi_communicator_t *oldcomm,
 
     *req = NULL;
 
-    /* ompi_comm_allocate */
-    newcomm = OBJ_NEW(ompi_communicator_t);
-    if (NULL == newcomm) {
-        return OMPI_ERR_OUT_OF_RESOURCE;
-    }
     /* Allocate the name buffer at the MPI Forum ABI maximum so the standard-ABI
      * entry points can store full-length names.  The traditional OMPI entry
      * points still limit themselves to OPAL_MAX_OBJECT_NAME. */
@@ -401,7 +395,6 @@ int ompi_comm_set_nb (ompi_communicator_t **ncomm, ompi_communicator_t *oldcomm,
          * behave as info keys, and is copied only on MPI_Comm_dup.
          */
         if (OMPI_SUCCESS != (ret = ompi_comm_copy_topo(oldcomm, newcomm))) {
-            ompi_comm_free(&newcomm);
             return ret;
         }
     }
@@ -413,7 +406,6 @@ int ompi_comm_set_nb (ompi_communicator_t **ncomm, ompi_communicator_t *oldcomm,
             if (OMPI_SUCCESS != (ret = ompi_attr_copy_all (COMM_ATTR, oldcomm,
                                                            newcomm, attr,
                                                            newcomm->c_keyhash))) {
-                ompi_comm_free(&newcomm);
                 return ret;
             }
         }
@@ -421,6 +413,30 @@ int ompi_comm_set_nb (ompi_communicator_t **ncomm, ompi_communicator_t *oldcomm,
 
     if (NULL != oldcomm) {
         newcomm->instance = oldcomm->instance;
+    }
+
+    return (OMPI_SUCCESS);
+}
+
+int ompi_comm_set_nb (ompi_communicator_t **ncomm, ompi_communicator_t *oldcomm, int local_size,
+                      int *local_ranks, int remote_size, int *remote_ranks, opal_hash_table_t *attr,
+                      ompi_errhandler_t *errh, ompi_group_t *local_group, ompi_group_t *remote_group,
+                      uint32_t flags, ompi_request_t **req)
+{
+    ompi_communicator_t *newcomm;
+    int ret;
+
+    /* ompi_comm_allocate */
+    newcomm = OBJ_NEW(ompi_communicator_t);
+    if (NULL == newcomm) {
+        return OMPI_ERR_OUT_OF_RESOURCE;
+    }
+
+    ret = ompi_comm_fill_nb (newcomm, oldcomm, local_size, local_ranks, remote_size, remote_ranks,
+                             attr, errh, local_group, remote_group, flags, req);
+    if (OMPI_SUCCESS != ret) {
+        ompi_comm_free (&newcomm);
+        return ret;
     }
 
     *ncomm = newcomm;

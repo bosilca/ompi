@@ -421,7 +421,7 @@ int ompi_comm_shrink_internal(ompi_communicator_t* comm, ompi_communicator_t** n
 struct ompi_comm_ishrink_context_t {
     opal_object_t super;
     ompi_communicator_t *comm;
-    ompi_communicator_t **newcomm;
+    ompi_communicator_t *newcomp;
     ompi_group_t *failed_group;
     ompi_group_t *alive_group;
     ompi_group_t *alive_rgroup;
@@ -459,7 +459,17 @@ int ompi_comm_ishrink_internal(ompi_communicator_t* comm, ompi_communicator_t** 
         return OMPI_ERR_OUT_OF_RESOURCE;
     }
     context->comm = comm;
-    context->newcomm = newcomm;
+    /* The new communicator cannot be built before the agreement on the failed
+     * group completes, but the handle has to be visible to the caller as soon
+     * as we return, the way MPI_Comm_idup() does it: the Fortran binding
+     * converts it to an integer handle without waiting on the request. So
+     * allocate the object now and let the schedule fill it in later. */
+    context->newcomp = OBJ_NEW(ompi_communicator_t);
+    if(OPAL_UNLIKELY( NULL == context->newcomp )) {
+        OBJ_RELEASE(context);
+        ompi_comm_request_return(request);
+        return OMPI_ERR_OUT_OF_RESOURCE;
+    }
     context->failed_group = NULL;
     context->alive_group = NULL;
     context->alive_rgroup = NULL;
@@ -499,11 +509,17 @@ int ompi_comm_ishrink_internal(ompi_communicator_t* comm, ompi_communicator_t** 
                                     comm->c_coll->coll_iagree_module );
     if( OMPI_SUCCESS != rc ) {
         OBJ_RELEASE(context->failed_group);
+        OBJ_RELEASE(context->newcomp);
         ompi_comm_request_return(request);
         return rc;
     }
 
     ompi_comm_request_schedule_append(request, ompi_comm_ishrink_check_agree, subreq, 1);
+
+    /* publish the new communicator before starting the request: once the
+     * request is active the context belongs to the progress engine and may be
+     * gone by the time we get the cpu back */
+    *newcomm = context->newcomp;
 
     /* kick off the request */
     ompi_comm_request_start(request);
@@ -586,24 +602,25 @@ static int ompi_comm_ishrink_check_agree(ompi_comm_request_t *request) {
     }
     OBJ_RELEASE(context->failed_group);
 
-    rc = ompi_comm_set_nb( context->newcomm,         /* new comm */
-                           comm,                     /* old comm */
-                           0,                        /* local_size */
-                           NULL,                     /* local_ranks */
-                           0,                        /* remote_size */
-                           NULL,                     /* remote_ranks */
-                           NULL,                     /* attrs */
-                           comm->error_handler,      /* error handler */
-                           context->alive_group,     /* local group */
-                           context->alive_rgroup,    /* remote group */
-                           0,                        /* flags */
-                           subreq
-                         );
+    rc = ompi_comm_fill_nb( context->newcomp,         /* new comm */
+                            comm,                     /* old comm */
+                            0,                        /* local_size */
+                            NULL,                     /* local_ranks */
+                            0,                        /* remote_size */
+                            NULL,                     /* remote_ranks */
+                            NULL,                     /* attrs */
+                            comm->error_handler,      /* error handler */
+                            context->alive_group,     /* local group */
+                            context->alive_rgroup,    /* remote group */
+                            0,                        /* flags */
+                            subreq
+                          );
     if( OMPI_SUCCESS != rc ) {
         OBJ_RELEASE(context->alive_group);
         if( NULL != context->alive_rgroup ) {
             OBJ_RELEASE(context->alive_rgroup);
         }
+        ompi_comm_free(&context->newcomp);
         return rc;
     }
 
@@ -632,7 +649,7 @@ static int ompi_comm_ishrink_check_setrank(ompi_comm_request_t *request) {
         opal_output_verbose(1, ompi_ftmpi_output_handle,
                             "%s ompi: comm_ishrink: Construction failed with error %d",
                             OMPI_NAME_PRINT(OMPI_PROC_MY_NAME), rc);
-        OBJ_RELEASE(*context->newcomm);
+        OBJ_RELEASE(context->newcomp);
         return rc;
     }
 
@@ -657,7 +674,7 @@ static int ompi_comm_ishrink_check_setrank(ompi_comm_request_t *request) {
 #if OPAL_ENABLE_DEBUG
     context->start = ompi_wtime();
 #endif
-    rc = ompi_comm_nextcid_nb( *context->newcomm, /* new communicator */
+    rc = ompi_comm_nextcid_nb( context->newcomp,  /* new communicator */
                                context->comm,     /* old comm */
                                NULL,              /* bridge comm */
                                NULL,              /* local leader */
@@ -666,7 +683,7 @@ static int ompi_comm_ishrink_check_setrank(ompi_comm_request_t *request) {
                                mode,              /* mode */
                                subreq );
     if( OMPI_SUCCESS != rc ) {
-        OBJ_RELEASE(*context->newcomm);
+        OBJ_RELEASE(context->newcomp);
         return rc;
     }
 
@@ -689,7 +706,7 @@ static int ompi_comm_ishrink_check_cid(ompi_comm_request_t *request) {
         opal_output_verbose(1, ompi_ftmpi_output_handle,
                             "%s ompi: comm_ishrink: Determine context id failed with error %d",
                             OMPI_NAME_PRINT(OMPI_PROC_MY_NAME), rc);
-        OBJ_RELEASE(*context->newcomm);
+        OBJ_RELEASE(context->newcomp);
         return rc;
     }
 #if OPAL_ENABLE_DEBUG
@@ -708,7 +725,7 @@ static int ompi_comm_ishrink_check_cid(ompi_comm_request_t *request) {
     }
     /* --------------------------------------------------------- */
     /* Set name for debugging purposes */
-    ompi_communicator_t *newcomp = *context->newcomm;
+    ompi_communicator_t *newcomp = context->newcomp;
     snprintf(newcomp->c_name, OMPI_MPI_MAX_OBJECT_NAME_ABI, "MPI COMMUNICATOR %d SHRUNK FROM %d",
              ompi_comm_get_local_cid(newcomp),
              ompi_comm_get_local_cid(context->comm));
@@ -716,7 +733,7 @@ static int ompi_comm_ishrink_check_cid(ompi_comm_request_t *request) {
     context->start = ompi_wtime();
 #endif
     /* activate communicator and init coll-module */
-    rc = ompi_comm_activate_nb( context->newcomm, /* new communicator */
+    rc = ompi_comm_activate_nb( &context->newcomp, /* new communicator */
                                 context->comm,
                                 NULL,
                                 NULL,

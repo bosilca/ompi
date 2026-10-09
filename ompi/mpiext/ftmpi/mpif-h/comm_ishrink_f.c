@@ -2,6 +2,7 @@
  * Copyright (c) 2010-2022 The University of Tennessee and the University
  *                         of Tennessee Research Foundation.  All rights
  *                         reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -64,6 +65,9 @@ void ompix_comm_ishrink_f(MPI_Fint *comm, MPI_Fint *newcomm, MPI_Fint *request, 
                                                &c_newcomm,
                                                &c_req));
 
+    /* c_newcomm is a stack variable, so it is only usable because
+     * MPIX_Comm_ishrink() publishes the new communicator before it returns
+     * rather than from the progress engine. */
     if (MPI_SUCCESS == OMPI_FINT_2_INT(*ierr)) {
         *request = PMPI_Request_c2f(c_req);
         *newcomm = PMPI_Comm_c2f(c_newcomm);
