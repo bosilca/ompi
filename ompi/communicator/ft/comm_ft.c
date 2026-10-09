@@ -7,6 +7,7 @@
  *
  * Copyright (c) 2021      Nanook Consulting.  All rights reserved.
  * Copyright (c) 2023      Jeffrey M. Squyres.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -726,7 +727,7 @@ static int ompi_comm_ishrink_check_cid(ompi_comm_request_t *request) {
                                 mode,
                                 subreq );
     if( OMPI_SUCCESS != rc ) {
-        OBJ_RELEASE(*context->newcomm);
+        /* activation released the new communicator already */
         ompi_comm_request_return(request);
         return rc;
     }
@@ -749,7 +750,7 @@ static int ompi_comm_ishrink_check_activate(ompi_comm_request_t *request) {
         opal_output_verbose(1, ompi_ftmpi_output_handle,
                             "%s ompi: comm_ishrink: Activation failed with error %d",
                             OMPI_NAME_PRINT(OMPI_PROC_MY_NAME), rc);
-        OBJ_RELEASE(*context->newcomm);
+        /* activation released the new communicator already */
         ompi_comm_request_return(request);
         return rc;
     }

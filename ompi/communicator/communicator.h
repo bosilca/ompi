@@ -1188,12 +1188,26 @@ int ompi_comm_determine_first ( ompi_communicator_t *intercomm,
  */
 int ompi_comm_determine_first_auto ( ompi_communicator_t* intercomm );
 
+/**
+ * Activate a new communicator and select its collective module.
+ *
+ * Activation takes ownership of *newcomm. On any failure -- including one
+ * reported asynchronously through the request of the non-blocking variant --
+ * the new communicator is released and *newcomm is set to MPI_COMM_NULL.
+ * Callers must therefore not release it themselves on the error path; a
+ * caller that frees the communicator again ends up operating on the
+ * predefined MPI_COMM_NULL. Note that this differs from ompi_comm_nextcid(),
+ * which leaves the communicator to its caller on failure.
+ */
 OMPI_DECLSPEC int ompi_comm_activate (ompi_communicator_t **newcomm, ompi_communicator_t *comm,
                                       ompi_communicator_t *bridgecomm, const void *arg0,
                                       const void *arg1, bool send_first, int mode);
 
 /**
- * Non-blocking variant of comm_activate.
+ * Non-blocking variant of comm_activate. Same ownership rules as
+ * ompi_comm_activate(): *newcomm is MPI_COMM_NULL once the operation has
+ * failed, whether this call returns the error directly or req completes
+ * with it.
  *
  * @param[inout] newcomm    New communicator
  * @param[in]    comm       Parent communicator

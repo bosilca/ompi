@@ -836,7 +836,7 @@ int ompi_comm_split_with_info( ompi_communicator_t* comm, int color, int key,
     if (inter && my_rsize == 0) {
         color = MPI_UNDEFINED;
     }
-    if ( NULL != newcomp && MPI_UNDEFINED == color ) {
+    if ( NULL != newcomp && MPI_COMM_NULL != newcomp && MPI_UNDEFINED == color ) {
         ompi_comm_free ( &newcomp );
     }
 
@@ -1418,8 +1418,12 @@ static int ompi_comm_split_type_core(ompi_communicator_t *comm,
     ompi_comm_free (&newcomp);
 
  exit:
-    if (OPAL_UNLIKELY(OMPI_SUCCESS != rc && MPI_COMM_NULL != newcomp)) {
-        ompi_comm_free (&newcomp);
+    if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
+        /* activation already released the communicator and left
+         * MPI_COMM_NULL behind; the earlier steps did not */
+        if (MPI_COMM_NULL != newcomp) {
+            ompi_comm_free (&newcomp);
+        }
         *newcomm = MPI_COMM_NULL;
     }
 
@@ -1836,7 +1840,6 @@ int ompi_comm_dup_with_info ( ompi_communicator_t * comm, opal_info_t *info,
     /* activate communicator and init coll-module */
     rc = ompi_comm_activate (&newcomp, comm, NULL, NULL, NULL, false, mode);
     if ( OMPI_SUCCESS != rc ) {
-        OBJ_RELEASE(newcomp);
         return rc;
     }
 
@@ -2007,7 +2010,6 @@ static int ompi_comm_idup_with_info_activate (ompi_comm_request_t *request)
     /* activate communicator and init coll-module */
     rc = ompi_comm_activate_nb (&context->newcomp, context->comm, NULL, NULL, NULL, false, mode, subreq);
     if ( OMPI_SUCCESS != rc ) {
-        OBJ_RELEASE(context->newcomp);
         return rc;
     }
 
@@ -2061,7 +2063,6 @@ int ompi_comm_create_group (ompi_communicator_t *comm, ompi_group_t *group, int 
     /* activate communicator and init coll-module */
     rc = ompi_comm_activate (&newcomp, comm, NULL, &tag, NULL, false, mode);
     if ( OMPI_SUCCESS != rc ) {
-        OBJ_RELEASE(newcomp);
         return rc;
     }
 
@@ -2253,7 +2254,6 @@ int ompi_intercomm_create (ompi_communicator_t *local_comm, int local_leader, om
     rc = ompi_comm_activate (&newcomp, local_comm, bridge_comm, &lleader, &rleader,
                              false, OMPI_COMM_CID_INTRA_BRIDGE);
     if ( MPI_SUCCESS != rc ) {
-        ompi_comm_free (&newcomp);
         return rc;
     }
 
@@ -2439,7 +2439,6 @@ int ompi_intercomm_create_from_groups (ompi_group_t *local_group, int local_lead
     }
 
     if (OPAL_UNLIKELY(OMPI_SUCCESS != rc)) {
-        ompi_comm_free (&newcomp);
         return rc;
     }
 

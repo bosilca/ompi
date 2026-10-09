@@ -965,7 +965,7 @@ int ompi_comm_activate_nb (ompi_communicator_t **newcomm, ompi_communicator_t *c
                            const void *arg1, bool send_first, int mode, ompi_request_t **req)
 {
     ompi_comm_cid_context_t *context;
-    ompi_comm_request_t *request;
+    ompi_comm_request_t *request = NULL;
     ompi_request_t *subreq;
     uint32_t comm_size;
     int ret = 0;
@@ -975,7 +975,8 @@ int ompi_comm_activate_nb (ompi_communicator_t **newcomm, ompi_communicator_t *c
     context = mca_comm_cid_context_alloc (*newcomm, comm, bridgecomm, arg0, arg1, "activate",
                                           send_first, mode);
     if (NULL == context) {
-        return OMPI_ERR_OUT_OF_RESOURCE;
+        ret = OMPI_ERR_OUT_OF_RESOURCE;
+        goto error;
     }
 
     /* keep track of the pointer so it can be set to MPI_COMM_NULL on failure */
@@ -984,7 +985,8 @@ int ompi_comm_activate_nb (ompi_communicator_t **newcomm, ompi_communicator_t *c
     request = ompi_comm_request_get ();
     if (NULL == request) {
         OBJ_RELEASE(context);
-        return OMPI_ERR_OUT_OF_RESOURCE;
+        ret = OMPI_ERR_OUT_OF_RESOURCE;
+        goto error;
     }
 
     request->context = &context->super;
@@ -1000,8 +1002,8 @@ int ompi_comm_activate_nb (ompi_communicator_t **newcomm, ompi_communicator_t *c
 
         (*newcomm)->c_index_vec = (uint32_t *)calloc(comm_size, sizeof(uint32_t));
         if (NULL == (*newcomm)->c_index_vec) {
-            ompi_comm_request_return (request);    /* also releases the context */
-            return OMPI_ERR_OUT_OF_RESOURCE;
+            ret = OMPI_ERR_OUT_OF_RESOURCE;
+            goto error;
         }
 
         if (OMPI_COMM_IS_INTRA(*newcomm)) {
@@ -1012,10 +1014,7 @@ int ompi_comm_activate_nb (ompi_communicator_t **newcomm, ompi_communicator_t *c
     if (MPI_UNDEFINED != (*newcomm)->c_local_group->grp_my_rank) {
         /* Initialize the PML stuff in the newcomm  */
         if ( OMPI_SUCCESS != (ret = MCA_PML_CALL(add_comm(*newcomm))) ) {
-            OBJ_RELEASE(*newcomm);
-            ompi_comm_request_return (request);
-            *newcomm = MPI_COMM_NULL;
-            return ret;
+            goto error;
         }
         OMPI_COMM_SET_PML_ADDED(*newcomm);
     }
@@ -1029,8 +1028,7 @@ int ompi_comm_activate_nb (ompi_communicator_t **newcomm, ompi_communicator_t *c
         ret = context->iallreduce_fn (&context->local_peers, &context->max_local_peers, 1, MPI_MAX, context,
                                       &subreq);
         if (OMPI_SUCCESS != ret) {
-            ompi_comm_request_return (request);
-            return ret;
+            goto error;
         }
         ompi_comm_request_schedule_append (request, ompi_comm_activate_nb_complete, &subreq, 1);
     } else {
@@ -1041,6 +1039,17 @@ int ompi_comm_activate_nb (ompi_communicator_t **newcomm, ompi_communicator_t *c
 
     *req = &request->super;
 
+    return ret;
+
+ error:
+    /* Activation owns the new communicator once it is handed to us: every
+     * failure, here or later in ompi_comm_activate_complete, releases it and
+     * leaves MPI_COMM_NULL behind so the caller never has to guess. */
+    if (NULL != request) {
+        ompi_comm_request_return (request);    /* also releases the context */
+    }
+    OBJ_RELEASE(*newcomm);
+    *newcomm = MPI_COMM_NULL;
     return ret;
 }
 
