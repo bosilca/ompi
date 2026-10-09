@@ -1975,7 +1975,9 @@ static int ompi_comm_idup_getcid (ompi_comm_request_t *request)
     rc = ompi_comm_nextcid_nb (context->newcomp, context->comm, NULL, NULL,
                                NULL, false, mode, subreq);
     if (OMPI_SUCCESS != rc) {
-        ompi_comm_request_return (request);
+        /* the progress loop owns the request: returning an error from a
+         * schedule callback leaves the schedule empty, so the request is
+         * completed with this status and returned when the user frees it */
         OBJ_RELEASE(context->newcomp);
         return rc;
     }
