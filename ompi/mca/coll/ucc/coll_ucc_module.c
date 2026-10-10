@@ -15,6 +15,7 @@
 
 #include "ompi_config.h"
 #include "coll_ucc.h"
+#include "ompi/mca/coll/base/coll_base_util.h"
 #include <string.h>
 #include "ompi/group/group.h"
 #include "coll_ucc_common.h"
@@ -1577,24 +1578,20 @@ mca_coll_ucc_module_disable(mca_coll_base_module_t *module,
 }
 
 
-/* The enabled module of comm, if any (registered in module_enable, removed at disable). */
+/* This component's module on comm, found on the communicator's own module list. */
 static mca_coll_ucc_module_t *mca_coll_ucc_module_find(ompi_communicator_t *comm)
 {
-    mca_coll_ucc_component_t *cm = &mca_coll_ucc_component;
-    mca_coll_ucc_module_t    *m, *found = NULL;
-    int                       i, n;
+    mca_coll_base_avail_coll_t *avail;
 
-    OPAL_THREAD_LOCK(&cm->lock);
-    n = opal_pointer_array_get_size(&cm->modules);
-    for (i = 0; i < n; i++) {
-        m = (mca_coll_ucc_module_t *)opal_pointer_array_get_item(&cm->modules, i);
-        if (NULL != m && m->comm == comm) {
-            found = m;
-            break;
+    if (NULL == comm->c_coll || NULL == comm->c_coll->module_list) {
+        return NULL;
+    }
+    OPAL_LIST_FOREACH(avail, comm->c_coll->module_list, mca_coll_base_avail_coll_t) {
+        if (avail->ac_module->coll_module_enable == mca_coll_ucc_module_enable) {
+            return (mca_coll_ucc_module_t *)avail->ac_module;
         }
     }
-    OPAL_THREAD_UNLOCK(&cm->lock);
-    return found;
+    return NULL;
 }
 
 /* True if the info key holds a boolean (returned in *on); *present if it is set at all. */
