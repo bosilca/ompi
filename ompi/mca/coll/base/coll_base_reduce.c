@@ -19,6 +19,7 @@
  *                         and Information Science. All rights reserved.
  * Copyright (c) 2022      Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2024      Stony Brook University.  All rights reserved.
+ * Copyright (c) 2026      NVIDIA Corporation.  All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -41,6 +42,7 @@
 #include "ompi/mca/coll/base/coll_base_functions.h"
 #include "coll_base_topo.h"
 #include "coll_base_util.h"
+#include "ompi/datatype/ompi_datatype_internal.h"
 
 int mca_coll_base_reduce_local(const void *inbuf, void *inoutbuf, size_t count,
                                struct ompi_datatype_t * dtype, struct ompi_op_t * op,
@@ -546,7 +548,9 @@ int ompi_coll_base_reduce_intra_in_order_binary( const void *sendbuf, void *recv
 
     /* An in-order binary tree must use root (size-1) to preserve the order of
        operations.  Thus, if root is not rank (size - 1), then we must handle
-       1. MPI_IN_PLACE option on real root, and
+       1. MPI_IN_PLACE on the real root: its contribution already sits in
+          recvbuf. This rank is not the tree root, so the generic reduce only
+          reads that buffer, and
        2. we must allocate temporary recvbuf on rank (size - 1).
        Note that generic function must be careful not to switch order of
        operations for non-commutative ops.
@@ -555,22 +559,13 @@ int ompi_coll_base_reduce_intra_in_order_binary( const void *sendbuf, void *recv
     use_this_sendbuf = (void *)sendbuf;
     use_this_recvbuf = recvbuf;
     if (io_root != root) {
-        ptrdiff_t dsize, gap = 0;
-        char *tmpbuf;
-
-        dsize = opal_datatype_span(&datatype->super, count, &gap);
-
         if ((root == rank) && (MPI_IN_PLACE == sendbuf)) {
-            tmpbuf_free = (char *) malloc(dsize);
-            if (NULL == tmpbuf_free) {
-                return MPI_ERR_INTERN;
-            }
-            tmpbuf = tmpbuf_free - gap;
-            ompi_datatype_copy_content_same_ddt(datatype, count,
-                                                (char*)tmpbuf,
-                                                (char*)recvbuf);
-            use_this_sendbuf = tmpbuf;
+            use_this_sendbuf = recvbuf;
         } else if (io_root == rank) {
+            ptrdiff_t dsize, gap = 0;
+            char *tmpbuf;
+
+            dsize = opal_datatype_span(&datatype->super, count, &gap);
             tmpbuf_free = (char *) malloc(dsize);
             if (NULL == tmpbuf_free) {
                 return MPI_ERR_INTERN;
@@ -673,11 +668,17 @@ ompi_coll_base_reduce_intra_basic_linear(const void *sbuf, void *rbuf, size_t co
 
     if (MPI_IN_PLACE == sbuf) {
         sbuf = rbuf;
-        inplace_temp_free = (char*)malloc(dsize);
-        if (NULL == inplace_temp_free) {
-            return OMPI_ERR_OUT_OF_RESOURCE;
+        /* The highest rank's block is the initial accumulator. On that rank
+         * MPI_IN_PLACE already has it in the user buffer, so reduce in place.
+         * Every other rank receives that block first and must not overwrite
+         * its own contribution, which is still the right-hand operand. */
+        if (rank != (size - 1)) {
+            inplace_temp_free = (char*)malloc(dsize);
+            if (NULL == inplace_temp_free) {
+                return OMPI_ERR_OUT_OF_RESOURCE;
+            }
+            rbuf = inplace_temp_free - gap;
         }
-        rbuf = inplace_temp_free - gap;
     }
 
     if (size > 1) {
@@ -694,7 +695,11 @@ ompi_coll_base_reduce_intra_basic_linear(const void *sbuf, void *rbuf, size_t co
     /* Initialize the receive buffer. */
 
     if (rank == (size - 1)) {
-        err = ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
+        if (sbuf != rbuf) {
+            err = ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
+        } else {
+            err = MPI_SUCCESS;
+        }
     } else {
         err = MCA_PML_CALL(recv(rbuf, count, dtype, size - 1,
                                 MCA_COLL_BASE_TAG_REDUCE, comm,
@@ -810,6 +815,40 @@ ompi_coll_base_reduce_intra_basic_linear(const void *sbuf, void *rbuf, size_t co
  * Recommendations: root = 0, otherwise it is required additional steps
  *                  in the root process.
  */
+
+/*
+ * Fold one slice of a Rabenseifner reduce.
+ *
+ * The operation order is the historical one: the received data is the
+ * left operand and the running partial is the right operand
+ * (rbuf = received op partial). A two-buffer op writes its right operand,
+ * and the user send buffer must not be written, so a partial that still
+ * lives there is copied into rbuf for this slice only. The sent half of a
+ * window is not reduced locally and is never copied. After the first fold
+ * the window shrinks to the reduced slice, which now lives in rbuf, so
+ * later steps of the same phase reuse it. At the root, MPI_IN_PLACE already
+ * has the partial in rbuf and the seed copy is skipped.
+ */
+static int
+ompi_coll_base_redscat_fold(struct ompi_op_t *op, char **partial, char *rbuf,
+                            char *received, ptrdiff_t offset, size_t count,
+                            struct ompi_datatype_t *dtype)
+{
+    char *out = rbuf + offset;
+    int err;
+
+    if (*partial != rbuf) {
+        err = ompi_datatype_copy_content_same_ddt(dtype, count, out,
+                                                   *partial + offset);
+        if (MPI_SUCCESS != err) {
+            return err;
+        }
+        *partial = rbuf;
+    }
+    ompi_op_reduce(op, received, out, count, dtype);
+    return MPI_SUCCESS;
+}
+
 int ompi_coll_base_reduce_intra_redscat_gather(
     const void *sbuf, void *rbuf, size_t count, struct ompi_datatype_t *dtype,
     struct ompi_op_t *op, int root, struct ompi_communicator_t *comm,
@@ -845,6 +884,7 @@ int ompi_coll_base_reduce_intra_redscat_gather(
 
     /* Temporary buffers */
     char *tmp_buf_raw = NULL, *rbuf_raw = NULL;
+    char *partial = NULL;
     tmp_buf_raw = malloc(dsize);
     if (NULL == tmp_buf_raw) {
         err = OMPI_ERR_OUT_OF_RESOURCE;
@@ -861,10 +901,13 @@ int ompi_coll_base_reduce_intra_redscat_gather(
         rbuf = rbuf_raw - gap;
     }
 
-    if ((rank != root) || (sbuf != MPI_IN_PLACE)) {
-        err = ompi_datatype_copy_content_same_ddt(dtype, count, rbuf,
-                                                  (char *)sbuf);
-        if (MPI_SUCCESS != err) { goto cleanup_and_return; }
+    /* Partial starts in the user buffer. Root MPI_IN_PLACE already stores
+     * it in rbuf. Sends of a not-yet-folded half read partial; the fold
+     * copies only the half that is about to be reduced. */
+    if ((rank == root) && (MPI_IN_PLACE == sbuf)) {
+        partial = (char *) rbuf;
+    } else {
+        partial = (char *) sbuf;
     }
 
     /*
@@ -898,7 +941,7 @@ int ompi_coll_base_reduce_intra_redscat_gather(
              * Send the left half of the input vector to the left neighbor,
              * Recv the right half of the input vector from the left neighbor
              */
-            err = ompi_coll_base_sendrecv(rbuf, count_lhalf, dtype, rank - 1,
+            err = ompi_coll_base_sendrecv(partial, count_lhalf, dtype, rank - 1,
                                           MCA_COLL_BASE_TAG_REDUCE,
                                           (char *)tmp_buf + (ptrdiff_t)count_lhalf * extent,
                                           count_rhalf, dtype, rank - 1,
@@ -906,9 +949,12 @@ int ompi_coll_base_reduce_intra_redscat_gather(
                                           MPI_STATUS_IGNORE, rank);
             if (MPI_SUCCESS != err) { goto cleanup_and_return; }
 
-            /* Reduce on the right half of the buffers (result in rbuf) */
-            ompi_op_reduce(op, (char *)tmp_buf + (ptrdiff_t)count_lhalf * extent,
-                           (char *)rbuf + count_lhalf * extent, count_rhalf, dtype);
+            /* rbuf = received op partial, on the right half. */
+            err = ompi_coll_base_redscat_fold(op, &partial, (char *) rbuf,
+                                              (char *) tmp_buf + (ptrdiff_t) count_lhalf * extent,
+                                              (ptrdiff_t) count_lhalf * extent,
+                                              count_rhalf, dtype);
+            if (MPI_SUCCESS != err) { goto cleanup_and_return; }
 
             /* Send the right half to the left neighbor */
             err = MCA_PML_CALL(send((char *)rbuf + (ptrdiff_t)count_lhalf * extent,
@@ -926,7 +972,7 @@ int ompi_coll_base_reduce_intra_redscat_gather(
              * Send the right half of the input vector to the right neighbor,
              * Recv the left half of the input vector from the right neighbor
              */
-            err = ompi_coll_base_sendrecv((char *)rbuf + (ptrdiff_t)count_lhalf * extent,
+            err = ompi_coll_base_sendrecv(partial + (ptrdiff_t)count_lhalf * extent,
                                           count_rhalf, dtype, rank + 1,
                                           MCA_COLL_BASE_TAG_REDUCE,
                                           tmp_buf, count_lhalf, dtype, rank + 1,
@@ -934,8 +980,10 @@ int ompi_coll_base_reduce_intra_redscat_gather(
                                           MPI_STATUS_IGNORE, rank);
             if (MPI_SUCCESS != err) { goto cleanup_and_return; }
 
-            /* Reduce on the right half of the buffers (result in rbuf) */
-            ompi_op_reduce(op, tmp_buf, rbuf, count_lhalf, dtype);
+            /* rbuf = received op partial, on the left half. */
+            err = ompi_coll_base_redscat_fold(op, &partial, (char *) rbuf,
+                                              tmp_buf, 0, count_lhalf, dtype);
+            if (MPI_SUCCESS != err) { goto cleanup_and_return; }
 
             /* Recv the right half from the right neighbor */
             err = MCA_PML_CALL(recv((char *)rbuf + (ptrdiff_t)count_lhalf * extent,
@@ -1006,8 +1054,9 @@ int ompi_coll_base_reduce_intra_redscat_gather(
                 rindex[step] = sindex[step] + scount[step];
             }
 
-            /* Send part of data from the rbuf, recv into the tmp_buf */
-            err = ompi_coll_base_sendrecv((char *)rbuf + (ptrdiff_t)sindex[step] * extent,
+            /* Send the outgoing half from the partial, recv into tmp_buf.
+             * Once this window has been folded, partial is rbuf. */
+            err = ompi_coll_base_sendrecv(partial + (ptrdiff_t)sindex[step] * extent,
                                           scount[step], dtype, dest,
                                           MCA_COLL_BASE_TAG_REDUCE,
                                           (char *)tmp_buf + (ptrdiff_t)rindex[step] * extent,
@@ -1016,10 +1065,12 @@ int ompi_coll_base_reduce_intra_redscat_gather(
                                           MPI_STATUS_IGNORE, rank);
             if (MPI_SUCCESS != err) { goto cleanup_and_return; }
 
-            /* Local reduce: rbuf[] = tmp_buf[] <op> rbuf[] */
-            ompi_op_reduce(op, (char *)tmp_buf + (ptrdiff_t)rindex[step] * extent,
-                           (char *)rbuf + (ptrdiff_t)rindex[step] * extent,
-                           rcount[step], dtype);
+            /* rbuf[] = tmp_buf[] <op> partial[] */
+            err = ompi_coll_base_redscat_fold(op, &partial, (char *) rbuf,
+                                              (char *) tmp_buf + (ptrdiff_t) rindex[step] * extent,
+                                              (ptrdiff_t) rindex[step] * extent,
+                                              rcount[step], dtype);
+            if (MPI_SUCCESS != err) { goto cleanup_and_return; }
 
             /* Move the current window to the received message */
             if (step + 1 < nsteps) {
@@ -1215,13 +1266,42 @@ int ompi_coll_base_reduce_intra_knomial( const void *sendbuf, void *recvbuf,
     if( sendbuf == MPI_IN_PLACE ) {
         sendtmpbuf = (char *)recvbuf;
     }
-    buf_size = opal_datatype_span(&datatype->super, (int64_t)count, &gap);
-    reduce_buf = (char *)malloc(buf_size);
-    reduce_buf_start = reduce_buf - gap;
-    err = ompi_datatype_copy_content_same_ddt(datatype, count,
-                                              (char*)reduce_buf_start,
-                                              (char*)sendtmpbuf);
-    if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
+
+    /*
+     * Each child is applied as the left operand, so the accumulator must
+     * already hold our data: acc = child op acc. Leaves have nothing to
+     * combine and send the user buffer. The root accumulates in recvbuf,
+     * which removes the copy out of a temporary; MPI_IN_PLACE already has
+     * the local data there.
+     */
+    if ((rank != root) && is_leaf) {
+        return MCA_PML_CALL(send(sendtmpbuf, count, datatype, tree->tree_prev,
+                                 MCA_COLL_BASE_TAG_REDUCE,
+                                 MCA_PML_BASE_SEND_STANDARD, comm));
+    }
+
+    if (rank == root) {
+        reduce_buf_start = (char *) recvbuf;
+        if (MPI_IN_PLACE != sendbuf) {
+            err = ompi_datatype_copy_content_same_ddt(datatype, count,
+                                                      reduce_buf_start,
+                                                      sendtmpbuf);
+            if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
+        }
+    } else {
+        buf_size = opal_datatype_span(&datatype->super, (int64_t)count, &gap);
+        reduce_buf = (char *) malloc(buf_size);
+        if (NULL == reduce_buf) {
+            err = OMPI_ERR_OUT_OF_RESOURCE;
+            line = __LINE__;
+            goto err_hndl;
+        }
+        reduce_buf_start = reduce_buf - gap;
+        err = ompi_datatype_copy_content_same_ddt(datatype, count,
+                                                  reduce_buf_start,
+                                                  sendtmpbuf);
+        if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
+    }
 
     // do transfer in a single transaction instead of segments
     num_reqs = 0;
@@ -1269,13 +1349,6 @@ int ompi_coll_base_reduce_intra_knomial( const void *sendbuf, void *recvbuf,
         if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
     }
 
-    if (rank == root) {
-        err = ompi_datatype_copy_content_same_ddt(datatype, count,
-                                                  (char*)recvbuf,
-                                                  (char*)reduce_buf_start);
-        if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
-    }
-
     if (NULL != child_buf) free(child_buf);
     if (NULL != reduce_buf) free(reduce_buf);
     return MPI_SUCCESS;
@@ -1309,4 +1382,274 @@ int ompi_coll_base_reduce_intra_knomial( const void *sendbuf, void *recvbuf,
     (void)line;  // silence compiler warning
     return err;
 
+}
+
+
+/*
+ * Reductions that are exact under any grouping and any order of the
+ * operands: integer SUM/PROD (modular arithmetic), and the intrinsic ops
+ * that carry OMPI_OP_FLAGS_FLOAT_ASSOC (MIN, MAX, logical, bitwise, ...).
+ * Floating-point SUM/PROD are deliberately excluded.
+ */
+static inline bool coll_base_reduce_truly_associative(ompi_op_t *op,
+                                                      ompi_datatype_t *datatype)
+{
+    if (!ompi_op_is_intrinsic(op) || !ompi_op_is_commute(op)
+        || !ompi_datatype_is_predefined(datatype)) {
+        return false;
+    }
+    if (ompi_op_is_float_assoc(op)) {
+        return true;
+    }
+    return (datatype->super.id >= OPAL_DATATYPE_INT1)
+           && (datatype->super.id <= OPAL_DATATYPE_UINT16);
+}
+
+/*
+ * ompi_coll_base_reduce_intra_knomial_childacc
+ *
+ * k-nomial reduce for commutative ops. The first child's temporary receive
+ * buffer is the accumulator, so ranks with children never copy their own
+ * data: acc = local op child0, then acc = child_i op acc for i > 0. The
+ * children are combined in tree order, so the result is bitwise identical
+ * to ompi_coll_base_reduce_intra_knomial (commutativity only swaps the two
+ * operands of the first combine). At the root without MPI_IN_PLACE, child 0
+ * is received straight into recvbuf. At the root with MPI_IN_PLACE, recvbuf
+ * already holds the local data and is the accumulator.
+ * Non-commutative ops use the order-preserving knomial reduce.
+ */
+int ompi_coll_base_reduce_intra_knomial_childacc(const void *sendbuf, void *recvbuf,
+                                                 size_t count, ompi_datatype_t *datatype,
+                                                 ompi_op_t *op, int root,
+                                                 ompi_communicator_t *comm,
+                                                 mca_coll_base_module_t *module,
+                                                 uint32_t segsize,
+                                                 int max_outstanding_reqs, int radix)
+{
+    int err = OMPI_SUCCESS, rank, line = 0, num_children, num_reqs = 0;
+    ptrdiff_t extent, lb, buf_size, gap = 0;
+    char *child_buf = NULL, *child_buf_start = NULL, *acc = NULL;
+    const char *sendtmpbuf;
+    mca_coll_base_comm_t *data = module->base_data;
+    ompi_coll_tree_t *tree;
+    ompi_request_t **reqs = NULL;
+    bool root_in_place;
+
+    if (!ompi_op_is_commute(op)) {
+        return ompi_coll_base_reduce_intra_knomial(sendbuf, recvbuf, count, datatype, op,
+                                                   root, comm, module, segsize,
+                                                   max_outstanding_reqs, radix);
+    }
+
+    OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
+                 "coll:base:reduce_intra_knomial_childacc count %zu", count));
+
+    rank = ompi_comm_rank(comm);
+    COLL_BASE_UPDATE_KMTREE(comm, module, root, radix);
+    if (NULL == data->cached_kmtree) {
+        return ompi_coll_base_reduce_intra_knomial(sendbuf, recvbuf, count, datatype, op,
+                                                   root, comm, module, segsize,
+                                                   max_outstanding_reqs, radix);
+    }
+    tree = data->cached_kmtree;
+    num_children = tree->tree_nextsize;
+
+    sendtmpbuf = (MPI_IN_PLACE == sendbuf) ? (const char *) recvbuf : (const char *) sendbuf;
+
+    if (0 == num_children) {
+        if (rank == root) {
+            if (MPI_IN_PLACE != sendbuf) {
+                err = ompi_datatype_copy_content_same_ddt(datatype, count, (char *) recvbuf,
+                                                          (char *) sendtmpbuf);
+            }
+            return err;
+        }
+        return MCA_PML_CALL(send(sendtmpbuf, count, datatype, tree->tree_prev,
+                                 MCA_COLL_BASE_TAG_REDUCE, MCA_PML_BASE_SEND_STANDARD, comm));
+    }
+
+    ompi_datatype_get_extent(datatype, &lb, &extent);
+    root_in_place = (rank == root) && (MPI_IN_PLACE == sendbuf);
+
+    buf_size = opal_datatype_span(&datatype->super, (int64_t) count * num_children, &gap);
+    child_buf = (char *) malloc(buf_size);
+    if (NULL == child_buf) {
+        err = OMPI_ERR_OUT_OF_RESOURCE;
+        line = __LINE__;
+        goto err_hndl;
+    }
+    child_buf_start = child_buf - gap;
+    reqs = ompi_coll_base_comm_get_reqs(data, num_children);
+
+    for (int i = 0; i < num_children; i++) {
+        char *slot = child_buf_start + (ptrdiff_t) i * count * extent;
+        if ((0 == i) && (rank == root) && !root_in_place) {
+            slot = (char *) recvbuf;
+        }
+        err = MCA_PML_CALL(irecv(slot, count, datatype, tree->tree_next[i],
+                                 MCA_COLL_BASE_TAG_REDUCE, comm, &reqs[num_reqs++]));
+        if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
+    }
+    err = ompi_request_wait_all(num_reqs, reqs, MPI_STATUS_IGNORE);
+    if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
+
+    if (root_in_place) {
+        /* recvbuf holds the local data */
+        for (int i = 0; i < num_children; i++) {
+            ompi_op_reduce(op, child_buf_start + (ptrdiff_t) i * count * extent,
+                           recvbuf, count, datatype);
+        }
+        acc = (char *) recvbuf;
+    } else {
+        /* child 0 (in recvbuf at the root, in the temporary otherwise) is the accumulator */
+        acc = (rank == root) ? (char *) recvbuf : child_buf_start;
+        ompi_op_reduce(op, (char *) sendtmpbuf, acc, count, datatype);
+        for (int i = 1; i < num_children; i++) {
+            ompi_op_reduce(op, child_buf_start + (ptrdiff_t) i * count * extent,
+                           acc, count, datatype);
+        }
+    }
+
+    if (rank != root) {
+        err = MCA_PML_CALL(send(acc, count, datatype, tree->tree_prev,
+                                MCA_COLL_BASE_TAG_REDUCE, MCA_PML_BASE_SEND_STANDARD, comm));
+        if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
+    }
+
+    free(child_buf);
+    return MPI_SUCCESS;
+
+ err_hndl:
+    free(child_buf);
+    if (NULL != reqs) {
+        ompi_coll_base_free_reqs(reqs, num_children);
+    }
+    OPAL_OUTPUT((ompi_coll_base_framework.framework_output, "%s:%4d\tError occurred %d, rank %2d",
+                 __FILE__, line, err, rank));
+    (void) line;
+    return err;
+}
+
+/*
+ * ompi_coll_base_reduce_intra_knomial_arrival
+ *
+ * Like ompi_coll_base_reduce_intra_knomial_childacc, but the children are
+ * combined in the order their data arrives (wait_any), which overlaps the
+ * reductions with the remaining transfers. The first child to arrive
+ * becomes the accumulator. Because the combination order is arbitrary and
+ * can change from run to run, this is only used when the reduction is exact
+ * under any order and grouping (see coll_base_reduce_truly_associative);
+ * floating-point SUM/PROD and user-defined ops fall back to childacc.
+ */
+int ompi_coll_base_reduce_intra_knomial_arrival(const void *sendbuf, void *recvbuf,
+                                                size_t count, ompi_datatype_t *datatype,
+                                                ompi_op_t *op, int root,
+                                                ompi_communicator_t *comm,
+                                                mca_coll_base_module_t *module,
+                                                uint32_t segsize,
+                                                int max_outstanding_reqs, int radix)
+{
+    int err = OMPI_SUCCESS, rank, line = 0, num_children, num_reqs = 0, index;
+    ptrdiff_t extent, lb, buf_size, gap = 0;
+    char *child_buf = NULL, *child_buf_start = NULL, *acc = NULL;
+    const char *sendtmpbuf;
+    mca_coll_base_comm_t *data = module->base_data;
+    ompi_coll_tree_t *tree;
+    ompi_request_t **reqs = NULL;
+    bool root_in_place;
+
+    if (!coll_base_reduce_truly_associative(op, datatype)) {
+        return ompi_coll_base_reduce_intra_knomial_childacc(sendbuf, recvbuf, count, datatype,
+                                                            op, root, comm, module, segsize,
+                                                            max_outstanding_reqs, radix);
+    }
+
+    OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
+                 "coll:base:reduce_intra_knomial_arrival count %zu", count));
+
+    rank = ompi_comm_rank(comm);
+    COLL_BASE_UPDATE_KMTREE(comm, module, root, radix);
+    if (NULL == data->cached_kmtree) {
+        return ompi_coll_base_reduce_intra_knomial(sendbuf, recvbuf, count, datatype, op,
+                                                   root, comm, module, segsize,
+                                                   max_outstanding_reqs, radix);
+    }
+    tree = data->cached_kmtree;
+    num_children = tree->tree_nextsize;
+
+    sendtmpbuf = (MPI_IN_PLACE == sendbuf) ? (const char *) recvbuf : (const char *) sendbuf;
+
+    if (0 == num_children) {
+        if (rank == root) {
+            if (MPI_IN_PLACE != sendbuf) {
+                err = ompi_datatype_copy_content_same_ddt(datatype, count, (char *) recvbuf,
+                                                          (char *) sendtmpbuf);
+            }
+            return err;
+        }
+        return MCA_PML_CALL(send(sendtmpbuf, count, datatype, tree->tree_prev,
+                                 MCA_COLL_BASE_TAG_REDUCE, MCA_PML_BASE_SEND_STANDARD, comm));
+    }
+
+    ompi_datatype_get_extent(datatype, &lb, &extent);
+    root_in_place = (rank == root) && (MPI_IN_PLACE == sendbuf);
+
+    buf_size = opal_datatype_span(&datatype->super, (int64_t) count * num_children, &gap);
+    child_buf = (char *) malloc(buf_size);
+    if (NULL == child_buf) {
+        err = OMPI_ERR_OUT_OF_RESOURCE;
+        line = __LINE__;
+        goto err_hndl;
+    }
+    child_buf_start = child_buf - gap;
+    reqs = ompi_coll_base_comm_get_reqs(data, num_children);
+
+    for (int i = 0; i < num_children; i++) {
+        err = MCA_PML_CALL(irecv(child_buf_start + (ptrdiff_t) i * count * extent, count,
+                                 datatype, tree->tree_next[i], MCA_COLL_BASE_TAG_REDUCE, comm,
+                                 &reqs[num_reqs++]));
+        if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
+    }
+
+    for (int done = 0; done < num_children; done++) {
+        char *arrived;
+        err = ompi_request_wait_any(num_children, reqs, &index, MPI_STATUS_IGNORE);
+        if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
+        arrived = child_buf_start + (ptrdiff_t) index * count * extent;
+        if (0 == done) {
+            if (rank != root) {
+                /* the first arrival becomes the accumulator */
+                acc = arrived;
+                ompi_op_reduce(op, (char *) sendtmpbuf, acc, count, datatype);
+            } else if (root_in_place) {
+                acc = (char *) recvbuf;
+                ompi_op_reduce(op, arrived, acc, count, datatype);
+            } else {
+                /* recvbuf = arrived op local, fused: no copy of the local data */
+                acc = (char *) recvbuf;
+                ompi_3buff_op_reduce(op, (char *) sendtmpbuf, arrived, acc, count, datatype);
+            }
+        } else {
+            ompi_op_reduce(op, arrived, acc, count, datatype);
+        }
+    }
+
+    if (rank != root) {
+        err = MCA_PML_CALL(send(acc, count, datatype, tree->tree_prev,
+                                MCA_COLL_BASE_TAG_REDUCE, MCA_PML_BASE_SEND_STANDARD, comm));
+        if (MPI_SUCCESS != err) { line = __LINE__; goto err_hndl; }
+    }
+
+    free(child_buf);
+    return MPI_SUCCESS;
+
+ err_hndl:
+    free(child_buf);
+    if (NULL != reqs) {
+        ompi_coll_base_free_reqs(reqs, num_children);
+    }
+    OPAL_OUTPUT((ompi_coll_base_framework.framework_output, "%s:%4d\tError occurred %d, rank %2d",
+                 __FILE__, line, err, rank));
+    (void) line;
+    return err;
 }

@@ -440,6 +440,8 @@ Reduce (Id=11)
    6, "in-order_binary", "..."
    7, "rabenseifner", "..."
    8, "knomial", "..."
+   9, "knomial_childacc", "k-nomial tree; the first child's receive buffer is the accumulator, so no rank copies its own data. Commutative operations only; same combination order as knomial."
+   10, "knomial_arrival", "Like knomial_childacc, but children are combined in arrival order. Only for operations that are exact in any order (integer sum and product, min, max, logical, bitwise); other operations use knomial_childacc."
 
 .. _Reduce_scatter:
 
